@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { MobileAttendance } from "@/components/mobile-attendance";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { 
   User, 
   MapPin, 
@@ -144,12 +143,9 @@ export default function MobileAttendancePage() {
           <p className="mt-1">Attendance data is securely stored and encrypted</p>
         </div>
       </div>
-      
+
       {/* Mobile Navigation */}
       <MobileAttendanceNav />
-    </div>
-  );
-}      <MobileAttendanceNav />
     </div>
   );
 }
