@@ -30,7 +30,7 @@ export class EnhancedAttendanceService {
       .from("attendance_settings")
       .select("*")
       .limit(1)
-      .single();
+      .maybeSingle();
 
     if (error && error.code !== "PGRST116") {
       throw error;
@@ -154,7 +154,7 @@ export class EnhancedAttendanceService {
         }
       )
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
     
@@ -185,7 +185,7 @@ export class EnhancedAttendanceService {
       .select()
       .eq("user_id", userId)
       .eq("date", date)
-      .single();
+      .maybeSingle();
 
     if (!attendance) {
       throw new Error("No check-in record found for today");
@@ -253,7 +253,7 @@ export class EnhancedAttendanceService {
       })
       .eq("id", attendance.id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
     return data;
@@ -281,7 +281,7 @@ export class EnhancedAttendanceService {
         updated_at: now,
       })
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
     return data;
@@ -297,7 +297,7 @@ export class EnhancedAttendanceService {
       .from("breaks")
       .select()
       .eq("id", breakId)
-      .single();
+      .maybeSingle();
 
     if (!breakRecord) {
       throw new Error("Break record not found");
@@ -318,7 +318,7 @@ export class EnhancedAttendanceService {
       })
       .eq("id", breakId)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
     return data;
@@ -348,7 +348,7 @@ export class EnhancedAttendanceService {
       .select()
       .eq("user_id", userId)
       .eq("date", new Date().toISOString().split("T")[0])
-      .single();
+      .maybeSingle();
 
     if (error && error.code !== "PGRST116") {
       throw error;
@@ -432,7 +432,7 @@ export class EnhancedAttendanceService {
         updated_at: now,
       })
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
     return data;
@@ -525,7 +525,7 @@ export class EnhancedAttendanceService {
       .from("attendance")
       .select()
       .eq("id", attendanceId)
-      .single();
+      .maybeSingle();
     
     if (fetchError) throw fetchError;
     if (!currentRecord) {
@@ -554,7 +554,7 @@ export class EnhancedAttendanceService {
       })
       .eq("id", attendanceId)
       .select()
-      .single();
+      .maybeSingle();
     
     if (updateError) throw updateError;
     
