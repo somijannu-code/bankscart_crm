@@ -553,19 +553,19 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               <SelectItem value="all">All Assignees</SelectItem>
               <SelectItem value="unassigned">Unassigned</SelectItem>
               {telecallers.map((telecaller) => (
-                <SelectItem key={telecaller.id} value={telecaller.id}>
+                <SelectItem key={users.id} value={users.id}>
                   <div className="flex items-center gap-2">
-                    {telecallerStatus[telecaller.id] !== undefined && (
+                    {telecallerStatus[users.id] !== undefined && (
                       <div
                         className={`w-2 h-2 rounded-full ${
-                          telecallerStatus[telecaller.id] ? "bg-green-500" : "bg-red-500"
+                          telecallerStatus[users.id] ? "bg-green-500" : "bg-red-500"
                         }`}
                         title={
-                          telecallerStatus[telecaller.id] ? "Checked in" : "Not checked in"
+                          telecallerStatus[users.id] ? "Checked in" : "Not checked in"
                         }
                       />
                     )}
-                    {telecaller.full_name}
+                    {users.full_name}
                   </div>
                 </SelectItem>
               ))}
@@ -658,15 +658,15 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
                 {telecallers.map((telecaller) => (
                   <DropdownMenuCheckboxItem
-                    key={telecaller.id}
-                    checked={bulkAssignTo.split(",").includes(telecaller.id)}
+                    key={users.id}
+                    checked={bulkAssignTo.split(",").includes(users.id)}
                     onCheckedChange={(checked) => {
                       setBulkAssignTo((prev) => {
                         const ids = prev ? prev.split(",").filter(Boolean) : [];
                         if (checked) {
-                          if (!ids.includes(telecaller.id)) ids.push(telecaller.id);
+                          if (!ids.includes(users.id)) ids.push(users.id);
                         } else {
-                          const filtered = ids.filter((id) => id !== telecaller.id);
+                          const filtered = ids.filter((id) => id !== users.id);
                           return filtered.join(",");
                         }
                         // remove potential "unassigned" when adding real ids
@@ -676,15 +676,15 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     }}
                   >
                     <div className="flex items-center gap-2">
-                      {telecallerStatus[telecaller.id] !== undefined && (
+                      {telecallerStatus[users.id] !== undefined && (
                         <div
                           className={`w-2 h-2 rounded-full ${
-                            telecallerStatus[telecaller.id] ? "bg-green-500" : "bg-red-500"
+                            telecallerStatus[users.id] ? "bg-green-500" : "bg-red-500"
                           }`}
-                          title={telecallerStatus[telecaller.id] ? "Checked in" : "Not checked in"}
+                          title={telecallerStatus[users.id] ? "Checked in" : "Not checked in"}
                         />
                       )}
-                      {telecaller.full_name}
+                      {users.full_name}
                     </div>
                   </DropdownMenuCheckboxItem>
                 ))}
@@ -913,13 +913,13 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
                             {telecallers.map((telecaller) => (
                               <DropdownMenuCheckboxItem
-                                key={telecaller.id}
+                                key={users.id}
                                 checked={
                                   Boolean(lead.assigned_to) &&
                                   String(lead.assigned_to)
                                     .split(",")
                                     .map((s) => s.trim())
-                                    .includes(telecaller.id)
+                                    .includes(users.id)
                                 }
                                 onCheckedChange={(checked) => {
                                   // Build new CSV string
@@ -927,9 +927,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                                   let newAssignees = [...existing];
 
                                   if (checked) {
-                                    if (!newAssignees.includes(telecaller.id)) newAssignees.push(telecaller.id);
+                                    if (!newAssignees.includes(users.id)) newAssignees.push(users.id);
                                   } else {
-                                    newAssignees = newAssignees.filter((id) => id !== telecaller.id);
+                                    newAssignees = newAssignees.filter((id) => id !== users.id);
                                   }
 
                                   const csv = newAssignees.join(",");
@@ -937,15 +937,15 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                                 }}
                               >
                                 <div className="flex items-center gap-2">
-                                  {telecallerStatus[telecaller.id] !== undefined && (
+                                  {telecallerStatus[users.id] !== undefined && (
                                     <div
                                       className={`w-2 h-2 rounded-full ${
-                                        telecallerStatus[telecaller.id] ? "bg-green-500" : "bg-red-500"
+                                        telecallerStatus[users.id] ? "bg-green-500" : "bg-red-500"
                                       }`}
-                                      title={telecallerStatus[telecaller.id] ? "Checked in" : "Not checked in"}
+                                      title={telecallerStatus[users.id] ? "Checked in" : "Not checked in"}
                                     />
                                   )}
-                                  {telecaller.full_name}
+                                  {users.full_name}
                                 </div>
                               </DropdownMenuCheckboxItem>
                             ))}
