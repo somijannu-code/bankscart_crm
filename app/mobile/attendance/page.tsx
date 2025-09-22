@@ -26,30 +26,35 @@ export default function MobileAttendancePage() {
   const supabase = createClient();
 
   useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        if (authUser) {
-          const { data: userData } = await supabase
-            .from("users")
-            .select("full_name, email, role")
-            .eq("id", authUser.id)
-            .single();
-          
-          setUser({
-            ...authUser,
-            ...userData
-          });
-        }
-      } catch (error) {
-        console.error("Error fetching user:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const fetchUser = async () => {
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (authUser) {
+        const { data: userData, error } = await supabase
+          .from("users")
+          .select("full_name, email, role")
+          .eq("id", authUser.id)
+          .maybeSingle();
 
-    fetchUser();
-  }, []);
+        if (error) {
+          console.error("Error fetching user data:", error.message);
+        }
+
+        setUser({
+          ...authUser,
+          ...userData
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching user:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchUser();
+}, []);
+
 
   if (loading) {
     return (
