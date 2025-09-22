@@ -343,53 +343,48 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       const { data: { user } = { user: null } } = await supabase.auth.getUser();
       const assignedById = user?.id ?? null;
 
-      // telecallerIds is CSV string, filter out "unassigned"
-      const telecallerIds = bulkAssignTo.split(",").map((s) => s.trim()).filter(Boolean).filter(id => id !== "unassigned");
-
-      let updates: any[] = [];
-
-      if (telecallerIds.length > 0) {
-        // distribute equally among selected leads
-        selectedLeads.forEach((leadId, index) => {
-          const telecallerId = telecallerIds[index % telecallerIds.length];
-          updates.push({
-            id: leadId,
-            assigned_to: telecallerId,
-            assigned_by: assignedById,
-            assigned_at: new Date().toISOString(),
-          });
-        });
-      } else {
-        // unassign all
-        selectedLeads.forEach((leadId) => {
-          updates.push({
-            id: leadId,
-            assigned_to: null,
-            assigned_by: assignedById,
-            assigned_at: new Date().toISOString(),
-          });
-        });
-      }
-
-      const results = await Promise.all(
-        updates.map((update) =>
+      // Handle the "unassigned" case first
+      if (bulkAssignTo === "unassigned") {
+        const updates = selectedLeads.map((leadId) =>
           supabase
             .from("leads")
             .update({
-              assigned_to: update.assigned_to,
-              assigned_by: update.assigned_by,
-              assigned_at: update.assigned_at,
+              assigned_to: null,
+              assigned_by: assignedById,
+              assigned_at: new Date().toISOString(),
             })
-            .eq("id", update.id)
-        )
-      );
+            .eq("id", leadId)
+        );
 
-      const errors = results.filter((r) => r.error);
-      if (errors.length > 0) {
-        throw new Error(`Failed to assign ${errors.length} leads`);
-      }
+        const results = await Promise.all(updates);
+        const errors = results.filter((r) => r.error);
+        if (errors.length > 0) {
+          throw new Error(`Failed to unassign ${errors.length} leads`);
+        }
+      } else {
+        // Distribute leads among selected telecallers
+        const telecallerIds = bulkAssignTo.split(",").map((s) => s.trim()).filter(Boolean);
+        if (telecallerIds.length === 0) return; // Should not happen with the updated UI logic
 
-      if (telecallerIds.length > 0) {
+        const updates = selectedLeads.map((leadId, index) => {
+          const telecallerId = telecallerIds[index % telecallerIds.length];
+          return supabase
+            .from("leads")
+            .update({
+              assigned_to: telecallerId,
+              assigned_by: assignedById,
+              assigned_at: new Date().toISOString(),
+            })
+            .eq("id", leadId);
+        });
+
+        const results = await Promise.all(updates);
+        const errors = results.filter((r) => r.error);
+        if (errors.length > 0) {
+          throw new Error(`Failed to assign ${errors.length} leads`);
+        }
+        
+        // Notifications
         const notifications = selectedLeads.map((leadId, index) => ({
           user_id: telecallerIds[index % telecallerIds.length],
           type: "lead_assignment",
@@ -632,24 +627,20 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="w-48 justify-between">
-                  {bulkAssignTo ? `${bulkAssignTo.split(",").filter(Boolean).length} Selected` : "Assign to..."}
+                  {bulkAssignTo
+                    ? `${bulkAssignTo.split(",").filter(Boolean).length} Selected`
+                    : "Assign to..."}
                   <ChevronDown className="ml-2 h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent className="w-48">
                 <DropdownMenuCheckboxItem
-                  checked={bulkAssignTo.split(",").includes("unassigned")}
+                  checked={bulkAssignTo === "unassigned"}
                   onCheckedChange={(checked) => {
                     if (checked) {
-                      setBulkAssignTo((prev) => {
-                        const ids = prev ? prev.split(",").filter(Boolean) : [];
-                        if (!ids.includes("unassigned")) ids.push("unassigned");
-                        return ids.join(",");
-                      });
+                      setBulkAssignTo("unassigned");
                     } else {
-                      setBulkAssignTo((prev) =>
-                        (prev ? prev.split(",").filter((id) => id !== "unassigned") : []).join(",")
-                      );
+                      setBulkAssignTo("");
                     }
                   }}
                 >
@@ -662,16 +653,19 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     checked={bulkAssignTo.split(",").includes(telecaller.id)}
                     onCheckedChange={(checked) => {
                       setBulkAssignTo((prev) => {
-                        const ids = prev ? prev.split(",").filter(Boolean) : [];
+                        let ids = prev
+                          ? prev.split(",").filter(Boolean).filter((id) => id !== "unassigned")
+                          : [];
+
                         if (checked) {
-                          if (!ids.includes(telecaller.id)) ids.push(telecaller.id);
+                          if (!ids.includes(telecaller.id)) {
+                            ids.push(telecaller.id);
+                          }
                         } else {
-                          const filtered = ids.filter((id) => id !== telecaller.id);
-                          return filtered.join(",");
+                          ids = ids.filter((id) => id !== telecaller.id);
                         }
-                        // remove potential "unassigned" when adding real ids
-                        const final = ids.filter((id) => id !== "unassigned");
-                        return final.join(",");
+                        
+                        return ids.join(",");
                       });
                     }}
                   >
@@ -691,7 +685,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            <Button onClick={handleBulkAssign} disabled={!bulkAssignTo || selectedLeads.length === 0} size="sm">
+            <Button onClick={handleBulkAssign} disabled={!bulkAssignTo} size="sm">
               Assign
             </Button>
 
