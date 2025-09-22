@@ -1,341 +1,396 @@
 "use client";
 
-import { useState, useEffect } from "react"
-import Link from "next/link"
-import { createClient } from "@/lib/supabase/client"
-import { 
-  User, Building, Calendar, Clock, Eye, Phone, Mail, 
-  Search, Filter, ChevronDown, ChevronUp, Download, 
-  MoreHorizontal, Check, X, AlertCircle
-} from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
-import { LeadStatusDialog } from "@/components/lead-status-dialog"
-import { QuickActions } from "@/components/quick-actions"
-import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination"
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
+import {
+  User,
+  Building,
+  Calendar,
+  Clock,
+  Eye,
+  Phone,
+  Mail,
+  Search,
+  Filter,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  MoreHorizontal,
+  Check,
+  X,
+  AlertCircle,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { LeadStatusDialog } from "@/components/lead-status-dialog";
+import { QuickActions } from "@/components/quick-actions";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { useTelecallerStatus } from "@/hooks/use-telecaller-status"
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+} from "@/components/ui/dropdown-menu";
+import { useTelecallerStatus } from "@/hooks/use-telecaller-status";
 
 interface Lead {
-  id: string
-  name: string
-  email: string
-  phone: string
-  company: string
-  status: string
-  priority: string
-  created_at: string
-  last_contacted: string | null
-  loan_amount: number | null
-  loan_type: string | null
-  source: string | null
-  assigned_to: string | null
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  status: string;
+  priority: string;
+  created_at: string;
+  last_contacted: string | null;
+  loan_amount: number | null;
+  loan_type: string | null;
+  source: string | null;
+  assigned_to: string | null; // may store single id or CSV of ids (for CSV workaround)
   assigned_user: {
-    id: string
-    full_name: string
-  } | null
-  city: string | null
-  follow_up_date: string | null
+    id: string;
+    full_name: string;
+  } | null;
+  city: string | null;
+  follow_up_date: string | null;
 }
 
 interface LeadsTableProps {
-  leads: Lead[]
-  telecallers: Array<{ id: string; full_name: string }>
+  leads: Lead[];
+  telecallers: Array<{ id: string; full_name: string }>;
 }
 
 export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
-  const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
-  const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
-  const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState<string>("all")
-  const [priorityFilter, setPriorityFilter] = useState<string>("all")
-  const [assignedToFilter, setAssignedToFilter] = useState<string>("all")
-  const [sortField, setSortField] = useState<string>("created_at")
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
-  const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
-    name: true,
-    contact: true,
-    company: true,
-    status: true,
-    priority: true,
-    created: true,
-    lastContacted: true,
-    loanAmount: true,
-    loanType: true,
-    source: true,
-    assignedTo: true,
-    actions: true
-  })
-  const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
-  const [selectedLeads, setSelectedLeads] = useState<string[]>([])
-  const [bulkAssignTo, setBulkAssignTo] = useState<string>("")
-  const [bulkStatus, setBulkStatus] = useState<string>("")
-  const supabase = createClient()
-
-  // Get telecaller status for all telecallers in the leads and telecallers list
-  const allTelecallerIds = [
-    ...leads.map(lead => lead.assigned_user?.id).filter(Boolean) as string[],
-    ...telecallers.map(t => t.id)
-  ].filter((id, index, self) => self.indexOf(id) === index) // Remove duplicates
-
-  const { telecallerStatus, loading: statusLoading } = useTelecallerStatus(allTelecallerIds)
-
-  // Add safe value getters
-  const getSafeValue = (value: any, defaultValue: string = 'N/A') => {
-    return value ?? defaultValue
-  }
-
-  // Filter and sort leads
-  const filteredLeads = leads.filter(lead => {
-    const matchesSearch = searchTerm === "" || 
-      lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (lead.email && lead.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      lead.phone.includes(searchTerm) ||
-      (lead.company && lead.company.toLowerCase().includes(searchTerm.toLowerCase()))
-    
-    const matchesStatus = statusFilter === "all" || lead.status === statusFilter
-    const matchesPriority = priorityFilter === "all" || lead.priority === priorityFilter
-    const matchesAssignedTo = assignedToFilter === "all" || 
-      (assignedToFilter === "unassigned" && !lead.assigned_to) ||
-      lead.assigned_to === assignedToFilter
-    
-    return matchesSearch && matchesStatus && matchesPriority && matchesAssignedTo
-  }).sort((a, b) => {
-    let aValue = a[sortField as keyof Lead]
-    let bValue = b[sortField as keyof Lead]
-    
-    if (typeof aValue === 'string' && typeof bValue === 'string') {
-      aValue = aValue.toLowerCase()
-      bValue = bValue.toLowerCase()
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [priorityFilter, setPriorityFilter] = useState<string>("all");
+  const [assignedToFilter, setAssignedToFilter] = useState<string>("all");
+  const [sortField, setSortField] = useState<string>("created_at");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">(
+    "desc"
+  );
+  const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>(
+    {
+      name: true,
+      contact: true,
+      company: true,
+      status: true,
+      priority: true,
+      created: true,
+      lastContacted: true,
+      loanAmount: true,
+      loanType: true,
+      source: true,
+      assignedTo: true,
+      actions: true,
     }
-    
-    if (aValue === null) return sortDirection === 'asc' ? -1 : 1
-    if (bValue === null) return sortDirection === 'asc' ? 1 : -1
-    
-    if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1
-    if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1
-    return 0
-  })
+  );
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
+  const [bulkAssignTo, setBulkAssignTo] = useState<string>(""); // CSV of telecaller ids or "unassigned"
+  const [bulkStatus, setBulkStatus] = useState<string>("");
+  const supabase = createClient();
 
-  // Pagination
-  const totalPages = Math.ceil(filteredLeads.length / pageSize)
+  // Prepare telecaller IDs for status hook
+  const allTelecallerIds = [
+    ...leads
+      .map((lead) => lead.assigned_user?.id)
+      .filter(Boolean) as string[],
+    ...telecallers.map((t) => t.id),
+  ].filter((id, index, self) => self.indexOf(id) === index); // unique
+
+  const { telecallerStatus, loading: statusLoading } =
+    useTelecallerStatus(allTelecallerIds);
+
+  // safe getter
+  const getSafeValue = (value: any, defaultValue: string = "N/A") => {
+    return value ?? defaultValue;
+  };
+
+  // Filtering + searching
+  const filteredLeads = leads
+    .filter((lead) => {
+      const matchesSearch =
+        searchTerm === "" ||
+        lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (lead.email &&
+          lead.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        lead.phone.includes(searchTerm) ||
+        (lead.company &&
+          lead.company.toLowerCase().includes(searchTerm.toLowerCase()));
+
+      const matchesStatus = statusFilter === "all" || lead.status === statusFilter;
+      const matchesPriority =
+        priorityFilter === "all" || lead.priority === priorityFilter;
+
+      const matchesAssignedTo =
+        assignedToFilter === "all" ||
+        (assignedToFilter === "unassigned" && !lead.assigned_to) ||
+        (assignedToFilter !== "unassigned" &&
+          lead.assigned_to === assignedToFilter);
+
+      return matchesSearch && matchesStatus && matchesPriority && matchesAssignedTo;
+    })
+    .sort((a, b) => {
+      let aValue = a[sortField as keyof Lead] as any;
+      let bValue = b[sortField as keyof Lead] as any;
+
+      if (typeof aValue === "string" && typeof bValue === "string") {
+        aValue = aValue.toLowerCase();
+        bValue = bValue.toLowerCase();
+      }
+
+      if (aValue === null) return sortDirection === "asc" ? -1 : 1;
+      if (bValue === null) return sortDirection === "asc" ? 1 : -1;
+
+      if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
+      if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
+      return 0;
+    });
+
+  // pagination
+  const totalPages = Math.max(1, Math.ceil(filteredLeads.length / pageSize));
   const paginatedLeads = filteredLeads.slice(
     (currentPage - 1) * pageSize,
     currentPage * pageSize
-  )
+  );
 
   const handleSort = (field: string) => {
     if (sortField === field) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
     } else {
-      setSortField(field)
-      setSortDirection('desc')
+      setSortField(field);
+      setSortDirection("desc");
     }
-  }
+  };
 
-  const [isCallInitiated, setIsCallInitiated] = useState(false) // New state to track if call is initiated
+  const [isCallInitiated, setIsCallInitiated] = useState(false);
 
   const handleCallInitiated = (lead: Lead) => {
-    setSelectedLead(lead)
-    setIsStatusDialogOpen(true)
-    setIsCallInitiated(true) // Set to true when call is initiated
-  }
+    setSelectedLead(lead);
+    setIsStatusDialogOpen(true);
+    setIsCallInitiated(true);
+  };
 
-  // New function to handle when call is logged
   const handleCallLogged = (callLogId: string) => {
-    setIsCallInitiated(false) // Reset the call initiated state
-  }
+    setIsCallInitiated(false);
+  };
 
-  const handleStatusUpdate = async (newStatus: string, note?: string, callbackDate?: string) => {
+  const handleStatusUpdate = async (
+    newStatus: string,
+    note?: string,
+    callbackDate?: string
+  ) => {
     try {
-      if (!selectedLead?.id) return
-      
-      const updateData: any = { 
+      if (!selectedLead?.id) return;
+
+      const updateData: any = {
         status: newStatus,
-        last_contacted: new Date().toISOString()
-      }
+        last_contacted: new Date().toISOString(),
+      };
 
-      // Add note if provided for Not Eligible status
       if (newStatus === "not_eligible" && note) {
-        const { error: noteError } = await supabase
-          .from("notes")
-          .insert({
-            lead_id: selectedLead.id,
-            note: note,
-            note_type: "status_change"
-          })
-
-        if (noteError) throw noteError
+        const { error: noteError } = await supabase.from("notes").insert({
+          lead_id: selectedLead.id,
+          note: note,
+          note_type: "status_change",
+        });
+        if (noteError) throw noteError;
       }
 
-      // Add callback date if provided for Call Back status
       if (newStatus === "follow_up" && callbackDate) {
-        const { error: followUpError } = await supabase
-          .from("follow_ups")
-          .insert({
-            lead_id: selectedLead.id,
-            scheduled_date: callbackDate,
-            status: "scheduled"
-          })
-
-        if (followUpError) throw followUpError
-        
-        // Also update the lead's follow_up_date
-        updateData.follow_up_date = callbackDate
+        const { error: followUpError } = await supabase.from("follow_ups").insert({
+          lead_id: selectedLead.id,
+          scheduled_date: callbackDate,
+          status: "scheduled",
+        });
+        if (followUpError) throw followUpError;
+        updateData.follow_up_date = callbackDate;
       }
 
       const { error } = await supabase
         .from("leads")
         .update(updateData)
-        .eq("id", selectedLead.id)
+        .eq("id", selectedLead.id);
 
-      if (error) throw error
+      if (error) throw error;
 
-      console.log(`Status updated for lead ${selectedLead.id} to ${newStatus}`)
-      window.location.reload()
-      
+      console.log(`Status updated for lead ${selectedLead.id} to ${newStatus}`);
+      window.location.reload();
     } catch (error) {
-      console.error("Error updating lead status:", error)
+      console.error("Error updating lead status:", error);
     }
-  }
+  };
 
   const handleStatusChange = async (leadId: string, newStatus: string) => {
     try {
       const { error } = await supabase
         .from("leads")
-        .update({ 
+        .update({
           status: newStatus,
-          last_contacted: new Date().toISOString()
+          last_contacted: new Date().toISOString(),
         })
-        .eq("id", leadId)
+        .eq("id", leadId);
 
-      if (error) throw error
+      if (error) throw error;
 
-      console.log(`Status changed for lead ${leadId} to ${newStatus}`)
-      window.location.reload()
-      
+      console.log(`Status changed for lead ${leadId} to ${newStatus}`);
+      window.location.reload();
     } catch (error) {
-      console.error("Error changing lead status:", error)
+      console.error("Error changing lead status:", error);
     }
-  }
+  };
 
+  /**
+   * handleAssignLead
+   * Accepts telecallerId which may be:
+   * - a single id string,
+   * - a CSV string of ids (e.g. "id1,id2"), or
+   * - the literal "unassigned" to clear assignment.
+   *
+   * We store the value in `assigned_to` as-is (CSV workaround).
+   * For notifications we only send when a non-unassigned value is present.
+   */
   const handleAssignLead = async (leadId: string, telecallerId: string) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      const assignedById = user?.id
+      const { data: { user } = { user: null } } = await supabase.auth.getUser();
+      const assignedById = user?.id ?? null;
+
+      const assignedToValue = telecallerId === "unassigned" ? null : telecallerId;
 
       const { error } = await supabase
         .from("leads")
-        .update({ 
-          assigned_to: telecallerId === "unassigned" ? null : telecallerId,
+        .update({
+          assigned_to: assignedToValue,
           assigned_by: assignedById,
-          assigned_at: new Date().toISOString()
+          assigned_at: new Date().toISOString(),
         })
-        .eq("id", leadId)
+        .eq("id", leadId);
 
-      if (error) throw error
+      if (error) throw error;
 
-      if (telecallerId !== "unassigned") {
-        await supabase.from("notifications").insert({
-          user_id: telecallerId,
+      // notifications: if telecallerId is CSV, notify each id
+      if (assignedToValue) {
+        const ids = String(assignedToValue).split(",").map((s) => s.trim()).filter(Boolean);
+        const notifications = ids.map((id) => ({
+          user_id: id,
           type: "lead_assignment",
           title: "New Lead Assigned",
           message: "A new lead has been assigned to you.",
           lead_id: leadId,
           read: false,
-        });
+        }));
+        if (notifications.length > 0) {
+          await supabase.from("notifications").insert(notifications);
+        }
       }
-      
-      console.log(`Lead ${leadId} assigned to ${telecallerId}`)
-      window.location.reload()
-      
+
+      console.log(`Lead ${leadId} assigned to ${assignedToValue}`);
+      window.location.reload();
     } catch (error) {
-      console.error("Error assigning lead:", error)
+      console.error("Error assigning lead:", error);
     }
-  }
+  };
 
   const toggleLeadSelection = (leadId: string) => {
-    setSelectedLeads(prev => 
-      prev.includes(leadId) 
-        ? prev.filter(id => id !== leadId)
-        : [...prev, leadId]
-    )
-  }
+    setSelectedLeads((prev) =>
+      prev.includes(leadId) ? prev.filter((id) => id !== leadId) : [...prev, leadId]
+    );
+  };
 
   const selectAllLeads = () => {
-    if (selectedLeads.length === paginatedLeads.length) {
-      setSelectedLeads([])
+    if (selectedLeads.length === paginatedLeads.length && paginatedLeads.length > 0) {
+      setSelectedLeads([]);
     } else {
-      setSelectedLeads(paginatedLeads.map(lead => lead.id))
+      setSelectedLeads(paginatedLeads.map((lead) => lead.id));
     }
-  }
+  };
 
   const handleBulkAssign = async () => {
-    if (!bulkAssignTo || selectedLeads.length === 0) return
+    if (!bulkAssignTo || selectedLeads.length === 0) return;
 
     try {
-      // Get the current user ID once, outside the loop
-      const { data: { user } } = await supabase.auth.getUser()
-      const assignedById = user?.id
+      const { data: { user } = { user: null } } = await supabase.auth.getUser();
+      const assignedById = user?.id ?? null;
 
-      // Distribute leads equally among selected telecallers if multiple are selected
-      let telecallerIds = bulkAssignTo.split(',').filter(id => id !== "unassigned")
-      let updates: any[] = []
+      // telecallerIds is CSV string, filter out "unassigned"
+      const telecallerIds = bulkAssignTo.split(",").map((s) => s.trim()).filter(Boolean).filter(id => id !== "unassigned");
+
+      let updates: any[] = [];
 
       if (telecallerIds.length > 0) {
-        // Distribute leads equally among telecallers
+        // distribute equally among selected leads
         selectedLeads.forEach((leadId, index) => {
-          const telecallerId = telecallerIds[index % telecallerIds.length]
+          const telecallerId = telecallerIds[index % telecallerIds.length];
           updates.push({
             id: leadId,
             assigned_to: telecallerId,
             assigned_by: assignedById,
-            assigned_at: new Date().toISOString()
-          })
-        })
+            assigned_at: new Date().toISOString(),
+          });
+        });
       } else {
-        // Unassign all selected leads
-        selectedLeads.forEach(leadId => {
+        // unassign all
+        selectedLeads.forEach((leadId) => {
           updates.push({
             id: leadId,
             assigned_to: null,
             assigned_by: assignedById,
-            assigned_at: new Date().toISOString()
-          })
-        })
+            assigned_at: new Date().toISOString(),
+          });
+        });
       }
 
-      // Execute all updates
       const results = await Promise.all(
-        updates.map(update => 
+        updates.map((update) =>
           supabase
             .from("leads")
             .update({
               assigned_to: update.assigned_to,
               assigned_by: update.assigned_by,
-              assigned_at: update.assigned_at
+              assigned_at: update.assigned_at,
             })
             .eq("id", update.id)
         )
-      )
-      
-      const errors = results.filter(result => result.error)
+      );
+
+      const errors = results.filter((r) => r.error);
       if (errors.length > 0) {
-        throw new Error(`Failed to assign ${errors.length} leads`)
+        throw new Error(`Failed to assign ${errors.length} leads`);
       }
-      
+
       if (telecallerIds.length > 0) {
-      const notifications = selectedLeads.map((leadId, index) => ({
+        const notifications = selectedLeads.map((leadId, index) => ({
           user_id: telecallerIds[index % telecallerIds.length],
           type: "lead_assignment",
           title: "New Lead Assigned",
@@ -345,107 +400,102 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         }));
         await supabase.from("notifications").insert(notifications);
       }
-    
-      console.log(`Bulk assigned ${selectedLeads.length} leads`)
-      setSelectedLeads([])
-      setBulkAssignTo("")
-      window.location.reload()
-      
+
+      console.log(`Bulk assigned ${selectedLeads.length} leads`);
+      setSelectedLeads([]);
+      setBulkAssignTo("");
+      window.location.reload();
     } catch (error) {
-      console.error("Error bulk assigning leads:", error)
+      console.error("Error bulk assigning leads:", error);
     }
-  }
+  };
 
   const handleBulkStatusUpdate = async () => {
-    if (!bulkStatus || selectedLeads.length === 0) return
+    if (!bulkStatus || selectedLeads.length === 0) return;
 
     try {
-      // Update status for all selected leads
-      const updates = selectedLeads.map(leadId => 
+      const updates = selectedLeads.map((leadId) =>
         supabase
           .from("leads")
-          .update({ 
+          .update({
             status: bulkStatus,
-            last_contacted: new Date().toISOString()
+            last_contacted: new Date().toISOString(),
           })
           .eq("id", leadId)
-      )
+      );
 
-      // Execute all updates concurrently
-      const results = await Promise.all(updates)
-      
-      const errors = results.filter(result => result.error)
+      const results = await Promise.all(updates);
+      const errors = results.filter((r) => r.error);
       if (errors.length > 0) {
-        throw new Error(`Failed to update status for ${errors.length} leads`)
+        throw new Error(`Failed to update status for ${errors.length} leads`);
       }
 
-      console.log(`Bulk updated status for ${selectedLeads.length} leads to ${bulkStatus}`)
-      setSelectedLeads([])
-      setBulkStatus("")
-      window.location.reload()
-      
+      console.log(`Bulk updated status for ${selectedLeads.length} leads to ${bulkStatus}`);
+      setSelectedLeads([]);
+      setBulkStatus("");
+      window.location.reload();
     } catch (error) {
-      console.error("Error bulk updating lead status:", error)
+      console.error("Error bulk updating lead status:", error);
     }
-  }
+  };
 
   const getPriorityVariant = (priority: string) => {
     switch (priority) {
       case "high":
-        return "destructive"
+        return "destructive";
       case "medium":
-        return "default"
+        return "default";
       case "low":
-        return "secondary"
+        return "secondary";
       default:
-        return "secondary"
+        return "secondary";
     }
-  }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
       case "new":
-        return "bg-blue-100 text-blue-800"
+        return "bg-blue-100 text-blue-800";
       case "contacted":
-        return "bg-yellow-100 text-yellow-800"
+        return "bg-yellow-100 text-yellow-800";
       case "Interested":
-        return "bg-green-100 text-green-800"
+        return "bg-green-100 text-green-800";
       case "Documents_Sent":
-        return "bg-purple-100 text-purple-800"
+        return "bg-purple-100 text-purple-800";
       case "Login":
-        return "bg-orange-100 text-orange-800"
+        return "bg-orange-100 text-orange-800";
       case "Disbursed":
-        return "bg-green-100 text-green-800"
+        return "bg-green-100 text-green-800";
       case "Not_Interested":
-        return "bg-red-100 text-red-800"
+        return "bg-red-100 text-red-800";
       case "Call_Back":
-        return "bg-indigo-100 text-indigo-800"
+        return "bg-indigo-100 text-indigo-800";
       case "not_eligible":
-        return "bg-red-100 text-red-800"
+        return "bg-red-100 text-red-800";
       case "nr":
-        return "bg-gray-100 text-gray-800"
+        return "bg-gray-100 text-gray-800";
       case "self_employed":
-        return "bg-amber-100 text-amber-800"
+        return "bg-amber-100 text-amber-800";
       default:
-        return "bg-gray-100 text-gray-800"
+        return "bg-gray-100 text-gray-800";
     }
-  }
+  };
 
   const formatCurrency = (amount: number | null) => {
-    if (!amount) return 'N/A'
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 0
-    }).format(amount)
-  }
+    if (!amount && amount !== 0) return "N/A";
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0,
+    }).format(amount ?? 0);
+  };
 
   if (!leads) {
     return (
       <div className="text-center py-8">
         <p className="text-gray-500">No leads data available</p>
       </div>
-    )
+    );
   }
 
   return (
@@ -461,7 +511,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        
+
         <div className="flex gap-2 w-full sm:w-auto">
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-full sm:w-40">
@@ -482,7 +532,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               <SelectItem value="self_employed">Self Employed</SelectItem>
             </SelectContent>
           </Select>
-          
+
           <Select value={priorityFilter} onValueChange={setPriorityFilter}>
             <SelectTrigger className="w-full sm:w-40">
               <SelectValue placeholder="Filter by priority" />
@@ -494,7 +544,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               <SelectItem value="low">Low</SelectItem>
             </SelectContent>
           </Select>
-          
+
           <Select value={assignedToFilter} onValueChange={setAssignedToFilter}>
             <SelectTrigger className="w-full sm:w-40">
               <SelectValue placeholder="Filter by assignee" />
@@ -505,10 +555,15 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               {telecallers.map((telecaller) => (
                 <SelectItem key={telecaller.id} value={telecaller.id}>
                   <div className="flex items-center gap-2">
-                    {/* Status indicator for telecaller */}
                     {telecallerStatus[telecaller.id] !== undefined && (
-                      <div className={`w-2 h-2 rounded-full ${telecallerStatus[telecaller.id] ? 'bg-green-500' : 'bg-red-500'}`} 
-                           title={telecallerStatus[telecaller.id] ? 'Checked in' : 'Not checked in'} />
+                      <div
+                        className={`w-2 h-2 rounded-full ${
+                          telecallerStatus[telecaller.id] ? "bg-green-500" : "bg-red-500"
+                        }`}
+                        title={
+                          telecallerStatus[telecaller.id] ? "Checked in" : "Not checked in"
+                        }
+                      />
                     )}
                     {telecaller.full_name}
                   </div>
@@ -516,7 +571,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               ))}
             </SelectContent>
           </Select>
-          
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="ml-auto">
@@ -533,7 +588,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     setVisibleColumns({ ...visibleColumns, [key]: checked })
                   }
                 >
-                  {key.replace(/([A-Z])/g, ' $1').toLowerCase()}
+                  {key.replace(/([A-Z])/g, " $1").toLowerCase()}
                 </DropdownMenuCheckboxItem>
               ))}
             </DropdownMenuContent>
@@ -545,9 +600,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       {selectedLeads.length > 0 && (
         <div className="flex flex-col sm:flex-row items-center gap-4 p-4 bg-gray-50 rounded-lg">
           <span className="text-sm text-gray-600">
-            {selectedLeads.length} lead{selectedLeads.length !== 1 ? 's' : ''} selected
+            {selectedLeads.length} lead{selectedLeads.length !== 1 ? "s" : ""} selected
           </span>
-          
+
           <div className="flex flex-wrap items-center gap-2">
             {/* Bulk Status Update */}
             <Select value={bulkStatus} onValueChange={setBulkStatus}>
@@ -568,50 +623,79 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                 <SelectItem value="self_employed">Self Employed</SelectItem>
               </SelectContent>
             </Select>
-            
-            <Button 
-              onClick={handleBulkStatusUpdate}
-              disabled={!bulkStatus}
-              size="sm"
-            >
+
+            <Button onClick={handleBulkStatusUpdate} disabled={!bulkStatus} size="sm">
               Update Status
             </Button>
-            
-            {/* Bulk Assignment */}
-            <Select value={bulkAssignTo} onValueChange={setBulkAssignTo}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="Assign to..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="unassigned">Unassign</SelectItem>
+
+            {/* Bulk Assignment (MULTI-SELECT using DropdownMenuCheckboxItem) */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="w-48 justify-between">
+                  {bulkAssignTo ? `${bulkAssignTo.split(",").filter(Boolean).length} Selected` : "Assign to..."}
+                  <ChevronDown className="ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-48">
+                <DropdownMenuCheckboxItem
+                  checked={bulkAssignTo.split(",").includes("unassigned")}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      setBulkAssignTo((prev) => {
+                        const ids = prev ? prev.split(",").filter(Boolean) : [];
+                        if (!ids.includes("unassigned")) ids.push("unassigned");
+                        return ids.join(",");
+                      });
+                    } else {
+                      setBulkAssignTo((prev) =>
+                        (prev ? prev.split(",").filter((id) => id !== "unassigned") : []).join(",")
+                      );
+                    }
+                  }}
+                >
+                  Unassign
+                </DropdownMenuCheckboxItem>
+
                 {telecallers.map((telecaller) => (
-                  <SelectItem key={telecaller.id} value={telecaller.id}>
+                  <DropdownMenuCheckboxItem
+                    key={telecaller.id}
+                    checked={bulkAssignTo.split(",").includes(telecaller.id)}
+                    onCheckedChange={(checked) => {
+                      setBulkAssignTo((prev) => {
+                        const ids = prev ? prev.split(",").filter(Boolean) : [];
+                        if (checked) {
+                          if (!ids.includes(telecaller.id)) ids.push(telecaller.id);
+                        } else {
+                          const filtered = ids.filter((id) => id !== telecaller.id);
+                          return filtered.join(",");
+                        }
+                        // remove potential "unassigned" when adding real ids
+                        const final = ids.filter((id) => id !== "unassigned");
+                        return final.join(",");
+                      });
+                    }}
+                  >
                     <div className="flex items-center gap-2">
-                      {/* Status indicator for telecaller */}
                       {telecallerStatus[telecaller.id] !== undefined && (
-                        <div className={`w-2 h-2 rounded-full ${telecallerStatus[telecaller.id] ? 'bg-green-500' : 'bg-red-500'}`} 
-                             title={telecallerStatus[telecaller.id] ? 'Checked in' : 'Not checked in'} />
+                        <div
+                          className={`w-2 h-2 rounded-full ${
+                            telecallerStatus[telecaller.id] ? "bg-green-500" : "bg-red-500"
+                          }`}
+                          title={telecallerStatus[telecaller.id] ? "Checked in" : "Not checked in"}
+                        />
                       )}
                       {telecaller.full_name}
                     </div>
-                  </SelectItem>
+                  </DropdownMenuCheckboxItem>
                 ))}
-              </SelectContent>
-            </Select>
-            
-            <Button 
-              onClick={handleBulkAssign}
-              disabled={!bulkAssignTo}
-              size="sm"
-            >
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <Button onClick={handleBulkAssign} disabled={!bulkAssignTo || selectedLeads.length === 0} size="sm">
               Assign
             </Button>
-            
-            <Button 
-              variant="outline" 
-              onClick={() => setSelectedLeads([])}
-              size="sm"
-            >
+
+            <Button variant="outline" onClick={() => setSelectedLeads([])} size="sm">
               Clear
             </Button>
           </div>
@@ -632,54 +716,40 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                 />
               </TableHead>
               {visibleColumns.name && (
-                <TableHead 
-                  className="cursor-pointer" 
-                  onClick={() => handleSort('name')}
-                >
-                  Name {sortField === 'name' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
+                <TableHead className="cursor-pointer" onClick={() => handleSort("name")}>
+                  Name {sortField === "name" && (sortDirection === "asc" ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
                 </TableHead>
               )}
               {visibleColumns.contact && <TableHead>Contact</TableHead>}
               {visibleColumns.company && (
-                <TableHead 
-                  className="cursor-pointer" 
-                  onClick={() => handleSort('company')}
-                >
-                  Company {sortField === 'company' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
+                <TableHead className="cursor-pointer" onClick={() => handleSort("company")}>
+                  Company {sortField === "company" && (sortDirection === "asc" ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
                 </TableHead>
               )}
               {visibleColumns.status && <TableHead>Status</TableHead>}
               {visibleColumns.priority && <TableHead>Priority</TableHead>}
               {visibleColumns.loanAmount && (
-                <TableHead 
-                  className="cursor-pointer" 
-                  onClick={() => handleSort('loan_amount')}
-                >
-                  Loan Amount {sortField === 'loan_amount' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
+                <TableHead className="cursor-pointer" onClick={() => handleSort("loan_amount")}>
+                  Loan Amount {sortField === "loan_amount" && (sortDirection === "asc" ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
                 </TableHead>
               )}
               {visibleColumns.loanType && <TableHead>Loan Type</TableHead>}
               {visibleColumns.source && <TableHead>Source</TableHead>}
               {visibleColumns.assignedTo && <TableHead>Assigned To</TableHead>}
               {visibleColumns.created && (
-                <TableHead 
-                  className="cursor-pointer" 
-                  onClick={() => handleSort('created_at')}
-                >
-                  Created {sortField === 'created_at' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
+                <TableHead className="cursor-pointer" onClick={() => handleSort("created_at")}>
+                  Created {sortField === "created_at" && (sortDirection === "asc" ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
                 </TableHead>
               )}
               {visibleColumns.lastContacted && (
-                <TableHead 
-                  className="cursor-pointer" 
-                  onClick={() => handleSort('last_contacted')}
-                >
-                  Last Contacted {sortField === 'last_contacted' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
+                <TableHead className="cursor-pointer" onClick={() => handleSort("last_contacted")}>
+                  Last Contacted {sortField === "last_contacted" && (sortDirection === "asc" ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
                 </TableHead>
               )}
               {visibleColumns.actions && <TableHead>Actions</TableHead>}
             </TableRow>
           </TableHeader>
+
           <TableBody>
             {paginatedLeads.map((lead) => (
               <TableRow key={lead.id} className="cursor-pointer hover:bg-gray-50">
@@ -692,27 +762,29 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     onClick={(e) => e.stopPropagation()}
                   />
                 </TableCell>
+
                 {visibleColumns.name && (
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-2">
                       <User className="h-4 w-4" />
-                      <Link 
+                      <Link
                         href={`/admin/leads/${lead.id}`}
                         onClick={(e: React.MouseEvent) => {
                           e.stopPropagation();
                         }}
                         className="text-blue-600 hover:text-blue-800 hover:underline cursor-pointer text-left"
                       >
-                        {getSafeValue(lead.name, 'Unknown')}
+                        {getSafeValue(lead.name, "Unknown")}
                       </Link>
                     </div>
                   </TableCell>
                 )}
+
                 {visibleColumns.contact && (
                   <TableCell>
                     <QuickActions
-                      phone={getSafeValue(lead.phone, '')}
-                      email={getSafeValue(lead.email, '')}
+                      phone={getSafeValue(lead.phone, "")}
+                      email={getSafeValue(lead.email, "")}
                       leadId={lead.id}
                       onCallInitiated={() => {
                         handleCallInitiated(lead);
@@ -720,51 +792,51 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     />
                   </TableCell>
                 )}
+
                 {visibleColumns.company && (
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <Building className="h-4 w-4" />
-                      {getSafeValue(lead.company, 'No company')}
+                      {getSafeValue(lead.company, "No company")}
                     </div>
                   </TableCell>
                 )}
+
                 {visibleColumns.status && (
                   <TableCell>
                     <Badge className={getStatusColor(lead.status)}>
-                      {getSafeValue(lead.status, 'unknown').replace("_", " ").toUpperCase()}
+                      {getSafeValue(lead.status, "unknown").replace("_", " ").toUpperCase()}
                     </Badge>
                   </TableCell>
                 )}
+
                 {visibleColumns.priority && (
                   <TableCell>
-                    <Badge variant={getPriorityVariant(getSafeValue(lead.priority, 'medium'))}>
-                      {getSafeValue(lead.priority, 'medium').toUpperCase()}
+                    <Badge variant={getPriorityVariant(getSafeValue(lead.priority, "medium"))}>
+                      {getSafeValue(lead.priority, "medium").toUpperCase()}
                     </Badge>
                   </TableCell>
                 )}
+
                 {visibleColumns.loanAmount && (
-                  <TableCell>
-                    {formatCurrency(lead.loan_amount)}
-                  </TableCell>
+                  <TableCell>{formatCurrency(lead.loan_amount)}</TableCell>
                 )}
-                {visibleColumns.loanType && (
-                  <TableCell>
-                    {getSafeValue(lead.loan_type, 'N/A')}
-                  </TableCell>
-                )}
-                {visibleColumns.source && (
-                  <TableCell>
-                    {getSafeValue(lead.source, 'N/A')}
-                  </TableCell>
-                )}
+
+                {visibleColumns.loanType && <TableCell>{getSafeValue(lead.loan_type, "N/A")}</TableCell>}
+
+                {visibleColumns.source && <TableCell>{getSafeValue(lead.source, "N/A")}</TableCell>}
+
                 {visibleColumns.assignedTo && (
                   <TableCell>
                     {lead.assigned_user ? (
                       <div className="flex items-center gap-2">
-                        {/* Status indicator for assigned telecaller */}
                         {telecallerStatus[lead.assigned_user.id] !== undefined && (
-                          <div className={`w-2 h-2 rounded-full ${telecallerStatus[lead.assigned_user.id] ? 'bg-green-500' : 'bg-red-500'}`} 
-                               title={telecallerStatus[lead.assigned_user.id] ? 'Checked in' : 'Not checked in'} />
+                          <div
+                            className={`w-2 h-2 rounded-full ${
+                              telecallerStatus[lead.assigned_user.id] ? "bg-green-500" : "bg-red-500"
+                            }`}
+                            title={telecallerStatus[lead.assigned_user.id] ? "Checked in" : "Not checked in"}
+                          />
                         )}
                         {lead.assigned_user.full_name}
                       </div>
@@ -773,24 +845,25 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     )}
                   </TableCell>
                 )}
+
                 {visibleColumns.created && (
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <Calendar className="h-4 w-4" />
-                      {lead.created_at ? new Date(lead.created_at).toLocaleDateString() : 'Unknown date'}
+                      {lead.created_at ? new Date(lead.created_at).toLocaleDateString() : "Unknown date"}
                     </div>
                   </TableCell>
                 )}
+
                 {visibleColumns.lastContacted && (
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <Clock className="h-4 w-4" />
-                      {lead.last_contacted
-                        ? new Date(lead.last_contacted).toLocaleDateString()
-                        : "Never"}
+                      {lead.last_contacted ? new Date(lead.last_contacted).toLocaleDateString() : "Never"}
                     </div>
                   </TableCell>
                 )}
+
                 {visibleColumns.actions && (
                   <TableCell>
                     <DropdownMenu>
@@ -800,6 +873,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
+
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem asChild>
                           <a href={`/admin/leads/${lead.id}`}>
@@ -807,84 +881,98 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                             View Details
                           </a>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => {
-                          setSelectedLead(lead)
-                          setIsStatusDialogOpen(true)
-                        }}>
+
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setSelectedLead(lead);
+                            setIsStatusDialogOpen(true);
+                          }}
+                        >
                           <Check className="mr-2 h-4 w-4" />
                           Update Status
                         </DropdownMenuItem>
-                        <DropdownMenu>
+
+                        {/* Row-level multi-assign using sub-menu + checkbox items */}
+                        <DropdownMenuSub>
                           <DropdownMenuTrigger asChild>
                             <DropdownMenuItem>
                               <User className="mr-2 h-4 w-4" />
                               Assign To
-                            <DropdownMenuSub label="Assign To">
-  <DropdownMenuSubContent className="w-56">
-    <DropdownMenuCheckboxItem
-      checked={!lead.telecaller_id}
-      onCheckedChange={(checked) => {
-        if (checked) {
-          handleAssign(lead.id, null) // unassign
-        }
-      }}
-    >
-      Unassign
-    </DropdownMenuCheckboxItem>
+                            </DropdownMenuItem>
+                          </DropdownMenuTrigger>
 
-    {telecallers.map((telecaller) => (
-      <DropdownMenuCheckboxItem
-        key={telecaller.id}
-        checked={lead.telecaller_id?.split(",").includes(telecaller.id)}
-        onCheckedChange={(checked) => {
-          let newAssignees = lead.telecaller_id
-            ? lead.telecaller_id.split(",")
-            : []
+                          <DropdownMenuSubContent className="w-56">
+                            <DropdownMenuCheckboxItem
+                              checked={!lead.assigned_to}
+                              onCheckedChange={(checked) => {
+                                if (checked) handleAssignLead(lead.id, "unassigned");
+                              }}
+                            >
+                              Unassign
+                            </DropdownMenuCheckboxItem>
 
-          if (checked) {
-            if (!newAssignees.includes(telecaller.id)) {
-              newAssignees.push(telecaller.id)
-            }
-          } else {
-            newAssignees = newAssignees.filter((id) => id !== telecaller.id)
-          }
+                            {telecallers.map((telecaller) => (
+                              <DropdownMenuCheckboxItem
+                                key={telecaller.id}
+                                checked={
+                                  Boolean(lead.assigned_to) &&
+                                  String(lead.assigned_to)
+                                    .split(",")
+                                    .map((s) => s.trim())
+                                    .includes(telecaller.id)
+                                }
+                                onCheckedChange={(checked) => {
+                                  // Build new CSV string
+                                  const existing = lead.assigned_to ? String(lead.assigned_to).split(",").map((s) => s.trim()).filter(Boolean) : [];
+                                  let newAssignees = [...existing];
 
-          handleAssign(lead.id, newAssignees.join(","))
-        }}
-      >
-        <div className="flex items-center gap-2">
-          {/* Status indicator */}
-          {telecallerStatus[telecaller.id] !== undefined && (
-            <div
-              className={`w-2 h-2 rounded-full ${
-                telecallerStatus[telecaller.id]
-                  ? "bg-green-500"
-                  : "bg-red-500"
-              }`}
-              title={
-                telecallerStatus[telecaller.id]
-                  ? "Checked in"
-                  : "Not checked in"
-              }
-            />
-          )}
-          {telecaller.full_name}
-        </div>
-      </DropdownMenuCheckboxItem>
-    ))}
-  </DropdownMenuSubContent>
-</DropdownMenuSub>
+                                  if (checked) {
+                                    if (!newAssignees.includes(telecaller.id)) newAssignees.push(telecaller.id);
+                                  } else {
+                                    newAssignees = newAssignees.filter((id) => id !== telecaller.id);
+                                  }
 
+                                  const csv = newAssignees.join(",");
+                                  handleAssignLead(lead.id, csv || "unassigned");
+                                }}
+                              >
+                                <div className="flex items-center gap-2">
+                                  {telecallerStatus[telecaller.id] !== undefined && (
+                                    <div
+                                      className={`w-2 h-2 rounded-full ${
+                                        telecallerStatus[telecaller.id] ? "bg-green-500" : "bg-red-500"
+                                      }`}
+                                      title={telecallerStatus[telecaller.id] ? "Checked in" : "Not checked in"}
+                                    />
+                                  )}
+                                  {telecaller.full_name}
+                                </div>
+                              </DropdownMenuCheckboxItem>
+                            ))}
+                          </DropdownMenuSubContent>
+                        </DropdownMenuSub>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
 
       {/* Pagination Controls */}
       {totalPages > 1 && (
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <span className="text-sm text-gray-600">Rows per page:</span>
-            <Select value={pageSize.toString()} onValueChange={(value) => {
-              setPageSize(parseInt(value));
-              setCurrentPage(1); // Reset to first page when changing page size
-            }}>
+            <Select
+              value={pageSize.toString()}
+              onValueChange={(value) => {
+                setPageSize(parseInt(value));
+                setCurrentPage(1);
+              }}
+            >
               <SelectTrigger className="w-24">
                 <SelectValue />
               </SelectTrigger>
@@ -904,7 +992,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               Showing {Math.min((currentPage - 1) * pageSize + 1, filteredLeads.length)} to {Math.min(currentPage * pageSize, filteredLeads.length)} of {filteredLeads.length} leads
             </span>
           </div>
-          
+
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
@@ -914,20 +1002,20 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
             >
               Previous
             </Button>
-            
+
             <div className="flex items-center gap-1">
               {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                let pageNum
+                let pageNum;
                 if (totalPages <= 5) {
-                  pageNum = i + 1
+                  pageNum = i + 1;
                 } else if (currentPage <= 3) {
-                  pageNum = i + 1
+                  pageNum = i + 1;
                 } else if (currentPage >= totalPages - 2) {
-                  pageNum = totalPages - 4 + i
+                  pageNum = totalPages - 4 + i;
                 } else {
-                  pageNum = currentPage - 2 + i
+                  pageNum = currentPage - 2 + i;
                 }
-                
+
                 return (
                   <Button
                     key={pageNum}
@@ -937,10 +1025,10 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                   >
                     {pageNum}
                   </Button>
-                )
+                );
               })}
             </div>
-            
+
             <Button
               variant="outline"
               size="sm"
@@ -958,15 +1046,15 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
           No leads found. Try adjusting your filters or upload some leads.
         </div>
       )}
-      
+
       {selectedLead && (
         <LeadStatusDialog
           leadId={selectedLead.id}
           currentStatus={selectedLead.status}
           open={isStatusDialogOpen}
           onOpenChange={(open) => {
-            setIsStatusDialogOpen(open)
-            if (!open) setIsCallInitiated(false) // Reset when dialog is closed
+            setIsStatusDialogOpen(open);
+            if (!open) setIsCallInitiated(false);
           }}
           onStatusUpdate={handleStatusUpdate}
           isCallInitiated={isCallInitiated}
@@ -974,5 +1062,5 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         />
       )}
     </div>
-  )
+  );
 }
