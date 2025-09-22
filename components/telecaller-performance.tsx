@@ -3,12 +3,27 @@
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
-import { TrendingUp, TrendingDown, Minus } from "lucide-react"
+import { TrendingUp, TrendingDown, Minus, Phone, Clock, CheckCircle } from "lucide-react"
 
-interface TelecallerPerformanceProps {
-  startDate: string
-  endDate: string
-  telecallerId?: string
+interface CallLog {
+  call_status: string
+  call_type: string
+  duration_seconds: number | null
+}
+
+interface Lead {
+  status: string
+  created_at: string
+}
+
+interface AttendanceRecord {
+  user_id: string
+  check_in: string | null
+}
+
+interface Telecaller {
+  id: string
+  full_name: string
 }
 
 interface PerformanceData {
@@ -22,6 +37,20 @@ interface PerformanceData {
   convertedLeads: number
   conversionRate: number
   isCheckedIn: boolean
+  totalCallDuration: number // New field for total call duration
+  avgCallDuration: number // New field for average call duration
+  callStatusBreakdown: { // New field for call status breakdown
+    connected: number
+    notConnected: number
+    noAnswer: number
+    busy: number
+  }
+}
+
+interface TelecallerPerformanceProps {
+  startDate: string
+  endDate: string
+  telecallerId?: string
 }
 
 export function TelecallerPerformance({ startDate, endDate, telecallerId }: TelecallerPerformanceProps) {
@@ -33,7 +62,7 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
     const fetchData = async () => {
       try {
         // Get telecallers to analyze
-        let telecallers
+        let telecallers: Telecaller[] = []
         if (telecallerId) {
           const { data } = await supabase.from("users").select("id, full_name").eq("id", telecallerId).single()
           telecallers = data ? [data] : []
@@ -57,7 +86,7 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
           
           if (attendanceRecords) {
             // Create a map of telecaller ID to checked-in status
-            telecallerStatus = attendanceRecords.reduce((acc, record) => {
+            telecallerStatus = attendanceRecords.reduce((acc: Record<string, boolean>, record: AttendanceRecord) => {
               acc[record.user_id] = !!record.check_in
               return acc
             }, {} as Record<string, boolean>)
@@ -80,7 +109,7 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
           // Get calls made by this telecaller
           const { data: calls } = await supabase
             .from("call_logs")
-            .select("call_status, call_type")
+            .select("call_status, call_type, duration_seconds")
             .eq("user_id", telecaller.id)
             .gte("created_at", startDate)
             .lte("created_at", `${endDate}T23:59:59`)
@@ -88,23 +117,35 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
           const totalLeads = leads?.length || 0
           const totalCalls = calls?.length || 0
           
+          // Calculate total and average call duration
+          const totalCallDuration = calls?.reduce((sum: number, call: CallLog) => sum + (call.duration_seconds || 0), 0) || 0
+          const avgCallDuration = totalCalls > 0 ? totalCallDuration / totalCalls : 0
+          
+          // Break down calls by status
+          const callStatusBreakdown = {
+            connected: calls?.filter((call: CallLog) => 
+              call.call_status === "connected" || 
+              call.call_status === "completed" ||
+              call.call_status === "successful" ||
+              call.call_type === "outbound"
+            ).length || 0,
+            notConnected: calls?.filter((call: CallLog) => call.call_status === "not_connected").length || 0,
+            noAnswer: calls?.filter((call: CallLog) => call.call_status === "no_answer").length || 0,
+            busy: calls?.filter((call: CallLog) => call.call_status === "busy").length || 0
+          }
+          
           // Update connected calls to include various successful call statuses
-          const connectedCalls = calls?.filter((call) => 
-            call.call_status === "connected" || 
-            call.call_status === "completed" ||
-            call.call_status === "successful" ||
-            call.call_type === "outbound"
-          ).length || 0
+          const connectedCalls = callStatusBreakdown.connected
           
           // Update new leads to include all initial statuses
-          const newLeads = leads?.filter((lead) => 
+          const newLeads = leads?.filter((lead: Lead) => 
             lead.status === "new" || 
             lead.status === "contacted" ||
             lead.status === "Interested"
           ).length || 0
           
           // Update converted leads to include all successful conversion statuses
-          const convertedLeads = leads?.filter((lead) => 
+          const convertedLeads = leads?.filter((lead: Lead) => 
             lead.status === "closed_won" ||
             lead.status === "Disbursed" ||
             lead.status === "Login" ||
@@ -122,7 +163,10 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
             newLeads,
             convertedLeads,
             conversionRate: totalLeads > 0 ? (convertedLeads / totalLeads) * 100 : 0,
-            isCheckedIn: telecallerStatus[telecaller.id] || false
+            isCheckedIn: telecallerStatus[telecaller.id] || false,
+            totalCallDuration,
+            avgCallDuration,
+            callStatusBreakdown
           })
         }
 
@@ -166,6 +210,15 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
     }
   }
 
+  // Format duration in seconds to HH:MM:SS format
+  const formatDuration = (seconds: number) => {
+    const hrs = Math.floor(seconds / 3600)
+    const mins = Math.floor((seconds % 3600) / 60)
+    const secs = Math.floor(seconds % 60)
+    
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  }
+
   if (isLoading) {
     return <div className="text-center py-4">Loading performance data...</div>
   }
@@ -179,11 +232,23 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
             <th className="text-left p-4 font-semibold">Status</th>
             <th className="text-left p-4 font-semibold">Total Leads</th>
             <th className="text-left p-4 font-semibold">New Leads</th>
-            <th className="text-left p-4 font-semibold">Total Calls</th>
+            <th className="text-left p-4 font-semibold">
+              <div className="flex items-center gap-1">
+                <Phone className="h-4 w-4" />
+                Total Calls
+              </div>
+            </th>
+            <th className="text-left p-4 font-semibold">
+              <div className="flex items-center gap-1">
+                <Clock className="h-4 w-4" />
+                Call Duration
+              </div>
+            </th>
             <th className="text-left p-4 font-semibold">Connected Calls</th>
             <th className="text-left p-4 font-semibold">Connect Rate</th>
             <th className="text-left p-4 font-semibold">Conversions</th>
             <th className="text-left p-4 font-semibold">Conversion Rate</th>
+            <th className="text-left p-4 font-semibold">Call Status Breakdown</th>
             <th className="text-left p-4 font-semibold">Performance</th>
           </tr>
         </thead>
@@ -218,6 +283,12 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
               <td className="p-4 text-center">
                 <div className="font-semibold text-lg">{telecaller.totalCalls}</div>
               </td>
+              <td className="p-4">
+                <div className="flex flex-col">
+                  <div className="font-semibold">{formatDuration(telecaller.totalCallDuration)}</div>
+                  <div className="text-xs text-gray-500">Avg: {formatDuration(telecaller.avgCallDuration)}</div>
+                </div>
+              </td>
               <td className="p-4 text-center">
                 <div className="font-semibold text-green-600">{telecaller.connectedCalls}</div>
               </td>
@@ -234,6 +305,23 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
                 <div className="text-center">
                   <div className="font-semibold">{telecaller.conversionRate.toFixed(1)}%</div>
                   {getPerformanceBadge(telecaller.conversionRate, "conversion")}
+                </div>
+              </td>
+              <td className="p-4">
+                <div className="flex flex-col gap-1 text-sm">
+                  <div className="flex items-center gap-1">
+                    <CheckCircle className="h-3 w-3 text-green-500" />
+                    <span>Connected: {telecaller.callStatusBreakdown.connected}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-red-500">Not Connected: {telecaller.callStatusBreakdown.notConnected}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-yellow-500">No Answer: {telecaller.callStatusBreakdown.noAnswer}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-orange-500">Busy: {telecaller.callStatusBreakdown.busy}</span>
+                  </div>
                 </div>
               </td>
               <td className="p-4">
