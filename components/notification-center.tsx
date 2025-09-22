@@ -11,14 +11,16 @@ import { formatDistanceToNow } from "date-fns"
 import { toast } from "sonner"
 
 interface Notification {
-  id: string
-  type: string
-  title: string
-  message: string
-  data: any
-  read: boolean
-  created_at: string
-  read_at?: string
+  id: string;
+  user_id: string;
+  type: string;
+  title: string;
+  message: string;
+  read: boolean;
+  follow_up_id?: string;
+  lead_id?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export function NotificationCenter() {
@@ -26,13 +28,27 @@ export function NotificationCenter() {
   const [unreadCount, setUnreadCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [isOpen, setIsOpen] = useState(false)
+  const [userId, setUserId] = useState<string | null>(null)
   const supabase = createClient()
 
   useEffect(() => {
-    fetchNotifications()
-    fetchUnreadCount()
+    const getUser = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        setUserId(user?.id || null);
+      } catch (error) {
+        console.error("Error getting user:", error);
+      }
+    };
+    getUser();
+  }, []);
 
-    // Setup real-time subscription for new notifications
+  useEffect(() => {
+    if (!userId) return;
+
+    fetchNotifications();
+    fetchUnreadCount();
+
     const channel = supabase
       .channel("notifications")
       .on(
@@ -40,34 +56,34 @@ export function NotificationCenter() {
         {
           event: "INSERT",
           schema: "public",
-          table: "notification_history",
+          table: "notifications",
+          filter: `user_id=eq.${userId}`,
         },
         (payload) => {
-          const newNotification = payload.new as Notification
+          const newNotification = payload.new as Notification;
           setNotifications((prev) => [newNotification, ...prev])
           setUnreadCount((prev) => prev + 1)
-
-          // Show toast for new notification
           toast.info(newNotification.title, {
             description: newNotification.message,
             duration: 5000,
           })
-        },
+        }
       )
       .subscribe()
 
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [])
+  }, [userId])
 
   const fetchNotifications = async () => {
     try {
       const { data, error } = await supabase
-        .from("notification_history")
+        .from("notifications")
         .select("*")
+        .eq("user_id", userId)
         .order("created_at", { ascending: false })
-        .limit(50)
+        .limit(50);
 
       if (error) throw error
       setNotifications(data || [])
@@ -80,9 +96,14 @@ export function NotificationCenter() {
 
   const fetchUnreadCount = async () => {
     try {
-      const { data, error } = await supabase.rpc("get_unread_notification_count")
+      const { count, error } = await supabase
+        .from("notifications")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("read", false);
+
       if (error) throw error
-      setUnreadCount(data || 0)
+      setUnreadCount(count || 0)
     } catch (error) {
       console.error("Error fetching unread count:", error)
     }
@@ -90,14 +111,15 @@ export function NotificationCenter() {
 
   const markAsRead = async (notificationId: string) => {
     try {
-      const { error } = await supabase.rpc("mark_notification_read", {
-        notification_id: notificationId,
-      })
+      const { error } = await supabase
+        .from("notifications")
+        .update({ read: true, updated_at: new Date().toISOString() })
+        .eq("id", notificationId)
 
       if (error) throw error
 
       setNotifications((prev) =>
-        prev.map((n) => (n.id === notificationId ? { ...n, read: true, read_at: new Date().toISOString() } : n)),
+        prev.map((n) => (n.id === notificationId ? { ...n, read: true, updated_at: new Date().toISOString() } : n))
       )
       setUnreadCount((prev) => Math.max(0, prev - 1))
     } catch (error) {
@@ -108,12 +130,16 @@ export function NotificationCenter() {
   const markAllAsRead = async () => {
     try {
       const unreadIds = notifications.filter((n) => !n.read).map((n) => n.id)
+      if (unreadIds.length === 0) return;
 
-      for (const id of unreadIds) {
-        await supabase.rpc("mark_notification_read", { notification_id: id })
-      }
+      const { error } = await supabase
+        .from("notifications")
+        .update({ read: true, updated_at: new Date().toISOString() })
+        .in("id", unreadIds);
 
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true, read_at: new Date().toISOString() })))
+      if (error) throw error
+
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true, updated_at: new Date().toISOString() })))
       setUnreadCount(0)
       toast.success("All notifications marked as read")
     } catch (error) {
@@ -141,9 +167,8 @@ export function NotificationCenter() {
       markAsRead(notification.id)
     }
 
-    // Handle notification-specific actions
-    if (notification.type === "lead_assignment" && notification.data?.leadId) {
-      window.open(`/telecaller/leads/${notification.data.leadId}`, "_blank")
+    if (notification.type === "lead_assignment" && notification.lead_id) {
+      window.open(`/telecaller/leads/${notification.lead_id}`, "_blank")
     } else if (notification.type === "bulk_lead_assignment") {
       window.open("/telecaller/leads", "_blank")
     }
@@ -162,7 +187,6 @@ export function NotificationCenter() {
           </Badge>
         )}
       </Button>
-
       {isOpen && (
         <Card className="absolute right-0 top-full mt-2 w-96 z-50 shadow-lg">
           <CardHeader className="pb-3">
