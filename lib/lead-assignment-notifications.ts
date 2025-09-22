@@ -41,27 +41,28 @@ export class LeadAssignmentNotificationManager {
       const preferences = assignedUser.notification_preferences || {}
       if (preferences.assignment_notifications === false) {
         console.log("User has disabled assignment notifications")
-        return // User has disabled assignment notifications
+        return
       }
 
       // Create notification content
       const title = "🎯 New Lead Assigned"
-      const body = `${notification.leadName} has been assigned to you`
+      const message = `${notification.leadName} has been assigned to you`
       const details = this.formatLeadDetails(notification)
 
-      console.log("Showing browser notification")
-      // Show browser notification
+      // 1. Insert notification into notifications table
+      await this.storeNotification(notification, title, message);
+
+      // 2. Show browser notification
       await notificationService.showBrowserNotification({
         title,
-        body: `${body}${details}`,
+        body: `${message}${details}`,
         tag: `lead-assignment-${notification.leadId}`,
         requireInteraction: true,
       })
 
-      console.log("Showing toast notification")
-      // Show toast notification
+      // 3. Show toast notification
       toast.success(title, {
-        description: `${body}${details}`,
+        description: `${message}${details}`,
         action: {
           label: "View Lead",
           onClick: () => {
@@ -71,18 +72,45 @@ export class LeadAssignmentNotificationManager {
         duration: 8000,
       })
 
-      // Send push notification if user has subscription
-      await this.sendPushNotification(notification, assignedUser)
-
-      // Store notification in database for history
-      await this.storeNotificationHistory(notification, assignedUser)
+      // 4. Send push notification if desired
+      await this.sendPushNotification(notification, title, message, details);
     } catch (error) {
       console.error("Error sending lead assignment notification:", error)
     }
   }
 
-  // Send push notification
-  private async sendPushNotification(notification: LeadAssignmentNotification, user: any): Promise<void> {
+  // Store notification in notifications table
+  private async storeNotification(
+    notification: LeadAssignmentNotification,
+    title: string,
+    message: string,
+  ): Promise<void> {
+    try {
+      const { error } = await this.supabase.from("notifications").insert({
+        user_id: notification.assignedTo,
+        type: "lead_assignment",
+        title,
+        message: `${message}.`,
+        follow_up_id: null,
+        lead_id: notification.leadId,
+        read: false,
+      });
+
+      if (error) {
+        console.error("Error storing notification:", error);
+      }
+    } catch (error) {
+      console.error("Error storing notification:", error);
+    }
+  }
+
+  // Send push notification via API
+  private async sendPushNotification(
+    notification: LeadAssignmentNotification,
+    title: string,
+    message: string,
+    details: string
+  ): Promise<void> {
     try {
       const response = await fetch("/api/notifications/send", {
         method: "POST",
@@ -90,54 +118,20 @@ export class LeadAssignmentNotificationManager {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          userId: notification.assignedTo,
-          title: "🎯 New Lead Assigned",
-          body: `${notification.leadName} has been assigned to you${this.formatLeadDetails(notification)}`,
-          url: `/telecaller/leads/${notification.leadId}`,
-          data: {
-            type: "lead_assignment",
-            leadId: notification.leadId,
-            leadName: notification.leadName,
-            leadPhone: notification.leadPhone,
-            priority: notification.priority,
-          },
+          userIds: [notification.assignedTo],
+          type: "lead_assignment",
+          title,
+          message: `${message}${details}`,
+          lead_id: notification.leadId,
+          follow_up_id: null
         }),
-      })
+      });
 
       if (!response.ok) {
-        console.error("Failed to send push notification:", await response.text())
+        console.error("Failed to send push notification:", await response.text());
       }
     } catch (error) {
-      console.error("Error sending push notification:", error)
-    }
-  }
-
-  // Store notification in database for history tracking
-  private async storeNotificationHistory(notification: LeadAssignmentNotification, user: any): Promise<void> {
-    try {
-      const { error } = await this.supabase.from("notification_history").insert({
-        user_id: notification.assignedTo,
-        type: "lead_assignment",
-        title: "New Lead Assigned",
-        message: `${notification.leadName} has been assigned to you`,
-        data: {
-          leadId: notification.leadId,
-          leadName: notification.leadName,
-          leadPhone: notification.leadPhone,
-          assignedBy: notification.assignedBy,
-          priority: notification.priority,
-          loanAmount: notification.loanAmount,
-          loanType: notification.loanType,
-        },
-        read: false,
-        created_at: new Date().toISOString(),
-      })
-
-      if (error) {
-        console.error("Error storing notification history:", error)
-      }
-    } catch (error) {
-      console.error("Error storing notification history:", error)
+      console.error("Error sending push notification:", error);
     }
   }
 
@@ -183,20 +177,31 @@ export class LeadAssignmentNotificationManager {
 
       const count = assignments.length
       const title = `🎯 ${count} New Leads Assigned`
-      const body = `${count} leads have been assigned to you`
+      const message = `${count} leads have been assigned to you`
 
-      // Show browser notification
+      // 1. Insert for all notifications
+      const notificationInserts = assignments.map(a => ({
+        user_id: assignedTo,
+        type: "lead_assignment",
+        title: "🎯 New Lead Assigned",
+        message: `${a.leadName} has been assigned to you.`,
+        follow_up_id: null,
+        lead_id: a.leadId,
+        read: false,
+      }));
+      await this.supabase.from("notifications").insert(notificationInserts);
+
+      // 2. Browser notification
       await notificationService.showBrowserNotification({
         title,
-        body,
+        body: message,
         tag: `bulk-assignment-${Date.now()}`,
         requireInteraction: true,
-        // REMOVED ACTIONS - they are not supported in regular notifications
       })
 
-      // Show toast notification
+      // 3. Toast notification
       toast.success(title, {
-        description: body,
+        description: message,
         action: {
           label: "View Leads",
           onClick: () => {
@@ -206,22 +211,18 @@ export class LeadAssignmentNotificationManager {
         duration: 8000,
       })
 
-      // Send push notification
+      // 4. Push notification
       await fetch("/api/notifications/send", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          userId: assignedTo,
+          userIds: [assignedTo],
+          type: "bulk_lead_assignment",
           title,
-          body,
-          url: "/telecaller/leads",
-          data: {
-            type: "bulk_lead_assignment",
-            count,
-            leadIds: assignments.map((a) => a.leadId),
-          },
+          message,
+          lead_ids: assignments.map((a) => a.leadId)
         }),
       })
     } catch (error) {
@@ -244,7 +245,6 @@ export class LeadAssignmentNotificationManager {
         },
         (payload: any) => {
           console.log("Received lead assignment UPDATE event:", payload)
-          // Check if this is a new assignment to this user
           if (payload.new.assigned_to === userId && 
               (payload.old.assigned_to === null || payload.old.assigned_to !== userId)) {
             console.log("New lead assignment detected for user:", userId)
@@ -261,7 +261,6 @@ export class LeadAssignmentNotificationManager {
         },
         (payload: any) => {
           console.log("Received new lead INSERT event:", payload)
-          // Check if the new lead is assigned to this user
           if (payload.new.assigned_to === userId) {
             console.log("New lead assigned to user on insert:", userId)
             this.handleRealtimeAssignment(payload.new)
@@ -281,7 +280,6 @@ export class LeadAssignmentNotificationManager {
     try {
       console.log("Handling real-time assignment for lead:", lead)
       
-      // Get additional lead details if needed
       let leadDetails = lead;
       if (!lead.name || !lead.phone) {
         const { data, error } = await this.supabase
