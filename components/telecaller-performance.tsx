@@ -40,10 +40,10 @@ interface PerformanceData {
   totalCallDuration: number // New field for total call duration
   avgCallDuration: number // New field for average call duration
   callStatusBreakdown: { // New field for call status breakdown
-    connected: number
-    notConnected: number
-    noAnswer: number
-    busy: number
+    connected: number     // Calls with duration > 0
+    notConnected: number  // Calls with duration = 0
+    noAnswer: number      // Calls with no_answer status
+    busy: number          // Calls with busy status
   }
 }
 
@@ -122,19 +122,15 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
           const avgCallDuration = totalCalls > 0 ? totalCallDuration / totalCalls : 0
           
           // Break down calls by status
+          // Connected calls are those with duration > 0
           const callStatusBreakdown = {
-            connected: calls?.filter((call: CallLog) => 
-              call.call_status === "connected" || 
-              call.call_status === "completed" ||
-              call.call_status === "successful" ||
-              call.call_type === "outbound"
-            ).length || 0,
-            notConnected: calls?.filter((call: CallLog) => call.call_status === "not_connected").length || 0,
-            noAnswer: calls?.filter((call: CallLog) => call.call_status === "no_answer").length || 0,
-            busy: calls?.filter((call: CallLog) => call.call_status === "busy").length || 0
+            connected: calls?.filter((call: CallLog) => (call.duration_seconds || 0) > 0).length || 0,
+            notConnected: calls?.filter((call: CallLog) => (call.duration_seconds || 0) === 0).length || 0,
+            noAnswer: calls?.filter((call: CallLog) => call.call_status === "nr").length || 0,
+            busy: calls?.filter((call: CallLog) => call.call_status === "nr").length || 0
           }
           
-          // Update connected calls to include various successful call statuses
+          // Connected calls are those with duration > 0
           const connectedCalls = callStatusBreakdown.connected
           
           // Update new leads to include all initial statuses
@@ -311,10 +307,10 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
                 <div className="flex flex-col gap-1 text-sm">
                   <div className="flex items-center gap-1">
                     <CheckCircle className="h-3 w-3 text-green-500" />
-                    <span>Connected: {telecaller.callStatusBreakdown.connected}</span>
+                    <span>Duration &gt; 0: {telecaller.callStatusBreakdown.connected}</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <span className="text-red-500">Not Connected: {telecaller.callStatusBreakdown.notConnected}</span>
+                    <span className="text-red-500">Duration = 0: {telecaller.callStatusBreakdown.notConnected}</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <span className="text-yellow-500">No Answer: {telecaller.callStatusBreakdown.noAnswer}</span>
@@ -360,4 +356,4 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
       )}
     </div>
   )
-}
+}}
