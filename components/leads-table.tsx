@@ -101,7 +101,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
-  // Refactored to use an array for cleaner state management
   const [bulkAssignTo, setBulkAssignTo] = useState<string[]>([]); 
   const [bulkStatus, setBulkStatus] = useState<string>("");
   const supabase = createClient();
@@ -225,14 +224,12 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       console.error("Error updating lead status:", error);
     }
   };
-
-  // Refactored to accept an array of IDs
+  
   const handleAssignLead = async (leadId: string, telecallerIds: string[]) => {
     try {
       const { data: { user } = { user: null } } = await supabase.auth.getUser();
       const assignedById = user?.id ?? null;
 
-      // Join array into a CSV string for database storage
       const assignedToValue = telecallerIds.length > 0 ? telecallerIds.join(",") : null;
 
       const { error } = await supabase
@@ -576,11 +573,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                 {telecallers.map((telecaller) => (
                   <DropdownMenuCheckboxItem
                     key={telecaller.id}
-                    // Check if the telecaller's ID is in the `bulkAssignTo` array
                     checked={bulkAssignTo.includes(telecaller.id)}
                     onCheckedChange={(checked) => {
                       setBulkAssignTo((prev) => {
-                        // Use a Set for easy addition/removal of unique IDs
                         const ids = new Set(prev);
                         if (checked) {
                           ids.add(telecaller.id);
@@ -795,53 +790,25 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                             </DropdownMenuItem>
                           </DropdownMenuTrigger>
                           <DropdownMenuSubContent className="w-56">
-                            {/* Unassign item is now a regular menu item */}
                             <DropdownMenuItem onClick={() => handleAssignLead(lead.id, [])}>
                               Unassign
                             </DropdownMenuItem>
-                            <DropdownMenuSub>
-                              <DropdownMenuTrigger asChild>
-                                <DropdownMenuItem>
-                                  Multi-Assign
-                                </DropdownMenuItem>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuSubContent className="w-56">
-                                {telecallers.map((telecaller) => (
-                                  <DropdownMenuCheckboxItem
-                                    key={telecaller.id}
-                                    checked={
-                                      Boolean(lead.assigned_to) &&
-                                      String(lead.assigned_to)
-                                        .split(",")
-                                        .map((s) => s.trim())
-                                        .includes(telecaller.id)
-                                    }
-                                    onCheckedChange={(checked) => {
-                                      const existing = lead.assigned_to
-                                        ? String(lead.assigned_to).split(",").map((s) => s.trim()).filter(Boolean)
-                                        : [];
-                                      const ids = new Set(existing);
-                                      if (checked) {
-                                        ids.add(telecaller.id);
-                                      } else {
-                                        ids.delete(telecaller.id);
-                                      }
-                                      handleAssignLead(lead.id, Array.from(ids));
-                                    }}
-                                  >
-                                    <div className="flex items-center gap-2">
-                                      {telecallerStatus[telecaller.id] !== undefined && (
-                                        <div
-                                          className={`w-2 h-2 rounded-full ${telecallerStatus[telecaller.id] ? "bg-green-500" : "bg-red-500"}`}
-                                          title={telecallerStatus[telecaller.id] ? "Checked in" : "Not checked in"}
-                                        />
-                                      )}
-                                      {telecaller.full_name}
-                                    </div>
-                                  </DropdownMenuCheckboxItem>
-                                ))}
-                              </DropdownMenuSubContent>
-                            </DropdownMenuSub>
+                            {telecallers.map((telecaller) => (
+                              <DropdownMenuItem 
+                                key={telecaller.id} 
+                                onClick={() => handleAssignLead(lead.id, [telecaller.id])}
+                              >
+                                <div className="flex items-center gap-2">
+                                  {telecallerStatus[telecaller.id] !== undefined && (
+                                    <div
+                                      className={`w-2 h-2 rounded-full ${telecallerStatus[telecaller.id] ? "bg-green-500" : "bg-red-500"}`}
+                                      title={telecallerStatus[telecaller.id] ? "Checked in" : "Not checked in"}
+                                    />
+                                  )}
+                                  {telecaller.full_name}
+                                </div>
+                              </DropdownMenuItem>
+                            ))}
                           </DropdownMenuSubContent>
                         </DropdownMenuSub>
                       </DropdownMenuContent>
