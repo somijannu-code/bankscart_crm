@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { useTelecallerStatus } from "@/hooks/use-telecaller-status"
 // IMPORTANT: You need to import a multi-select component here.
-// For example: import { MultiSelect } from "@/components/ui/multi-select"; 
+// Example: import { MultiSelect } from "@/components/ui/multi-select"; 
 
 interface Lead {
   id: string
@@ -550,57 +550,26 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               Update Status
             </Button>
             
-            {/* --- CHANGE 3: The Multi-Select Component --- */}
-            {/* You need to install or create a multi-select component.
-                This is a placeholder for that component. */}
+            {/* --- CHANGE 3: Replace the single-select Assign component with a multi-select component --- */}
             <div className="w-48">
-              {/* <MultiSelect
-                  options={telecallers.map(t => ({ label: t.full_name, value: t.id }))}
-                  onValueChange={(selectedValues) => setBulkAssignTo(selectedValues)}
-                  value={bulkAssignTo}
-                  placeholder="Assign to..."
-              /> */}
-              {/* As a temporary measure, a simple dropdown can be used, but it will not allow multi-select */}
-              <Select
-                onValueChange={(value) => {
-                  // This is a simple fallback and does not support multi-select.
-                  // Replace this with the MultiSelect component.
-                  setBulkAssignTo(value ? [value] : []);
-                }}
-                value={bulkAssignTo.length > 0 ? bulkAssignTo[0] : ""}
-              >
-                <SelectTrigger className="w-48">
-                  <SelectValue placeholder="Assign to..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="unassigned">Unassign</SelectItem>
-                  {telecallers.map((telecaller) => (
-                    <SelectItem key={telecaller.id} value={telecaller.id}>
-                      <div className="flex items-center gap-2">
-                        {telecallerStatus[telecaller.id] !== undefined && (
-                          <div
-                            className={`w-2 h-2 rounded-full ${
-                              telecallerStatus[telecaller.id] ? "bg-green-500" : "bg-red-500"
-                            }`}
-                            title={
-                              telecallerStatus[telecaller.id]
-                                ? "Checked in"
-                                : "Not checked in"
-                            }
-                          />
-                        )}
-                        {telecaller.full_name}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                {/* You will need to import or create a MultiSelect component.
+                For example, using a library like react-select or a custom component.
+                Make sure you also import it at the top of the file. 
+                
+                <MultiSelect
+                    options={telecallers.map(t => ({ label: t.full_name, value: t.id }))}
+                    onValueChange={(selectedValues) => setBulkAssignTo(selectedValues)}
+                    value={bulkAssignTo}
+                    placeholder="Assign to..."
+                /> 
+                */}
+                <span className="text-gray-500 italic">Multi-select component goes here</span>
             </div>
             {/* ----------------------------------------------------------------------------------------- */}
-            
+
             <Button 
               onClick={handleBulkAssign}
-              disabled={bulkAssignTo.length === 0}
+              disabled={bulkAssignTo.length === 0} // Disable if no assignees are selected
               size="sm"
             >
               Assign
