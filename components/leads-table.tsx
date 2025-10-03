@@ -66,7 +66,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [sortField, setSortField] = useState<string>("created_at")
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
   
-  // 🔑 THE FIX: columnVisibility state declaration is essential
+  // 🔑 State declaration (Correctly named visibleColumns)
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
     name: true,
     contact: true,
@@ -101,6 +101,8 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   }, [leads, telecallers]) 
 
   const { telecallerStatus, loading: statusLoading } = useTelecallerStatus(allTelecallerIds)
+
+  const maxPagesToShow = 5 // Defined for pagination helper below
 
   // Add safe value getters
   const getSafeValue = (value: any, defaultValue: string = 'N/A') => {
@@ -145,8 +147,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     (currentPage - 1) * pageSize,
     currentPage * pageSize
   )
-  
-  const maxPagesToShow = 5 // Defined for pagination helper below
 
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -167,7 +167,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
   const handleCallLogged = (callLogId: string) => {
     setIsCallInitiated(false) 
-    // You might want to refresh the lead status here
   }
 
   const handleStatusUpdate = async (newStatus: string, note?: string, callbackDate?: string) => {
@@ -179,12 +178,8 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         last_contacted: new Date().toISOString()
       }
 
-      // Logic for note/follow-up based on status
-      if (newStatus === "not_eligible" && note) {
-        // ... (Supabase note insertion logic) ...
-      }
+      // Logic for note/follow-up based on status (Supabase interactions removed for brevity)
       if (newStatus === "follow_up" && callbackDate) {
-        // ... (Supabase follow-up insertion logic) ...
         updateData.follow_up_date = callbackDate
       }
 
@@ -674,7 +669,8 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                 />
               </TableHead>
               
-              {columns.filter(col => col.key !== 'select' && columnVisibility[col.key]).map((column) => (
+              {/* 🔑 FIX: Changed columnVisibility[col.key] to visibleColumns[col.key] */}
+              {columns.filter(col => col.key !== 'select' && visibleColumns[col.key]).map((column) => (
                 <TableHead 
                   key={column.key} 
                   className="cursor-pointer hover:bg-gray-100"
@@ -709,7 +705,8 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     />
                   </TableCell>
 
-                  {columnVisibility.name && (
+                  {/* 🔑 FIX: Changed columnVisibility.name to visibleColumns.name and similarly for all checks */}
+                  {visibleColumns.name && (
                     <TableCell className="font-medium text-blue-600 hover:underline">
                       <Link href={`/leads/${lead.id}`}>
                         {getSafeValue(lead.name)}
@@ -717,7 +714,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     </TableCell>
                   )}
                   
-                  {columnVisibility.contact && (
+                  {visibleColumns.contact && (
                     <TableCell>
                       <div className="text-sm">
                         <Phone className="h-3 w-3 inline mr-1 text-gray-500" /> {getSafeValue(lead.phone)}
@@ -728,42 +725,42 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     </TableCell>
                   )}
                   
-                  {columnVisibility.company && <TableCell>{getSafeValue(lead.company)}</TableCell>}
+                  {visibleColumns.company && <TableCell>{getSafeValue(lead.company)}</TableCell>}
                   
-                  {columnVisibility.status && (
+                  {visibleColumns.status && (
                     <TableCell>
                       <Badge className={getStatusColor(lead.status)}>{getSafeValue(lead.status)}</Badge>
                     </TableCell>
                   )}
                   
-                  {columnVisibility.priority && (
+                  {visibleColumns.priority && (
                     <TableCell>
                       <Badge variant={getPriorityVariant(lead.priority)}>{getSafeValue(lead.priority)}</Badge>
                     </TableCell>
                   )}
 
-                  {columnVisibility.created && (
+                  {visibleColumns.created && (
                     <TableCell className="text-sm text-gray-500">
                       {format(new Date(lead.created_at), 'MMM dd, yyyy')}
                     </TableCell>
                   )}
 
-                  {columnVisibility.lastContacted && (
+                  {visibleColumns.lastContacted && (
                     <TableCell className="text-sm text-gray-500">
                       {lead.last_contacted ? format(new Date(lead.last_contacted), 'MMM dd, yyyy') : 'Never'}
                     </TableCell>
                   )}
 
-                  {columnVisibility.loanAmount && (
+                  {visibleColumns.loanAmount && (
                     <TableCell className="font-medium">
                       {lead.loan_amount ? `₹${lead.loan_amount.toLocaleString()}` : 'N/A'}
                     </TableCell>
                   )}
 
-                  {columnVisibility.loanType && <TableCell>{getSafeValue(lead.loan_type)}</TableCell>}
-                  {columnVisibility.source && <TableCell>{getSafeValue(lead.source)}</TableCell>}
+                  {visibleColumns.loanType && <TableCell>{getSafeValue(lead.loan_type)}</TableCell>}
+                  {visibleColumns.source && <TableCell>{getSafeValue(lead.source)}</TableCell>}
                   
-                  {columnVisibility.assignedTo && (
+                  {visibleColumns.assignedTo && (
                     <TableCell>
                       {lead.assigned_user ? (
                         <div className="flex items-center gap-2">
@@ -776,7 +773,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     </TableCell>
                   )}
                   
-                  {columnVisibility.actions && (
+                  {visibleColumns.actions && (
                     <TableCell className="w-20">
                       <QuickActions 
                         lead={lead}
