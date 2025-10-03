@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 
 export class AttendanceServiceServer {
+  
   static async getTodayAttendance(userId: string) {
     const supabase = await createServerActionClient();
     
