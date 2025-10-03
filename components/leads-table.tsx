@@ -1,20 +1,20 @@
 "use client";
 
 import { useState, useEffect } from "react"
-// Removed: import Link from "next/link" - Using simple <a> tag instead
-// Removed: import { createClient } from "@/lib/supabase/client" - Using mock client/database constants
+import Link from "next/link"
+import { createClient } from "@/lib/supabase/client"
 import { 
   User, Building, Calendar, Clock, Eye, Phone, Mail, 
-  Search, Filter, ChevronDown, ChevronUp, Download, Trash2, // Added Trash2 icon for delete
-  MoreHorizontal, Check, X, AlertCircle
+  Search, Filter, ChevronDown, ChevronUp, Download, // Download icon imported for export
+  MoreHorizontal, Check, X, AlertCircle, Trash2 // Trash2 icon imported for delete
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-// Removed: import { LeadStatusDialog } from "@/components/lead-status-dialog" - Using basic placeholder function
-// Removed: import { QuickActions } from "@/components/quick-actions" - Using basic placeholder function
+import { LeadStatusDialog } from "@/components/lead-status-dialog"
+import { QuickActions } from "@/components/quick-actions"
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination"
 import {
   DropdownMenu,
@@ -23,75 +23,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-// Removed: import { useTelecallerStatus } from "@/hooks/use-telecaller-status" - Using placeholder status
+import { useTelecallerStatus } from "@/hooks/use-telecaller-status"
 // IMPORTANT: You need to import a multi-select component here.
 // For example: import { MultiSelect } from "@/components/ui/multi-select"; 
-
-// --- MOCK/PLACEHOLDER IMPORTS FOR COMPILATION ---
-// Using Firebase imports for persistent storage as per guidelines
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
-import { 
-  getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, 
-  collection, query, where, addDoc, getDocs 
-} from 'firebase/firestore';
-
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : '';
-
-// Placeholder components/hooks to prevent errors
-const LeadStatusDialog = ({ open, onOpenChange, onStatusUpdate, leadId, currentStatus, isCallInitiated, onCallLogged }: any) => {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
-      <div className="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full">
-        <h3 className="font-bold text-lg">Update Status for Lead {leadId}</h3>
-        <p className="text-sm text-gray-500 my-2">Current Status: <span className="font-semibold">{currentStatus}</span></p>
-        {isCallInitiated && <p className="text-red-500 mb-4">Call initiated! Log the outcome.</p>}
-        <Button onClick={() => onStatusUpdate('contacted')} className="w-full mt-2">Set to Contacted</Button>
-        <Button variant="outline" onClick={() => onOpenChange(false)} className="w-full mt-2">Close</Button>
-      </div>
-    </div>
-  );
-};
-const QuickActions = ({ phone, email, leadId, onCallInitiated }: any) => (
-  <div className="flex gap-1 items-center">
-    <a href={`tel:${phone}`} onClick={onCallInitiated} className="p-1 rounded hover:bg-gray-100" title="Call">
-      <Phone className="h-4 w-4 text-blue-600" />
-    </a>
-    <a href={`mailto:${email}`} className="p-1 rounded hover:bg-gray-100" title="Email">
-      <Mail className="h-4 w-4 text-green-600" />
-    </a>
-  </div>
-);
-const useTelecallerStatus = (telecallerIds: string[]) => ({
-  telecallerStatus: telecallerIds.reduce((acc, id) => ({ ...acc, [id]: true }), {}),
-  loading: false
-});
-
-// --- FIREBASE INITIALIZATION ---
-let app: any;
-let db: any;
-let auth: any;
-
-try {
-  if (Object.keys(firebaseConfig).length > 0) {
-    app = initializeApp(firebaseConfig);
-    db = getFirestore(app);
-    auth = getAuth(app);
-  }
-} catch (error) {
-  console.error("Firebase initialization failed:", error);
-}
-
-// Security Rule helper
-const getPrivateCollectionRef = (collectionName: string, userId: string) => {
-  if (!db) return null;
-  return collection(db, 'artifacts', appId, 'users', userId, collectionName);
-};
-
-// --- END MOCK/PLACEHOLDER IMPORTS ---
 
 interface Lead {
   id: string
@@ -147,44 +81,16 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [pageSize, setPageSize] = useState(20)
   const [selectedLeads, setSelectedLeads] = useState<string[]>([])
   
-  // State for Firebase auth readiness and user ID
-  const [userId, setUserId] = useState<string | null>(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-
-  // Update state to hold an array of strings
+  // --- CHANGE 1: Update state to hold an array of strings ---
   const [bulkAssignTo, setBulkAssignTo] = useState<string[]>([])
-  const [bulkStatus, setBulkStatus] = useState<string>("")
+  // ---------------------------------------------------------
   
-  // 1. Firebase Auth/Init Effect
-  useEffect(() => {
-    const authenticate = async () => {
-      if (!auth) {
-        setUserId(crypto.randomUUID());
-        setIsAuthReady(true);
-        return;
-      }
-      try {
-        if (initialAuthToken) {
-          await signInWithCustomToken(auth, initialAuthToken);
-        } else {
-          await signInAnonymously(auth);
-        }
-        const currentUser = auth.currentUser;
-        if (currentUser) {
-          setUserId(currentUser.uid);
-        } else {
-          setUserId(crypto.randomUUID());
-        }
-      } catch (error) {
-        console.error("Firebase Auth error:", error);
-        setUserId(crypto.randomUUID());
-      } finally {
-        setIsAuthReady(true);
-      }
-    };
-
-    authenticate();
-  }, []); // Run only once on mount
+  const [bulkStatus, setBulkStatus] = useState<string>("")
+  // --- NEW STATE: For Delete Confirmation ---
+  const [isBulkDeleteConfirmOpen, setIsBulkDeleteConfirmOpen] = useState(false)
+  // ---------------------------------------------------
+  
+  const supabase = createClient()
 
   // Get telecaller status for all telecallers in the leads and telecallers list
   const allTelecallerIds = [
@@ -199,7 +105,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     return value ?? defaultValue
   }
 
-  // Filter and sort leads (Client-side sorting remains the same)
+  // Filter and sort leads
   const filteredLeads = leads.filter(lead => {
     const matchesSearch = searchTerm === "" || 
       lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -260,85 +166,97 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     setIsCallInitiated(false) // Reset the call initiated state
   }
 
-  // NOTE: Switched to Firestore logic
-  const updateLeadInFirestore = async (leadId: string, updateData: any) => {
-    if (!db || !userId) {
-      console.error("Database or User not ready.");
-      return;
-    }
-    const leadRef = doc(getPrivateCollectionRef('leads', userId) as any, leadId);
-    await updateDoc(leadRef, updateData);
-  }
-
-  // NOTE: Switched to Firestore logic
   const handleStatusUpdate = async (newStatus: string, note?: string, callbackDate?: string) => {
-    if (!selectedLead?.id) return
-    
     try {
+      if (!selectedLead?.id) return
+      
       const updateData: any = { 
         status: newStatus,
         last_contacted: new Date().toISOString()
       }
 
-      // Add note if provided
-      if (note && userId) {
-        const notesRef = getPrivateCollectionRef('notes', userId);
-        if (notesRef) {
-          await addDoc(notesRef, {
+      // Add note if provided for Not Eligible status
+      if (newStatus === "not_eligible" && note) {
+        const { error: noteError } = await supabase
+          .from("notes")
+          .insert({
             lead_id: selectedLead.id,
             note: note,
-            note_type: newStatus === "not_eligible" ? "status_change_note" : "follow_up_note",
-            created_at: new Date().toISOString()
-          });
-        }
+            note_type: "status_change"
+          })
+
+        if (noteError) throw noteError
       }
 
       // Add callback date if provided for Call Back status
-      if (newStatus === "Call_Back" && callbackDate && userId) {
-        const followUpsRef = getPrivateCollectionRef('follow_ups', userId);
-        if (followUpsRef) {
-          await addDoc(followUpsRef, {
+      if (newStatus === "follow_up" && callbackDate) {
+        const { error: followUpError } = await supabase
+          .from("follow_ups")
+          .insert({
             lead_id: selectedLead.id,
             scheduled_date: callbackDate,
-            status: "scheduled",
-            created_at: new Date().toISOString()
-          });
-        }
+            status: "scheduled"
+          })
+
+        if (followUpError) throw followUpError
+        
+        // Also update the lead's follow_up_date
         updateData.follow_up_date = callbackDate
       }
-      
-      await updateLeadInFirestore(selectedLead.id, updateData);
+
+      const { error } = await supabase
+        .from("leads")
+        .update(updateData)
+        .eq("id", selectedLead.id)
+
+      if (error) throw error
 
       console.log(`Status updated for lead ${selectedLead.id} to ${newStatus}`)
-      // In a real app with onSnapshot, this reload is not necessary
-      // window.location.reload() 
+      window.location.reload()
       
     } catch (error) {
       console.error("Error updating lead status:", error)
     }
   }
 
-  // NOTE: Switched to Firestore logic
-  const handleAssignLead = async (leadId: string, telecallerId: string) => {
-    if (!auth || !userId) {
-      console.error("Authentication or User ID not ready.");
-      return;
-    }
-    
+  const handleStatusChange = async (leadId: string, newStatus: string) => {
     try {
-      const assignedById = auth.currentUser?.uid || userId
+      const { error } = await supabase
+        .from("leads")
+        .update({ 
+          status: newStatus,
+          last_contacted: new Date().toISOString()
+        })
+        .eq("id", leadId)
 
-      const updateData = { 
-        assigned_to: telecallerId === "unassigned" ? null : telecallerId,
-        assigned_by: assignedById,
-        assigned_at: new Date().toISOString()
-      }
+      if (error) throw error
 
-      await updateLeadInFirestore(leadId, updateData);
+      console.log(`Status changed for lead ${leadId} to ${newStatus}`)
+      window.location.reload()
+      
+    } catch (error) {
+      console.error("Error changing lead status:", error)
+    }
+  }
+
+  const handleAssignLead = async (leadId: string, telecallerId: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      const assignedById = user?.id
+
+      const { error } = await supabase
+        .from("leads")
+        .update({ 
+          assigned_to: telecallerId === "unassigned" ? null : telecallerId,
+          assigned_by: assignedById,
+          assigned_at: new Date().toISOString()
+        })
+        .eq("id", leadId)
+
+      if (error) throw error
 
       console.log(`Lead ${leadId} assigned to ${telecallerId}`)
-      // In a real app with onSnapshot, this reload is not necessary
-      // window.location.reload()
+      window.location.reload()
       
     } catch (error) {
       console.error("Error assigning lead:", error)
@@ -357,161 +275,174 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     if (selectedLeads.length === paginatedLeads.length) {
       setSelectedLeads([])
     } else {
-      // Only select leads on the current page for simplicity
       setSelectedLeads(paginatedLeads.map(lead => lead.id))
     }
   }
 
-  // Function to handle bulk assign (Firestore Logic)
+  // --- CHANGE 2: Update handleBulkAssign to work with an array of IDs ---
   const handleBulkAssign = async () => {
     // Check if any telecallers or leads are selected
-    if (bulkAssignTo.length === 0 || selectedLeads.length === 0 || !auth || !userId) return
+    if (bulkAssignTo.length === 0 || selectedLeads.length === 0) return
 
     try {
-      const assignedById = auth.currentUser?.uid || userId
-      const telecallerIds = bulkAssignTo; 
-      const updates: Promise<void>[] = [];
+      // Get the current user ID once
+      const { data: { user } } = await supabase.auth.getUser()
+      const assignedById = user?.id
+
+      const updates: any[] = []
+      const telecallerIds = bulkAssignTo; // bulkAssignTo is already an array
 
       // Distribute leads equally among telecallers using round-robin
       selectedLeads.forEach((leadId, index) => {
           const telecallerId = telecallerIds[index % telecallerIds.length];
-          
-          const updateData = {
+          updates.push({
+              id: leadId,
               assigned_to: telecallerId,
               assigned_by: assignedById,
               assigned_at: new Date().toISOString()
-          };
-          
-          updates.push(updateLeadInFirestore(leadId, updateData));
+          });
       });
 
       // Execute all updates concurrently
-      await Promise.all(updates);
+      const results = await Promise.all(
+          updates.map(update => 
+              supabase
+                  .from("leads")
+                  .update({
+                      assigned_to: update.assigned_to,
+                      assigned_by: update.assigned_by,
+                      assigned_at: update.assigned_at
+                  })
+                  .eq("id", update.id)
+          )
+      );
+      
+      const errors = results.filter(result => result.error)
+      if (errors.length > 0) {
+          throw new Error(`Failed to assign ${errors.length} leads`)
+      }
 
       console.log(`Bulk assigned ${selectedLeads.length} leads`)
       setSelectedLeads([])
-      setBulkAssignTo([])
+      setBulkAssignTo([]) // Reset state to an empty array
+      window.location.reload()
       
     } catch (error) {
       console.error("Error bulk assigning leads:", error)
     }
   }
+  // ----------------------------------------------------------------------
 
-  // Function to handle bulk status update (Firestore Logic)
   const handleBulkStatusUpdate = async () => {
-    if (!bulkStatus || selectedLeads.length === 0 || !userId) return
+    if (!bulkStatus || selectedLeads.length === 0) return
 
     try {
-      const updates: Promise<void>[] = [];
-      const updateData = { 
-        status: bulkStatus,
-        last_contacted: new Date().toISOString()
-      };
-
-      // Create update promises for all selected leads
-      selectedLeads.forEach(leadId => {
-        updates.push(updateLeadInFirestore(leadId, updateData));
-      });
+      // Update status for all selected leads
+      const updates = selectedLeads.map(leadId => 
+        supabase
+          .from("leads")
+          .update({ 
+            status: bulkStatus,
+            last_contacted: new Date().toISOString()
+          })
+          .eq("id", leadId)
+      )
 
       // Execute all updates concurrently
-      await Promise.all(updates);
+      const results = await Promise.all(updates)
       
+      const errors = results.filter(result => result.error)
+      if (errors.length > 0) {
+        throw new Error(`Failed to update status for ${errors.length} leads`)
+      }
+
       console.log(`Bulk updated status for ${selectedLeads.length} leads to ${bulkStatus}`)
       setSelectedLeads([])
       setBulkStatus("")
+      window.location.reload()
       
     } catch (error) {
       console.error("Error bulk updating lead status:", error)
     }
   }
 
-  // --- NEW FUNCTION: Bulk Delete (Firestore Logic) ---
+  // --- NEW FUNCTION: handleBulkDelete ---
   const handleBulkDelete = async () => {
-    if (selectedLeads.length === 0 || !db || !userId) return
-    
-    // WARNING: Using custom modal UI instead of window.confirm
-    const confirmed = await new Promise(resolve => {
-        // Simple mock for a confirmation modal. Replace with a proper UI modal.
-        const confirmation = window.prompt(`Type 'DELETE' to confirm permanent deletion of ${selectedLeads.length} leads:`)
-        resolve(confirmation === 'DELETE')
-    })
+    if (selectedLeads.length === 0) return
 
-    if (!confirmed) return
+    // You would typically have a proper confirmation dialog component here.
+    // This state toggle handles that logic.
+    if (!isBulkDeleteConfirmOpen) {
+      setIsBulkDeleteConfirmOpen(true)
+      return
+    }
 
     try {
-      const leadsRef = getPrivateCollectionRef('leads', userId);
-      if (!leadsRef) throw new Error("Leads collection reference is missing.");
+      // Use the delete RPC or a direct delete query with .in()
+      // Note: Supabase's standard client delete doesn't directly support delete.in() for all versions, 
+      // but an RPC or a series of deletes is a common pattern. Here we'll use a direct `delete().in()`
+      const { error } = await supabase
+        .from("leads")
+        .delete()
+        .in("id", selectedLeads)
 
-      // In Firestore, bulk delete needs to iterate and delete or use batch writes for up to 500 documents.
-      // For simplicity here, we assume the user is only deleting the visible page leads (max 500).
-      
-      const deletePromises: Promise<void>[] = [];
-      
-      selectedLeads.forEach(leadId => {
-        const leadDocRef = doc(leadsRef as any, leadId);
-        deletePromises.push(deleteDoc(leadDocRef));
-      });
-      
-      await Promise.all(deletePromises);
+      if (error) throw error
 
       console.log(`Bulk deleted ${selectedLeads.length} leads`)
       setSelectedLeads([])
+      setIsBulkDeleteConfirmOpen(false)
+      window.location.reload()
       
     } catch (error) {
       console.error("Error bulk deleting leads:", error)
-      // Provide user feedback about the failure
+      setIsBulkDeleteConfirmOpen(false)
     }
   }
-  
-  // --- NEW FUNCTION: Bulk Export (No change needed, client-side) ---
+  // --------------------------------------
+
+  // --- NEW FUNCTION: handleBulkExport ---
   const handleBulkExport = () => {
     if (selectedLeads.length === 0) {
-        // IMPORTANT: Using console log instead of alert()
-        console.log("Please select leads to export.")
-        return
+      alert("Please select leads to export.")
+      return
     }
 
-    // 1. Get the data for the selected leads
-    const leadsToExport = leads.filter(lead => selectedLeads.includes(lead.id))
+    // Filter leads to only include selected ones and map to a flat object for CSV
+    const leadsToExport = leads
+      .filter(lead => selectedLeads.includes(lead.id))
+      .map(lead => ({
+        id: lead.id,
+        name: lead.name,
+        email: lead.email,
+        phone: lead.phone,
+        company: lead.company,
+        status: lead.status,
+        priority: lead.priority,
+        loan_amount: lead.loan_amount,
+        loan_type: lead.loan_type,
+        source: lead.source,
+        assigned_to: lead.assigned_user?.full_name || 'Unassigned',
+        created_at: lead.created_at,
+        last_contacted: lead.last_contacted,
+        city: lead.city,
+        follow_up_date: lead.follow_up_date,
+      }))
 
-    if (leadsToExport.length === 0) {
-        console.warn("No data found for selected leads.")
-        return
-    }
-
-    // 2. Prepare CSV content
-    const headers = [
-        "ID", "Name", "Email", "Phone", "Company", "Status", "Priority", 
-        "Loan Amount", "Loan Type", "Source", "Assigned To", "Created At", 
-        "Last Contacted", "Follow Up Date", "City"
-    ]
+    // Basic CSV conversion logic
+    const headers = Object.keys(leadsToExport[0]).join(',')
+    const rows = leadsToExport.map(lead => 
+      Object.values(lead)
+        .map(value => {
+          // Wrap string values in quotes if they contain commas
+          const stringValue = value !== null && value !== undefined ? String(value) : ""
+          return stringValue.includes(',') || stringValue.includes('\n') ? `"${stringValue.replace(/"/g, '""')}"` : stringValue
+        })
+        .join(',')
+    )
     
-    // Map leads data to CSV rows
-    const csvRows = leadsToExport.map(lead => [
-        lead.id,
-        `"${(lead.name || '').replace(/"/g, '""')}"`, // Handle quotes in text fields
-        lead.email || '',
-        lead.phone || '',
-        `"${(lead.company || '').replace(/"/g, '""')}"`,
-        lead.status || '',
-        lead.priority || '',
-        lead.loan_amount || '',
-        lead.loan_type || '',
-        lead.source || '',
-        lead.assigned_user?.full_name || 'Unassigned',
-        lead.created_at ? new Date(lead.created_at).toLocaleDateString() : '',
-        lead.last_contacted ? new Date(lead.last_contacted).toLocaleDateString() : 'Never',
-        lead.follow_up_date || '',
-        lead.city || ''
-    ])
-
-    // Combine headers and rows
-    const csvContent = [
-        headers.join(','),
-        ...csvRows.map(row => row.join(','))
-    ].join('\n')
-
-    // 3. Create Blob and download
+    const csvContent = [headers, ...rows].join('\n')
+    
+    // Create a Blob and download link
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -521,10 +452,12 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
-    
-    console.log(`Exported ${leadsToExport.length} leads to CSV.`)
+
+    console.log(`Exported ${selectedLeads.length} leads.`)
+    setSelectedLeads([])
   }
-  // ------------------------------------
+  // --------------------------------------
+
 
   const getPriorityVariant = (priority: string) => {
     switch (priority) {
@@ -587,8 +520,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-3xl font-bold text-gray-800">Leads Dashboard</h1>
-      <p className="text-sm text-gray-500">User ID: {userId ? userId : 'Authenticating...'}</p>
       {/* Filters and Search */}
       <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
         <div className="relative w-full sm:w-64">
@@ -601,9 +532,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
           />
         </div>
         
-        <div className="flex gap-2 w-full sm:w-auto overflow-x-auto pb-1">
+        <div className="flex gap-2 w-full sm:w-auto">
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="min-w-[120px] sm:w-40">
+            <SelectTrigger className="w-full sm:w-40">
               <SelectValue placeholder="Filter by status" />
             </SelectTrigger>
             <SelectContent>
@@ -623,7 +554,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
           </Select>
           
           <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-            <SelectTrigger className="min-w-[120px] sm:w-40">
+            <SelectTrigger className="w-full sm:w-40">
               <SelectValue placeholder="Filter by priority" />
             </SelectTrigger>
             <SelectContent>
@@ -635,7 +566,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
           </Select>
           
           <Select value={assignedToFilter} onValueChange={setAssignedToFilter}>
-            <SelectTrigger className="min-w-[120px] sm:w-40">
+            <SelectTrigger className="w-full sm:w-40">
               <SelectValue placeholder="Filter by assignee" />
             </SelectTrigger>
             <SelectContent>
@@ -680,17 +611,17 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         </div>
       </div>
 
-      {/* Bulk Actions */}
+      {/* Bulk Actions (Updated) */}
       {selectedLeads.length > 0 && (
-        <div className="flex flex-col sm:flex-row items-center gap-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <span className="text-sm text-blue-800 font-semibold min-w-max">
+        <div className="flex flex-col sm:flex-row items-center gap-4 p-4 bg-gray-50 rounded-lg">
+          <span className="text-sm text-gray-600">
             {selectedLeads.length} lead{selectedLeads.length !== 1 ? 's' : ''} selected
           </span>
           
           <div className="flex flex-wrap items-center gap-2">
             {/* Bulk Status Update */}
             <Select value={bulkStatus} onValueChange={setBulkStatus}>
-              <SelectTrigger className="w-40">
+              <SelectTrigger className="w-40 sm:w-48">
                 <SelectValue placeholder="Update status..." />
               </SelectTrigger>
               <SelectContent>
@@ -713,14 +644,23 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               disabled={!bulkStatus}
               size="sm"
             >
+              <Check className="mr-2 h-4 w-4" />
               Update Status
             </Button>
             
-            {/* Bulk Assign (Placeholder for MultiSelect) */}
-            <div className="w-40">
-              {/* NOTE: This is a simple fallback and does not support multi-select. */}
+            {/* --- CHANGE 3: The Multi-Select Component Placeholder --- */}
+            <div className="w-40 sm:w-48">
+              {/* <MultiSelect
+                  options={telecallers.map(t => ({ label: t.full_name, value: t.id }))}
+                  onValueChange={(selectedValues) => setBulkAssignTo(selectedValues)}
+                  value={bulkAssignTo}
+                  placeholder="Assign to..."
+              /> */}
+              {/* As a temporary measure, a simple dropdown can be used, but it will not allow multi-select */}
               <Select
                 onValueChange={(value) => {
+                  // This is a simple fallback and does not support multi-select.
+                  // Replace this with the MultiSelect component.
                   setBulkAssignTo(value ? [value] : []);
                 }}
                 value={bulkAssignTo.length > 0 ? bulkAssignTo[0] : ""}
@@ -752,55 +692,59 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                 </SelectContent>
               </Select>
             </div>
+            {/* ----------------------------------------------------------------------------------------- */}
             
             <Button 
               onClick={handleBulkAssign}
               disabled={bulkAssignTo.length === 0}
               size="sm"
             >
+              <User className="mr-2 h-4 w-4" />
               Assign
             </Button>
 
-            {/* Bulk Export Button */}
+            {/* --- NEW ELEMENT: Bulk Export Button --- */}
             <Button 
-              variant="outline"
               onClick={handleBulkExport}
-              disabled={selectedLeads.length === 0}
+              variant="outline"
               size="sm"
-              className="bg-green-50 hover:bg-green-100 text-green-700 border-green-300"
             >
               <Download className="mr-2 h-4 w-4" />
               Export
             </Button>
+            {/* ---------------------------------------- */}
             
-            {/* Bulk Delete Button */}
+            {/* --- NEW ELEMENT: Bulk Delete Button --- */}
             <Button 
-              variant="destructive"
               onClick={handleBulkDelete}
-              disabled={selectedLeads.length === 0}
+              variant={isBulkDeleteConfirmOpen ? "destructive" : "outline"}
               size="sm"
             >
-              <Trash2 className="mr-2 h-4 w-4" />
-              Delete
+              {isBulkDeleteConfirmOpen ? <AlertCircle className="mr-2 h-4 w-4" /> : <Trash2 className="mr-2 h-4 w-4" />}
+              {isBulkDeleteConfirmOpen ? "Confirm Delete" : "Delete"}
             </Button>
+            {/* ---------------------------------------- */}
             
             <Button 
               variant="outline" 
-              onClick={() => setSelectedLeads([])}
+              onClick={() => {
+                setSelectedLeads([])
+                setIsBulkDeleteConfirmOpen(false) // Reset delete confirmation
+              }}
               size="sm"
             >
-              Clear Selection
+              Clear
             </Button>
           </div>
         </div>
       )}
 
       {/* Table */}
-      <div className="rounded-md border overflow-x-auto">
-        <Table className="min-w-full">
+      <div className="rounded-md border">
+        <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-12 sticky left-0 bg-white z-10">
+              <TableHead className="w-12">
                 <input
                   type="checkbox"
                   checked={selectedLeads.length === paginatedLeads.length && paginatedLeads.length > 0}
@@ -854,13 +798,13 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                   Last Contacted {sortField === 'last_contacted' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
                 </TableHead>
               )}
-              {visibleColumns.actions && <TableHead className="sticky right-0 bg-white z-10">Actions</TableHead>}
+              {visibleColumns.actions && <TableHead>Actions</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {paginatedLeads.map((lead) => (
               <TableRow key={lead.id} className="cursor-pointer hover:bg-gray-50">
-                <TableCell className="sticky left-0 bg-white z-10">
+                <TableCell>
                   <input
                     type="checkbox"
                     checked={selectedLeads.includes(lead.id)}
@@ -873,15 +817,15 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-2">
                       <User className="h-4 w-4" />
-                      <a 
-                        href={`#lead-${lead.id}`} // Using an internal hash link placeholder
+                      <Link 
+                        href={`/admin/leads/${lead.id}`}
                         onClick={(e: React.MouseEvent) => {
                           e.stopPropagation();
                         }}
                         className="text-blue-600 hover:text-blue-800 hover:underline cursor-pointer text-left"
                       >
                         {getSafeValue(lead.name, 'Unknown')}
-                      </a>
+                      </Link>
                     </div>
                   </TableCell>
                 )}
@@ -969,7 +913,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                   </TableCell>
                 )}
                 {visibleColumns.actions && (
-                  <TableCell className="sticky right-0 bg-white z-10">
+                  <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" className="h-8 w-8 p-0">
@@ -979,7 +923,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem asChild>
-                          <a href={`#lead-${lead.id}`}>
+                          <a href={`/admin/leads/${lead.id}`}>
                             <Eye className="mr-2 h-4 w-4" />
                             View Details
                           </a>
@@ -993,7 +937,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                         </DropdownMenuItem>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+                            <DropdownMenuItem onSelect={(e) => e.preventDefault()}> 
                               <User className="mr-2 h-4 w-4" />
                               Assign To
                             </DropdownMenuItem>
@@ -1117,7 +1061,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
           leadId={selectedLead.id}
           currentStatus={selectedLead.status}
           open={isStatusDialogOpen}
-          onOpenChange={(open: boolean) => {
+          onOpenChange={(open) => {
             setIsStatusDialogOpen(open)
             if (!open) setIsCallInitiated(false) // Reset when dialog is closed
           }}
