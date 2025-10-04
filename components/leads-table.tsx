@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo } from "react"
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { 
@@ -11,8 +11,7 @@ import {
   FileText, PhoneCall, Send, Tag, Plus, Trash2,
   BarChart3, Users, DollarSign, Target, Zap,
   Layout, Table as TableIcon, Settings, Save,
-  AlertTriangle, CheckCircle2, XCircle, Sparkles,
-  CheckIcon
+  AlertTriangle, CheckCircle2, XCircle, Sparkles
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -21,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input"
 import { LeadStatusDialog } from "@/components/lead-status-dialog"
 import { QuickActions } from "@/components/quick-actions"
-import { 
+ { 
   Dialog, DialogContent, DialogDescription, DialogFooter, 
   DialogHeader, DialogTitle, DialogTrigger 
 } from "@/components/ui/dialog"
@@ -42,6 +41,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
+// >>> ADDED MultiSelectTags IMPORT
+import { MultiSelectTags } from "../multi-select-tags"
 
 interface Lead {
   id: string
@@ -86,73 +87,6 @@ interface LeadsTableProps {
   telecallers: Array<{ id: string; full_name: string }>
 }
 
-// --- Custom MultiSelect Component for Telecallers ---
-interface TelecallerMultiSelectProps {
-  telecallers: Array<{ id: string; full_name: string }>
-  selected: string[]
-  setSelected: (selected: string[]) => void
-  telecallerStatus: Record<string, boolean | undefined>
-}
-
-const TelecallerMultiSelect: React.FC<TelecallerMultiSelectProps> = ({ telecallers, selected, setSelected, telecallerStatus }) => {
-  const [isOpen, setIsOpen] = useState(false);
-
-  const toggleSelection = (id: string) => {
-    if (selected.includes(id)) {
-      setSelected(selected.filter(i => i !== id));
-    } else {
-      setSelected([...selected, id]);
-    }
-  };
-
-  const selectedNames = useMemo(() => {
-    return selected.map(id => telecallers.find(t => t.id === id)?.full_name || 'Unknown');
-  }, [selected, telecallers]);
-
-  return (
-    <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
-      <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline" className="w-[200px] justify-between">
-          <User className="h-4 w-4 mr-2" />
-          {selected.length === 0 ? "Select Telecallers" : `${selected.length} Selected`}
-          <ChevronDown className={`ml-2 h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : 'rotate-0'}`} />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent 
-        forceMount 
-        align="start" 
-        className="z-[9999] w-[200px] max-h-60 overflow-y-auto"
-        onCloseAutoFocus={(e) => e.preventDefault()}
-      >
-        <DropdownMenuLabel>Assign Leads To</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {telecallers.map((telecaller) => (
-          <DropdownMenuItem 
-            key={telecaller.id}
-            onSelect={(e) => {
-              e.preventDefault(); // Prevent closing dropdown on select
-              toggleSelection(telecaller.id);
-            }}
-            className="flex items-center justify-between"
-          >
-            <div className="flex items-center gap-2">
-              {telecallerStatus[telecaller.id] !== undefined && (
-                <div className={`w-2 h-2 rounded-full ${telecallerStatus[telecaller.id] ? 'bg-green-500' : 'bg-red-500'}`} />
-              )}
-              {telecaller.full_name}
-            </div>
-            {selected.includes(telecaller.id) && (
-              <CheckIcon className="h-4 w-4 text-primary" />
-            )}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-};
-// --- End MultiSelect Component ---
-
-
 export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
@@ -184,8 +118,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [selectedLeads, setSelectedLeads] = useState<string[]>([])
-  // State for multi-select telecaller assignment
-  const [bulkAssignTo, setBulkAssignTo] = useState<string[]>([]) 
+  const [bulkAssignTo, setBulkAssignTo] = useState<string[]>([])
   const [bulkStatus, setBulkStatus] = useState<string>("")
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table')
@@ -201,6 +134,8 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   ])
   const [newTag, setNewTag] = useState("")
   const [selectedLeadForTags, setSelectedLeadForTags] = useState<Lead | null>(null)
+  // >>> ADDED STATE FOR BULK TAGS
+  const [tagsToAddBulk, setTagsToAddBulk] = useState<string[]>([])
   
   // Email/SMS
   const [showEmailDialog, setShowEmailDialog] = useState(false)
@@ -451,7 +386,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       headers.join(','),
       ...filteredLeads.map(lead => 
         headers.map(h => {
-          const val = (lead as any)[h] // Use (lead as any)[h] for flexible property access
+          const val = lead[h as keyof Lead]
           return typeof val === 'string' ? `"${val}"` : val
         }).join(',')
       )
@@ -535,9 +470,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     console.log('Subject:', emailSubject)
     console.log('Body:', emailBody)
     
-    setSuccessMessage(`Simulated: Email sent to ${selectedLeads.length} leads.`);
-    setSelectedLeads([]);
-    setBulkAssignTo([]);
     setShowEmailDialog(false)
     setEmailSubject("")
     setEmailBody("")
@@ -550,240 +482,130 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     console.log('Sending SMS to', selectedLeads.length, 'leads')
     console.log('Message:', smsBody)
     
-    setSuccessMessage(`Simulated: SMS sent to ${selectedLeads.length} leads.`);
-    setSelectedLeads([]);
-    setBulkAssignTo([]);
     setShowSMSDialog(false)
     setSmsBody("")
   }
 
-  // --- START: SINGLE LEAD ASSIGNMENT ---
-  const handleAssignLead = async (leadId: string, telecallerId: string | 'unassigned') => {
-    setSuccessMessage("");
-    setErrorMessage("");
+  const handleBulkAssign = async (telecallerId: string) => {
+    if (selectedLeads.length === 0) return
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
       const assignedById = user?.id
 
-      const updateData = {
-        assigned_to: telecallerId === 'unassigned' ? null : telecallerId,
-        assigned_by: telecallerId === 'unassigned' ? null : assignedById,
-        assigned_at: telecallerId === 'unassigned' ? null : new Date().toISOString()
-      }
-
-      const { error } = await supabase
-        .from("leads")
-        .update(updateData)
-        .eq("id", leadId)
-      
-      if (error) throw error
-      
-      const telecallerName = telecallers.find(t => t.id === telecallerId)?.full_name || 'N/A';
-      
-      setSuccessMessage(`Lead ${leadId.substring(0, 4)} successfully ${telecallerId === 'unassigned' ? 'unassigned' : `assigned to ${telecallerName}`}.`)
-      // Reload page to reflect single assignment change, but with a slight delay
-      setTimeout(() => window.location.reload(), 1000) 
-      
-    } catch (error) {
-      console.error("Error assigning lead:", error)
-      setErrorMessage('Error assigning lead. Please check the console.')
-    }
-  }
-  // --- END: SINGLE LEAD ASSIGNMENT ---
-
-  // --- START: UPDATED BULK ASSIGN (SEQUENTIAL ROUND-ROBIN) ---
-  const handleBulkAssign = async () => {
-    if (selectedLeads.length === 0) {
-      setErrorMessage("Please select leads to assign.");
-      return;
-    }
-    if (bulkAssignTo.length === 0) {
-      setErrorMessage("Please select at least one telecaller for assignment.");
-      return;
-    }
-    
-    // Clear previous messages
-    setSuccessMessage("");
-    setErrorMessage("");
-
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      const assignedById = user?.id
-      
-      const telecallerIds = bulkAssignTo; 
-      let telecallerIndex = 0; // Index for round-robin
-      
-      let successfulUpdates = 0;
-      let failedUpdates = 0;
-      const totalLeads = selectedLeads.length;
-
-      // Iterate over selected leads and update one by one (Sequential)
-      for (const leadId of selectedLeads) {
-        // 1. Determine the telecaller for this lead using round-robin
-        const telecallerId = telecallerIds[telecallerIndex % telecallerIds.length];
-
-        const { error } = await supabase
+      // Update all selected leads
+      const updates = selectedLeads.map(leadId => 
+        supabase
           .from("leads")
           .update({ 
-            assigned_to: telecallerId,
+            assigned_to: telecallerId === 'unassigned' ? null : telecallerId,
             assigned_by: assignedById,
             assigned_at: new Date().toISOString()
           })
-          .eq("id", leadId);
-          
-        if (error) {
-          failedUpdates++;
-          console.error(`Failed to assign lead ${leadId} to telecaller ${telecallerId}:`, error);
-        } else {
-          successfulUpdates++;
-        }
-        
-        // 2. Move to the next telecaller for the next lead
-        telecallerIndex++; 
-        
-        // 3. Add a small delay to prevent rate-limiting (crucial for sequential updates)
-        await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
-      }
+          .eq("id", leadId)
+      )
 
-      const assignedCountMessage = bulkAssignTo.length === 1 
-        ? telecallers.find(t => t.id === bulkAssignTo[0])?.full_name || 'One Telecaller'
-        : `${bulkAssignTo.length} telecallers (Round-Robin)`;
-
-      if (failedUpdates > 0) {
-        setErrorMessage(`Assigned ${successfulUpdates} lead${successfulUpdates === 1 ? '' : 's'} across ${assignedCountMessage}, but failed to assign ${failedUpdates} due to an error.`);
-      } else {
-        setSuccessMessage(`Successfully assigned all ${totalLeads} lead${totalLeads === 1 ? '' : 's'} across ${assignedCountMessage}.`);
-      }
+      const results = await Promise.all(updates)
       
-      setSelectedLeads([]);
-      setBulkAssignTo([]); // Clear selected telecallers
+      const errors = results.filter(result => result.error)
+      if (errors.length > 0) {
+        throw new Error(`Failed to assign ${errors.length} leads`)
+      }
 
-      // Reload the page after 1.5 seconds to allow the success/error message to be visible
-      setTimeout(() => window.location.reload(), 1500);
+      console.log(`Bulk assigned ${selectedLeads.length} leads to ${telecallerId}`)
+      setSelectedLeads([])
+      window.location.reload()
       
     } catch (error) {
-      console.error("Critical error during assignment process:", error)
-      setErrorMessage('Critical error during assignment. Please check the console for details.');
+      console.error("Error bulk assigning leads:", error)
+      alert('Error assigning leads. Please try again.')
     }
   }
-  // --- END: UPDATED BULK ASSIGN (SEQUENTIAL ROUND-ROBIN) ---
 
-  // --- START: UPDATED BULK STATUS (SEQUENTIAL) ---
   const handleBulkStatusUpdate = async (newStatus: string) => {
     if (selectedLeads.length === 0) return
 
-    // Clear previous messages
-    setSuccessMessage("");
-    setErrorMessage("");
-
     try {
-      let successfulUpdates = 0;
-      let failedUpdates = 0;
-      const totalLeads = selectedLeads.length;
-
-      // Iterate over selected leads and update one by one
-      for (const leadId of selectedLeads) {
-        const { error } = await supabase
+      // Update status for all selected leads
+      const updates = selectedLeads.map(leadId => 
+        supabase
           .from("leads")
           .update({ 
             status: newStatus,
             last_contacted: new Date().toISOString()
           })
-          .eq("id", leadId);
-          
-        if (error) {
-          failedUpdates++;
-          console.error(`Failed to update status for lead ${leadId}:`, error);
-        } else {
-          successfulUpdates++;
-        }
-        
-        // Add a small delay to prevent rate-limiting
-        await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
-      }
+          .eq("id", leadId)
+      )
 
-      const statusName = newStatus.replace('_', ' ').toUpperCase();
-
-      if (failedUpdates > 0) {
-        setErrorMessage(`Updated status for ${successfulUpdates} lead${successfulUpdates === 1 ? '' : 's'} to ${statusName}, but failed for ${failedUpdates} leads.`);
-      } else {
-        setSuccessMessage(`Successfully updated status for all ${totalLeads} lead${totalLeads === 1 ? '' : 's'} to ${statusName}.`);
-      }
+      // Execute all updates concurrently
+      const results = await Promise.all(updates)
       
-      setSelectedLeads([]);
-      setBulkAssignTo([]);
+      const errors = results.filter(result => result.error)
+      if (errors.length > 0) {
+        throw new Error(`Failed to update status for ${errors.length} leads`)
+      }
 
-      // Reload the page after 1.5 seconds
-      setTimeout(() => window.location.reload(), 1500);
+      console.log(`Bulk updated status for ${selectedLeads.length} leads to ${newStatus}`)
+      setSelectedLeads([])
+      window.location.reload()
       
     } catch (error) {
-      console.error("Critical error during status update process:", error)
-      setErrorMessage('Critical error during status update. Please check the console for details.');
+      console.error("Error bulk updating lead status:", error)
+      alert('Error updating status. Please try again.')
     }
   }
-  // --- END: UPDATED BULK STATUS (SEQUENTIAL) ---
 
-  // --- START: UPDATED BULK TAG (SEQUENTIAL) ---
-  const handleBulkAddTag = async (tag: string) => {
-    if (selectedLeads.length === 0) return
-
-    // Clear previous messages
-    setSuccessMessage("");
-    setErrorMessage("");
+  // >>> REPLACED handleBulkAddTag with handleBulkAddTags
+  const handleBulkAddTags = async (tags: string[]) => {
+    if (selectedLeads.length === 0 || tags.length === 0) return
 
     try {
-      let successfulUpdates = 0;
-      let failedUpdates = 0;
-      const totalLeads = selectedLeads.length;
-
-      // Iterate over selected leads and update one by one
-      for (const leadId of selectedLeads) {
+      const updates = selectedLeads.flatMap((leadId) => {
         const lead = enrichedLeads.find(l => l.id === leadId)
-        const currentTags = lead?.tags || []
+        const currentTags = new Set(lead?.tags || [])
         
-        // Only add if tag doesn't exist
-        if (currentTags.includes(tag)) {
-          successfulUpdates++; // Count as success since the goal is met
-          continue; 
+        // Filter out tags already present in the lead
+        const tagsToAdd = tags.filter(tag => !currentTags.has(tag))
+
+        if (tagsToAdd.length > 0) {
+          // Create the update promise only if there are new tags to add
+          const newTags = [...currentTags, ...tagsToAdd]
+          return [supabase
+            .from("leads")
+            .update({ 
+              tags: newTags
+            })
+            .eq("id", leadId)
+          ]
         }
-
-        const { error } = await supabase
-          .from("leads")
-          .update({ 
-            tags: [...currentTags, tag]
-          })
-          .eq("id", leadId);
-
-        if (error) {
-          failedUpdates++;
-          console.error(`Failed to add tag "${tag}" to lead ${leadId}:`, error);
-        } else {
-          successfulUpdates++;
-        }
-
-        // Add a small delay to prevent rate-limiting
-        await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
-      }
-
-      if (failedUpdates > 0) {
-        setErrorMessage(`Added tag "${tag}" to ${successfulUpdates} lead${successfulUpdates === 1 ? '' : 's'}, but failed for ${failedUpdates} leads.`);
-      } else {
-        setSuccessMessage(`Successfully added tag "${tag}" to all ${totalLeads} lead${totalLeads === 1 ? '' : 's'}.`);
-      }
+        return [] // Return an empty array if no tags need adding for this lead
+      })
       
-      setSelectedLeads([]);
-      setBulkAssignTo([]);
+      if (updates.length === 0) {
+        setSuccessMessage(`Tags were already present on the selected leads.`)
+        setSelectedLeads([])
+        setTagsToAddBulk([])
+        return
+      }
 
-      // Reload the page after 1.5 seconds
-      setTimeout(() => window.location.reload(), 1500);
+      const results = await Promise.all(updates)
+      
+      const errors = results.filter(result => result.error)
+      if (errors.length > 0) {
+        throw new Error(`Failed to add tag to ${errors.length} leads`)
+      }
+
+      console.log(`Added tags "${tags.join(', ')}" to ${updates.length} leads`)
+      setSuccessMessage(`Successfully added tags to ${updates.length} leads.`)
+      setSelectedLeads([])
+      setTagsToAddBulk([])
+      window.location.reload() // Keeping reload for consistency with user's file pattern
       
     } catch (error) {
-      console.error("Critical error adding tag:", error)
-      setErrorMessage('Critical error during tag assignment. Please check the console for details.');
+      console.error("Error adding tag:", error)
+      setErrorMessage('Error adding tags. Please try again.')
     }
   }
-  // --- END: UPDATED BULK TAG (SEQUENTIAL) ---
 
   const handleAutoAssignLeads = async () => {
     if (!autoAssignRules.enabled || telecallers.length === 0) return
@@ -844,9 +666,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
           minTelecaller.count++
         })
       }
-      
-      // Note: Auto-Assign uses Promise.all here because it's typically a one-off admin action 
-      // and we want it to be fast. If this also fails, it will need sequential implementation.
+
       const results = await Promise.all(updates)
       
       const errors = results.filter(result => result.error)
@@ -1407,25 +1227,34 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                   </DialogContent>
                 </Dialog>
 
-                {/* Bulk Assignment Control (Multi-Select) */}
-                <div className="flex items-center gap-2">
-                  <TelecallerMultiSelect
-                    telecallers={telecallers}
-                    selected={bulkAssignTo}
-                    setSelected={setBulkAssignTo}
-                    telecallerStatus={telecallerStatus}
-                  />
-                  <Button
-                    size="sm"
-                    onClick={handleBulkAssign}
-                    disabled={bulkAssignTo.length === 0}
-                    className="flex-shrink-0"
-                  >
-                    <User className="h-4 w-4 mr-2" />
-                    Assign
-                  </Button>
-                </div>
-
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" variant="outline">
+                      <User className="h-4 w-4 mr-2" />
+                      Assign
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuLabel>Assign to Telecaller</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => handleBulkAssign('unassigned')}>
+                      Unassign All
+                    </DropdownMenuItem>
+                    {telecallers.map((telecaller) => (
+                      <DropdownMenuItem 
+                        key={telecaller.id}
+                        onClick={() => handleBulkAssign(telecaller.id)}
+                      >
+                        <div className="flex items-center gap-2">
+                          {telecallerStatus[telecaller.id] !== undefined && (
+                            <div className={`w-2 h-2 rounded-full ${telecallerStatus[telecaller.id] ? 'bg-green-500' : 'bg-red-500'}`} />
+                          )}
+                          {telecaller.full_name}
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -1470,37 +1299,52 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="sm" variant="outline">
+                {/* >>> REPLACED DropdownMenu with Dialog/MultiSelectTags */}
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button size="sm" variant="outline" disabled={selectedLeads.length === 0}>
                       <Tag className="h-4 w-4 mr-2" />
-                      Add Tags
+                      Bulk Tags
                     </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent>
-                    <DropdownMenuLabel>Add Tag to Selected</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    {availableTags.map((tag) => (
-                      <DropdownMenuItem 
-                        key={tag}
-                        onClick={() => handleBulkAddTag(tag)}
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add Tags to {selectedLeads.length} Leads</DialogTitle>
+                      <DialogDescription>
+                        Select one or more tags to add to all selected leads.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <Label>Select Tags</Label>
+                      <MultiSelectTags
+                        options={availableTags.map(tag => ({ value: tag, label: tag }))}
+                        selected={tagsToAddBulk}
+                        onChange={setTagsToAddBulk}
+                        placeholder="Choose tags to add..."
+                      />
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setTagsToAddBulk([])}>
+                        Clear Selection
+                      </Button>
+                      <Button 
+                        onClick={() => handleBulkAddTags(tagsToAddBulk)}
+                        disabled={tagsToAddBulk.length === 0}
                       >
                         <Tag className="h-4 w-4 mr-2" />
-                        {tag}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                        Add {tagsToAddBulk.length} Tag{tagsToAddBulk.length !== 1 ? 's' : ''}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+                {/* <<< END REPLACEMENT */}
 
                 <Button 
                   size="sm" 
                   variant="outline"
-                  onClick={() => {
-                    setSelectedLeads([])
-                    setBulkAssignTo([])
-                  }}
+                  onClick={() => setSelectedLeads([])}
                 >
-                  Clear Selection
+                  Clear
                 </Button>
               </div>
             </div>
@@ -1699,49 +1543,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                                 <Mail className="mr-2 h-4 w-4" />
                                 Send Email
                               </DropdownMenuItem>
-                              
-                              {/* --- START: Single Lead Assignment Dropdown --- */}
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
-                                    <User className="mr-2 h-4 w-4" />
-                                    Assign To
-                                  </DropdownMenuItem>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent side="right">
-                                  <DropdownMenuLabel>Select Telecaller</DropdownMenuLabel>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem 
-                                    onClick={() => handleAssignLead(lead.id, 'unassigned')}
-                                    className="text-red-500 hover:!bg-red-50"
-                                  >
-                                    <X className="mr-2 h-4 w-4" />
-                                    Unassign Lead
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  {telecallers.length === 0 ? (
-                                    <DropdownMenuItem disabled>No Telecallers available</DropdownMenuItem>
-                                  ) : (
-                                    telecallers.map((telecaller) => (
-                                      <DropdownMenuItem 
-                                        key={telecaller.id} 
-                                        onClick={() => handleAssignLead(lead.id, telecaller.id)}
-                                        className="flex items-center justify-between"
-                                      >
-                                        <div className="flex items-center gap-2">
-                                          {telecallerStatus[telecaller.id] !== undefined && (
-                                            <div className={`w-2 h-2 rounded-full ${telecallerStatus[telecaller.id] ? 'bg-green-500' : 'bg-red-500'}`} />
-                                          )}
-                                          {telecaller.full_name}
-                                        </div>
-                                        {lead.assigned_to === telecaller.id && <CheckIcon className="h-4 w-4 text-green-500" />}
-                                      </DropdownMenuItem>
-                                    ))
-                                  )}
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                              {/* --- END: Single Lead Assignment Dropdown --- */}
-                              
                               <DropdownMenuItem onClick={() => setSelectedLeadForTags(lead)}>
                                 <Tag className="mr-2 h-4 w-4" />
                                 Manage Tags
