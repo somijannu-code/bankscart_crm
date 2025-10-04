@@ -1247,33 +1247,33 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                 </Dialog>
 
                 <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button size="sm" variant="outline">
-                      <User className="h-4 w-4 mr-2" />
-                      Assign
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent>
-                    <DropdownMenuLabel>Assign to Telecaller</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => handleBulkAssign('unassigned')}>
-                      Unassign All
-                    </DropdownMenuItem>
-                    {telecallers.map((telecaller) => (
-                      <DropdownMenuItem 
-                        key={telecaller.id}
-                        onClick={() => handleBulkAssign(telecaller.id)}
-                      >
-                        <div className="flex items-center gap-2">
-                          {telecallerStatus[telecaller.id] !== undefined && (
-                            <div className={`w-2 h-2 rounded-full ${telecallerStatus[telecaller.id] ? 'bg-green-500' : 'bg-red-500'}`} />
-                          )}
-                          {telecaller.full_name}
-                        </div>
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+  <DropdownMenuTrigger asChild>
+    <Button size="sm" variant="outline">
+      <User className="h-4 w-4 mr-2" />
+      Assign
+    </Button>
+  </DropdownMenuTrigger>
+  <DropdownMenuContent>
+    <DropdownMenuLabel>Assign to Telecaller</DropdownMenuLabel>
+    <DropdownMenuSeparator />
+    <DropdownMenuItem onClick={() => handleBulkAssign('unassigned')}>
+      Unassign All
+    </DropdownMenuItem>
+    {telecallers.map((telecaller) => (
+      <DropdownMenuItem 
+        key={telecaller.id}
+        onClick={() => handleBulkAssign(telecaller.id)}
+      >
+        <div className="flex items-center gap-2">
+          {telecallerStatus[telecaller.id] !== undefined && (
+            <div className={`w-2 h-2 rounded-full ${telecallerStatus[telecaller.id] ? 'bg-green-500' : 'bg-red-500'}`} />
+          )}
+          {telecaller.full_name}
+        </div>
+      </DropdownMenuItem>
+    ))}
+  </DropdownMenuContent>
+</DropdownMenu>
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
