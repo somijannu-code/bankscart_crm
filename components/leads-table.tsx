@@ -66,7 +66,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [sortField, setSortField] = useState<string>("created_at")
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
   
-  // 🔑 State declaration (Correctly named visibleColumns)
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
     name: true,
     contact: true,
@@ -92,7 +91,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   
   const supabase = createClient()
 
-  // FIX FOR INFINITE LOOP: Stabilize the array reference using useMemo
   const allTelecallerIds = useMemo(() => {
     return [
       ...leads.map(lead => lead.assigned_user?.id).filter(Boolean) as string[],
@@ -104,7 +102,10 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
   const maxPagesToShow = 5 // Defined for pagination helper below
 
-  // Add safe value getters
+  // --- NEW: Comprehensive list of all possible lead statuses for bulk update ---
+  const allStatuses = ["New", "Contacted", "Interested", "Not_Eligible", "Dead", "Follow_Up"]
+  // -----------------------------------------------------------------------------
+
   const getSafeValue = (value: any, defaultValue: string = 'N/A') => {
     return value ?? defaultValue
   }
@@ -452,7 +453,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     { key: 'actions', name: 'Actions' },
   ]
   
-  // All unique statuses for the filter dropdown
+  // All unique statuses for the main filter dropdown
   const uniqueStatuses = Array.from(new Set(leads.map(lead => lead.status).filter(s => s)))
   
   // All unique priorities for the filter dropdown
@@ -480,6 +481,10 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
     return pages
   }
+
+  // --- NEW: Page Size options array ---
+  const pageSizeOptions = [10, 20, 50, 100]
+  // ------------------------------------
 
   return (
     <div className="space-y-4">
@@ -561,14 +566,14 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         {/* Bulk Actions and Column Visibility */}
         <div className="flex items-center gap-4 w-full md:w-auto mt-4 md:mt-0">
           
-          {/* Bulk Status Update */}
+          {/* Bulk Status Update (Now uses the comprehensive allStatuses list) */}
           <Select value={bulkStatus} onValueChange={setBulkStatus}>
             <SelectTrigger className="w-32">
               <SelectValue placeholder="Bulk Status" />
             </SelectTrigger>
             <SelectContent>
-              {uniqueStatuses.map(status => (
-                <SelectItem key={`bulk-${status}`} value={status}>{status}</SelectItem>
+              {allStatuses.map(status => ( // <-- FIX: Using comprehensive allStatuses
+                <SelectItem key={`bulk-${status}`} value={status}>{status.replace('_', ' ')}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -669,7 +674,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                 />
               </TableHead>
               
-              {/* 🔑 CORRECTED: Using visibleColumns[col.key] */}
               {columns.filter(col => col.key !== 'select' && visibleColumns[col.key]).map((column) => (
                 <TableHead 
                   key={column.key} 
@@ -705,7 +709,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     />
                   </TableCell>
 
-                  {/* 🔑 CORRECTED: Using visibleColumns.name */}
                   {visibleColumns.name && (
                     <TableCell className="font-medium text-blue-600 hover:underline">
                       <Link href={`/leads/${lead.id}`}>
@@ -741,7 +744,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
                   {visibleColumns.created && (
                     <TableCell className="text-sm text-gray-500">
-                      {format(new Date(lead.created_at), 'MMM dd, yyyy')}
+                      {lead.created_at ? format(new Date(lead.created_at), 'MMM dd, yyyy') : 'N/A'}
                     </TableCell>
                   )}
 
@@ -794,9 +797,35 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       {/* Pagination */}
       {filteredLeads.length > 0 && (
         <div className="flex items-center justify-between py-4">
-          <div className="text-sm text-gray-600">
-            Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filteredLeads.length)} of {filteredLeads.length} leads (Total: {leads.length})
+          
+          {/* --- NEW: Page Size Selector and Status Display --- */}
+          <div className="flex items-center gap-6">
+            <div className="flex items-center space-x-2">
+              <span className="text-sm text-gray-600">Leads per page:</span>
+              <Select 
+                value={String(pageSize)} 
+                onValueChange={(value) => {
+                  setPageSize(Number(value))
+                  setCurrentPage(1) // Reset page to 1 when page size changes
+                }}
+              >
+                <SelectTrigger className="w-20">
+                  <SelectValue placeholder={String(pageSize)} />
+                </SelectTrigger>
+                <SelectContent>
+                  {pageSizeOptions.map(option => (
+                    <SelectItem key={option} value={String(option)}>{option}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="text-sm text-gray-600">
+              Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filteredLeads.length)} of {filteredLeads.length} leads (Total: {leads.length})
+            </div>
           </div>
+          {/* ---------------------------------------------------- */}
+          
           <div className="flex items-center space-x-2">
             <Button
               variant="outline"
