@@ -482,112 +482,176 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     setSmsBody("")
   }
 
+  // --- START: UPDATED BULK ASSIGN (SEQUENTIAL) ---
   const handleBulkAssign = async (telecallerId: string) => {
     if (selectedLeads.length === 0) return
+
+    // Clear previous messages
+    setSuccessMessage("");
+    setErrorMessage("");
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
       const assignedById = user?.id
+      let successfulUpdates = 0;
+      let failedUpdates = 0;
+      const totalLeads = selectedLeads.length;
 
-      // Update all selected leads
-      const updates = selectedLeads.map(leadId => 
-        supabase
+      // Iterate over selected leads and update one by one
+      for (const leadId of selectedLeads) {
+        const { error } = await supabase
           .from("leads")
           .update({ 
             assigned_to: telecallerId === 'unassigned' ? null : telecallerId,
             assigned_by: assignedById,
             assigned_at: new Date().toISOString()
           })
-          .eq("id", leadId)
-      )
-
-      const results = await Promise.all(updates)
-      
-      const errors = results.filter(result => result.error)
-      if (errors.length > 0) {
-        throw new Error(`Failed to assign ${errors.length} leads`)
+          .eq("id", leadId);
+          
+        if (error) {
+          failedUpdates++;
+          console.error(`Failed to assign lead ${leadId}:`, error);
+        } else {
+          successfulUpdates++;
+        }
+        
+        // Add a small delay to prevent rate-limiting (crucial for sequential updates)
+        await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
       }
 
-      console.log(`Bulk assigned ${selectedLeads.length} leads to ${telecallerId}`)
-      setSelectedLeads([])
-      window.location.reload()
+      const assignedToName = telecallers.find(t => t.id === telecallerId)?.full_name || (telecallerId === 'unassigned' ? 'Unassigned' : 'Unknown');
+
+      if (failedUpdates > 0) {
+        setErrorMessage(`Assigned ${successfulUpdates} lead${successfulUpdates === 1 ? '' : 's'} to ${assignedToName}, but failed to assign ${failedUpdates} due to an error.`);
+      } else {
+        setSuccessMessage(`Successfully assigned all ${totalLeads} lead${totalLeads === 1 ? '' : 's'} to ${assignedToName}.`);
+      }
+      
+      setSelectedLeads([]);
+
+      // Reload the page after 1.5 seconds to allow the success/error message to be visible
+      setTimeout(() => window.location.reload(), 1500);
       
     } catch (error) {
-      console.error("Error bulk assigning leads:", error)
-      alert('Error assigning leads. Please try again.')
+      console.error("Critical error during assignment process:", error)
+      setErrorMessage('Critical error during assignment. Please check the console for details.');
     }
   }
+  // --- END: UPDATED BULK ASSIGN (SEQUENTIAL) ---
 
+  // --- START: UPDATED BULK STATUS (SEQUENTIAL) ---
   const handleBulkStatusUpdate = async (newStatus: string) => {
     if (selectedLeads.length === 0) return
 
+    // Clear previous messages
+    setSuccessMessage("");
+    setErrorMessage("");
+
     try {
-      // Update status for all selected leads
-      const updates = selectedLeads.map(leadId => 
-        supabase
+      let successfulUpdates = 0;
+      let failedUpdates = 0;
+      const totalLeads = selectedLeads.length;
+
+      // Iterate over selected leads and update one by one
+      for (const leadId of selectedLeads) {
+        const { error } = await supabase
           .from("leads")
           .update({ 
             status: newStatus,
             last_contacted: new Date().toISOString()
           })
-          .eq("id", leadId)
-      )
-
-      // Execute all updates concurrently
-      const results = await Promise.all(updates)
-      
-      const errors = results.filter(result => result.error)
-      if (errors.length > 0) {
-        throw new Error(`Failed to update status for ${errors.length} leads`)
+          .eq("id", leadId);
+          
+        if (error) {
+          failedUpdates++;
+          console.error(`Failed to update status for lead ${leadId}:`, error);
+        } else {
+          successfulUpdates++;
+        }
+        
+        // Add a small delay to prevent rate-limiting
+        await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
       }
 
-      console.log(`Bulk updated status for ${selectedLeads.length} leads to ${newStatus}`)
-      setSelectedLeads([])
-      window.location.reload()
+      const statusName = newStatus.replace('_', ' ').toUpperCase();
+
+      if (failedUpdates > 0) {
+        setErrorMessage(`Updated status for ${successfulUpdates} lead${successfulUpdates === 1 ? '' : 's'} to ${statusName}, but failed for ${failedUpdates} leads.`);
+      } else {
+        setSuccessMessage(`Successfully updated status for all ${totalLeads} lead${totalLeads === 1 ? '' : 's'} to ${statusName}.`);
+      }
+      
+      setSelectedLeads([]);
+
+      // Reload the page after 1.5 seconds
+      setTimeout(() => window.location.reload(), 1500);
       
     } catch (error) {
-      console.error("Error bulk updating lead status:", error)
-      alert('Error updating status. Please try again.')
+      console.error("Critical error during status update process:", error)
+      setErrorMessage('Critical error during status update. Please check the console for details.');
     }
   }
+  // --- END: UPDATED BULK STATUS (SEQUENTIAL) ---
 
+  // --- START: UPDATED BULK TAG (SEQUENTIAL) ---
   const handleBulkAddTag = async (tag: string) => {
     if (selectedLeads.length === 0) return
 
+    // Clear previous messages
+    setSuccessMessage("");
+    setErrorMessage("");
+
     try {
-      // Update tags for all selected leads
-      const updates = selectedLeads.map(async (leadId) => {
+      let successfulUpdates = 0;
+      let failedUpdates = 0;
+      const totalLeads = selectedLeads.length;
+
+      // Iterate over selected leads and update one by one
+      for (const leadId of selectedLeads) {
         const lead = enrichedLeads.find(l => l.id === leadId)
         const currentTags = lead?.tags || []
         
         // Only add if tag doesn't exist
-        if (!currentTags.includes(tag)) {
-          return supabase
-            .from("leads")
-            .update({ 
-              tags: [...currentTags, tag]
-            })
-            .eq("id", leadId)
+        if (currentTags.includes(tag)) {
+          successfulUpdates++; // Count as success since the goal is met
+          continue; 
         }
-        return Promise.resolve({ error: null })
-      })
 
-      const results = await Promise.all(updates)
-      
-      const errors = results.filter(result => result.error)
-      if (errors.length > 0) {
-        throw new Error(`Failed to add tag to ${errors.length} leads`)
+        const { error } = await supabase
+          .from("leads")
+          .update({ 
+            tags: [...currentTags, tag]
+          })
+          .eq("id", leadId);
+
+        if (error) {
+          failedUpdates++;
+          console.error(`Failed to add tag "${tag}" to lead ${leadId}:`, error);
+        } else {
+          successfulUpdates++;
+        }
+
+        // Add a small delay to prevent rate-limiting
+        await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
       }
 
-      console.log(`Added tag "${tag}" to ${selectedLeads.length} leads`)
-      setSelectedLeads([])
-      window.location.reload()
+      if (failedUpdates > 0) {
+        setErrorMessage(`Added tag "${tag}" to ${successfulUpdates} lead${successfulUpdates === 1 ? '' : 's'}, but failed for ${failedUpdates} leads.`);
+      } else {
+        setSuccessMessage(`Successfully added tag "${tag}" to all ${totalLeads} lead${totalLeads === 1 ? '' : 's'}.`);
+      }
+      
+      setSelectedLeads([]);
+
+      // Reload the page after 1.5 seconds
+      setTimeout(() => window.location.reload(), 1500);
       
     } catch (error) {
-      console.error("Error adding tag:", error)
-      alert('Error adding tag. Please try again.')
+      console.error("Critical error adding tag:", error)
+      setErrorMessage('Critical error during tag assignment. Please check the console for details.');
     }
   }
+  // --- END: UPDATED BULK TAG (SEQUENTIAL) ---
 
   const handleAutoAssignLeads = async () => {
     if (!autoAssignRules.enabled || telecallers.length === 0) return
@@ -648,7 +712,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
           minTelecaller.count++
         })
       }
-
+      
+      // Note: Auto-Assign uses Promise.all here because it's typically a one-off admin action 
+      // and we want it to be fast. If this also fails, it will need sequential implementation.
       const results = await Promise.all(updates)
       
       const errors = results.filter(result => result.error)
@@ -1216,7 +1282,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                       Assign
                     </Button>
                   </DropdownMenuTrigger>
-                  {/* FIX APPLIED: Added forceMount and high z-index class for clipping/stacking issues */}
+                  {/* UI FIX: Added forceMount and high z-index class for clipping/stacking issues */}
                   <DropdownMenuContent 
                     forceMount 
                     align="start" 
