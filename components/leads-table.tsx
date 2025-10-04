@@ -1,8 +1,8 @@
-"use client";
-
 import { useState, useEffect, useMemo, useCallback } from "react"
-// Removed "next/link" dependency; using <a> tag simulation instead.
-// Removed dependency on local project paths by integrating/simulating the required components/hooks.
+// Firebase Imports via CDN URLs for single-file environments
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { getFirestore, collection, query, onSnapshot, doc, updateDoc, deleteDoc, runTransaction, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 import { 
   User, Building, Calendar, Clock, Eye, Phone, Mail, 
@@ -10,9 +10,6 @@ import {
   MoreHorizontal, Check, X, AlertCircle, Trash2, DollarSign, Target, ListChecks, ArrowLeft, ArrowRight
 } from "lucide-react"
 import { format, isToday, isThisWeek, parseISO, isBefore, subDays, subWeeks, subMonths } from "date-fns";
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, signInAnonymously } from 'firebase/auth';
-import { getFirestore, collection, query, onSnapshot, doc, updateDoc, deleteDoc, runTransaction, where } from 'firebase/firestore';
 
 // --- UI Components Simulation (for self-containment) ---
 
@@ -284,7 +281,7 @@ const QuickActions: React.FC<QuickActionsProps> = ({ lead, onCallInitiate, onAss
                     <Calendar className="mr-2 h-4 w-4" /> Set Follow Up
                 </DropdownMenuItem>
                 <DropdownMenuItem>
-                    <a href={`/leads/${lead.id}`} className="flex items-center w-full">
+                    <a href={`#lead-details-${lead.id}`} className="flex items-center w-full" onClick={(e) => e.preventDefault()}>
                         <Eye className="mr-2 h-4 w-4" /> View Details
                     </a>
                 </DropdownMenuItem>
@@ -426,8 +423,8 @@ export function LeadsTable({ telecallers = [] }: LeadsTableProps) {
   // --- Firebase Auth and Data Fetching ---
 
   useEffect(() => {
-    if (!firebaseConfig) {
-        console.error("Firebase config is missing.");
+    if (!firebaseConfig || !auth) {
+        console.error("Firebase config or auth is missing.");
         setLoadingLeads(false);
         setIsAuthReady(true);
         return;
@@ -680,10 +677,10 @@ export function LeadsTable({ telecallers = [] }: LeadsTableProps) {
   }
 
   const handleAssignLead = async (leadId: string, telecallerId: string) => {
-    if (!db) return;
+    if (!db || !auth.currentUser) return;
     try {
       const leadDocRef = doc(db, `artifacts/${appId}/public/data/leads`, leadId);
-      const assignedById = auth.currentUser?.uid;
+      const assignedById = auth.currentUser.uid;
 
       await updateDoc(leadDocRef, {
         assigned_to: telecallerId === "unassigned" ? null : telecallerId,
@@ -708,7 +705,7 @@ export function LeadsTable({ telecallers = [] }: LeadsTableProps) {
   }
 
   const selectAllLeads = () => {
-    if (selectedLeads.length === paginatedLeads.length) {
+    if (selectedLeads.length > 0 && selectedLeads.length === paginatedLeads.length) {
       setSelectedLeads([])
     } else {
       setSelectedLeads(paginatedLeads.map(lead => lead.id))
@@ -717,10 +714,10 @@ export function LeadsTable({ telecallers = [] }: LeadsTableProps) {
 
   // Round-Robin Bulk Assignment Logic
   const handleBulkAssign = async () => {
-    if (bulkAssignTo.length === 0 || selectedLeads.length === 0 || !db) return
+    if (bulkAssignTo.length === 0 || selectedLeads.length === 0 || !db || !auth.currentUser) return
 
     try {
-      const assignedById = auth.currentUser?.uid;
+      const assignedById = auth.currentUser.uid;
       const telecallerIds = bulkAssignTo; 
       const leadsRef = collection(db, `artifacts/${appId}/public/data/leads`);
       
