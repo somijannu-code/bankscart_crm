@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { CalendarIcon, X, Phone, Clock, MessageSquare, DollarSign } from "lucide-react" 
+import { CalendarIcon, X, Phone, Clock, MessageSquare, IndianRupee } from "lucide-react" 
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
 import { useCallTracking } from "@/context/call-tracking-context"
@@ -222,10 +222,10 @@ export function LeadStatusUpdater({
           <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
             <div className="flex items-center gap-2 mb-2">
               <Phone className="h-4 w-4 text-blue-600" />
-              <span className="font-medium text-blue-800">Call Logging</span>
+              <span className="font-medium text-blue-800">a</span>
             </div>
             <p className="text-sm text-blue-700">
-              This call will be automatically logged when you update the status.
+              T.
             </p>
           </div>
         )}
@@ -250,7 +250,7 @@ export function LeadStatusUpdater({
           {/* New field for Loan Amount */}
           <div className="space-y-2">
             <label className="text-sm font-medium flex items-center gap-2">
-              <DollarSign className="h-4 w-4" />
+              <IndianRupee className="h-4 w-4" />
               Loan Amount:
             </label>
             <Input
