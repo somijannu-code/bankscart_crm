@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { CalendarIcon, X, Phone, Clock, MessageSquare, IndianRupee } from "lucide-react" 
+import { CalendarIcon, X, Phone, Clock, MessageSquare, DollarSign } from "lucide-react" 
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
 import { useCallTracking } from "@/context/call-tracking-context"
@@ -73,7 +73,7 @@ export function LeadStatusUpdater({
 
   const handleStatusUpdate = async () => {
     
-    // --- START VALIDATION CHECK ---
+    // --- START VALIDATION CHECK (Mandatory Reason for Not Eligible) ---
     const isNotEligible = status === "not_eligible"
     const isNoteEmpty = !note.trim()
 
@@ -133,7 +133,6 @@ export function LeadStatusUpdater({
       setCallbackDate(undefined)
       setCallNotes("")
       setCallDuration(0)
-      // Note: Keeping loanAmount state as it might be relevant for subsequent updates
       
       toast.success("Lead status updated successfully!")
 
@@ -212,6 +211,7 @@ export function LeadStatusUpdater({
           {isCallInitiated ? "Log Call & Update Status" : "Lead Status"}
         </CardTitle>
       </CardHeader>
+      {/* Added 'max-h-[80vh] overflow-y-auto' to CardContent to make it scrollable */}
       <CardContent className="space-y-4 max-h-[80vh] overflow-y-auto">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">Current Status:</span>
@@ -247,9 +247,10 @@ export function LeadStatusUpdater({
             </Select>
           </div>
 
+          {/* New field for Loan Amount */}
           <div className="space-y-2">
             <label className="text-sm font-medium flex items-center gap-2">
-              <IndianRupee className="h-4 w-4" />
+              <DollarSign className="h-4 w-4" />
               Loan Amount:
             </label>
             <Input
@@ -391,7 +392,7 @@ export function LeadStatusUpdater({
 
           <Button 
             onClick={handleStatusUpdate} 
-            disabled={isUpdating || (status === currentStatus && !isCallInitiated) || **isFormInvalid**}
+            disabled={isUpdating || (status === currentStatus && !isCallInitiated) || isFormInvalid}
             className="w-full"
           >
             {isUpdating ? "Updating..." : isCallInitiated ? "Log Call & Update Status" : "Update Status"}
