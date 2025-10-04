@@ -60,6 +60,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
+  // State for Status Filter
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [priorityFilter, setPriorityFilter] = useState<string>("all")
   const [assignedToFilter, setAssignedToFilter] = useState<string>("all")
@@ -100,11 +101,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
   const { telecallerStatus, loading: statusLoading } = useTelecallerStatus(allTelecallerIds)
 
-  const maxPagesToShow = 5 // Defined for pagination helper below
+  const maxPagesToShow = 5 
 
-  // --- NEW: Comprehensive list of all possible lead statuses for bulk update ---
   const allStatuses = ["New", "Contacted", "Interested", "Not_Eligible", "Dead", "Follow_Up"]
-  // -----------------------------------------------------------------------------
 
   const getSafeValue = (value: any, defaultValue: string = 'N/A') => {
     return value ?? defaultValue
@@ -118,6 +117,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       lead.phone.includes(searchTerm) ||
       (lead.company && lead.company.toLowerCase().includes(searchTerm.toLowerCase()))
     
+    // Status filter logic remains the same
     const matchesStatus = statusFilter === "all" || lead.status === statusFilter
     const matchesPriority = priorityFilter === "all" || lead.priority === priorityFilter
     const matchesAssignedTo = assignedToFilter === "all" || 
@@ -482,16 +482,15 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     return pages
   }
 
-  // --- NEW: Page Size options array ---
   const pageSizeOptions = [10, 20, 50, 100]
-  // ------------------------------------
 
   return (
     <div className="space-y-4">
       
-      {/* Search and Bulk Actions Bar */}
+      {/* Search, Status Filter, and Bulk Actions Bar */}
       <div className="flex flex-col md:flex-row gap-4 justify-between items-center p-4 border rounded-md bg-white shadow-sm">
         <div className="flex items-center gap-4 w-full md:w-auto">
+          {/* Search Bar */}
           <div className="relative w-full md:w-64">
             <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
             <Input
@@ -502,28 +501,29 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
             />
           </div>
           
+          {/* --- NEW/MOVED: Standalone Status Filter --- */}
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-40 flex-shrink-0">
+              <SelectValue placeholder="Filter by Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              {uniqueStatuses.map(status => (
+                <SelectItem key={`filter-status-${status}`} value={status}>{status.replace('_', ' ')}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {/* ------------------------------------------- */}
+          
+          {/* General Filter Dropdown (Now only for Priority and Assigned To) */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="flex items-center gap-2">
                 <Filter className="h-4 w-4" />
-                Filter
+                More Filters
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-56 p-2">
-              <div className="mb-2">
-                <label className="text-sm font-medium text-gray-700">Status</label>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-full mt-1">
-                    <SelectValue placeholder="All Statuses" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Statuses</SelectItem>
-                    {uniqueStatuses.map(status => (
-                      <SelectItem key={status} value={status}>{status}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
               <div className="mb-2">
                 <label className="text-sm font-medium text-gray-700">Priority</label>
                 <Select value={priorityFilter} onValueChange={setPriorityFilter}>
@@ -557,7 +557,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                 setPriorityFilter("all");
                 setAssignedToFilter("all");
               }}>
-                Clear Filters
+                Clear All Filters
               </Button>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -566,13 +566,13 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         {/* Bulk Actions and Column Visibility */}
         <div className="flex items-center gap-4 w-full md:w-auto mt-4 md:mt-0">
           
-          {/* Bulk Status Update (Now uses the comprehensive allStatuses list) */}
+          {/* Bulk Status Update */}
           <Select value={bulkStatus} onValueChange={setBulkStatus}>
             <SelectTrigger className="w-32">
               <SelectValue placeholder="Bulk Status" />
             </SelectTrigger>
             <SelectContent>
-              {allStatuses.map(status => ( // <-- FIX: Using comprehensive allStatuses
+              {allStatuses.map(status => (
                 <SelectItem key={`bulk-${status}`} value={status}>{status.replace('_', ' ')}</SelectItem>
               ))}
             </SelectContent>
@@ -798,7 +798,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       {filteredLeads.length > 0 && (
         <div className="flex items-center justify-between py-4">
           
-          {/* --- NEW: Page Size Selector and Status Display --- */}
           <div className="flex items-center gap-6">
             <div className="flex items-center space-x-2">
               <span className="text-sm text-gray-600">Leads per page:</span>
@@ -824,7 +823,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filteredLeads.length)} of {filteredLeads.length} leads (Total: {leads.length})
             </div>
           </div>
-          {/* ---------------------------------------------------- */}
           
           <div className="flex items-center space-x-2">
             <Button
