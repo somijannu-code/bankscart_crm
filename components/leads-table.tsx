@@ -669,7 +669,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                 />
               </TableHead>
               
-              {/* 🔑 FIX: Changed columnVisibility[col.key] to visibleColumns[col.key] */}
+              {/* 🔑 CORRECTED: Using visibleColumns[col.key] */}
               {columns.filter(col => col.key !== 'select' && visibleColumns[col.key]).map((column) => (
                 <TableHead 
                   key={column.key} 
@@ -705,7 +705,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     />
                   </TableCell>
 
-                  {/* 🔑 FIX: Changed columnVisibility.name to visibleColumns.name and similarly for all checks */}
+                  {/* 🔑 CORRECTED: Using visibleColumns.name */}
                   {visibleColumns.name && (
                     <TableCell className="font-medium text-blue-600 hover:underline">
                       <Link href={`/leads/${lead.id}`}>
