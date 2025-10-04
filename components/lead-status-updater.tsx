@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { CalendarIcon, X, Phone, Clock, MessageSquare, DollarSign } from "lucide-react" // Added DollarSign
+import { CalendarIcon, X, Phone, Clock, MessageSquare, IndianRupee } from "lucide-react" 
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
 import { useCallTracking } from "@/context/call-tracking-context"
@@ -46,35 +46,46 @@ export function LeadStatusUpdater({
   onStatusUpdate,
   isCallInitiated = false,
   onCallLogged,
-  initialLoanAmount = null, // Destructure new prop
+  initialLoanAmount = null,
 }: LeadStatusUpdaterProps) {
   const [status, setStatus] = useState(currentStatus)
   const [isUpdating, setIsUpdating] = useState(false)
-  const [note, setNote] = useState("")
-  const [remarks, setRemarks] = useState("") // New state for general remarks
+  const [note, setNote] = useState("") // This holds the 'Reason for Not Eligible'
+  const [remarks, setRemarks] = useState("")
   const [callbackDate, setCallbackDate] = useState<Date>()
-  const [callNotes, setCallNotes] = useState("") // New state for call notes
-  const [callDuration, setCallDuration] = useState(0) // New state for call duration
-  // New state for Loan Amount
+  const [callNotes, setCallNotes] = useState("")
+  const [callDuration, setCallDuration] = useState(0)
   const [loanAmount, setLoanAmount] = useState<number | null>(initialLoanAmount)
 
   const supabase = createClient()
   const { activeCall, startCall, endCall, updateCallDuration, formatDuration } = useCallTracking()
 
-  // If this is for a call, set default status to "contacted"
   useEffect(() => {
     if (isCallInitiated) {
       setStatus("contacted")
     }
   }, [isCallInitiated])
 
-  // Update loan amount if the initial prop changes (e.g., parent fetches new data)
   useEffect(() => {
     setLoanAmount(initialLoanAmount)
   }, [initialLoanAmount])
 
 
   const handleStatusUpdate = async () => {
+    
+    // --- START VALIDATION CHECK ---
+    const isNotEligible = status === "not_eligible"
+    const isNoteEmpty = !note.trim()
+
+    if (isNotEligible && isNoteEmpty) {
+      toast.error("Validation Failed", {
+        description: "Please specify the 'Reason for Not Eligible' before updating the status."
+      })
+      // Exit the function if validation fails
+      return 
+    }
+    // --- END VALIDATION CHECK ---
+
     setIsUpdating(true)
     try {
       const updateData: any = { 
@@ -93,7 +104,7 @@ export function LeadStatusUpdater({
       }
       
       // Add specific note if provided for Not Eligible status
-      if (status === "not_eligible" && note.trim()) {
+      if (isNotEligible && note.trim()) {
         updateData.notes = updateData.notes ? `${updateData.notes}\n\nReason for Not Eligible: ${note}` : `Reason for Not Eligible: ${note}`
       }
 
@@ -116,12 +127,16 @@ export function LeadStatusUpdater({
 
       onStatusUpdate?.(status, note, callbackDate?.toISOString())
       
-      // Reset form (keep loanAmount unless you want it reset)
+      // Reset form
       setNote("")
       setRemarks("")
       setCallbackDate(undefined)
       setCallNotes("")
       setCallDuration(0)
+      // Note: Keeping loanAmount state as it might be relevant for subsequent updates
+      
+      toast.success("Lead status updated successfully!")
+
     } catch (error) {
       console.error("Error updating lead status:", error)
       toast.error("Error updating lead status", {
@@ -143,7 +158,6 @@ export function LeadStatusUpdater({
         return
       }
 
-      // Get call duration from active call tracking if available
       let duration = callDuration
       if (activeCall && activeCall.leadId === leadId) {
         duration = await updateCallDuration(leadId, "")
@@ -155,7 +169,7 @@ export function LeadStatusUpdater({
           lead_id: leadId,
           user_id: user.id,
           call_type: "outbound",
-          call_status: "connected", // Default to connected for manual logging
+          call_status: "connected",
           duration_seconds: duration,
           notes: callNotes || remarks || "Call initiated from lead details",
         })
@@ -168,12 +182,10 @@ export function LeadStatusUpdater({
         description: `Duration: ${formatDuration(duration)}`
       })
 
-      // Notify parent component that call was logged
       if (data && onCallLogged) {
         onCallLogged(data.id)
       }
 
-      // End the active call tracking
       if (activeCall && activeCall.leadId === leadId) {
         endCall(leadId)
       }
@@ -189,6 +201,9 @@ export function LeadStatusUpdater({
 
   const showNoteField = status === "not_eligible"
   const showCallbackField = status === "follow_up"
+  
+  // Logic to determine if the update button should be disabled
+  const isFormInvalid = (status === "not_eligible" && !note.trim())
 
   return (
     <Card>
@@ -197,7 +212,6 @@ export function LeadStatusUpdater({
           {isCallInitiated ? "Log Call & Update Status" : "Lead Status"}
         </CardTitle>
       </CardHeader>
-      {/* Added 'max-h-[80vh] overflow-y-auto' to CardContent to make it scrollable */}
       <CardContent className="space-y-4 max-h-[80vh] overflow-y-auto">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">Current Status:</span>
@@ -233,10 +247,9 @@ export function LeadStatusUpdater({
             </Select>
           </div>
 
-          {/* New field for Loan Amount */}
           <div className="space-y-2">
             <label className="text-sm font-medium flex items-center gap-2">
-              <DollarSign className="h-4 w-4" />
+              <IndianRupee className="h-4 w-4" />
               Loan Amount:
             </label>
             <Input
@@ -251,7 +264,6 @@ export function LeadStatusUpdater({
             />
           </div>
 
-          {/* Call notes field - only shown when call is initiated */}
           {isCallInitiated && (
             <div className="space-y-2">
               <label className="text-sm font-medium flex items-center gap-2">
@@ -267,7 +279,6 @@ export function LeadStatusUpdater({
             </div>
           )}
 
-          {/* Call duration field - only shown when call is initiated */}
           {isCallInitiated && (
             <div className="space-y-2">
               <label className="text-sm font-medium flex items-center gap-2">
@@ -303,13 +314,20 @@ export function LeadStatusUpdater({
           {/* Note field for Not Eligible status */}
           {showNoteField && (
             <div className="space-y-2">
-              <label className="text-sm font-medium">Reason for Not Eligible:</label>
+              <label className="text-sm font-medium">
+                Reason for Not Eligible: <span className="text-red-500">* (Required)</span>
+              </label>
               <Textarea
                 placeholder="Please specify the reason why this lead is not eligible..."
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 rows={3}
+                // Apply a subtle error border if validation fails
+                className={cn(isFormInvalid && "border-red-500")} 
               />
+               {isFormInvalid && (
+                  <p className="text-sm text-red-500">This field is mandatory for 'Not Eligible' status.</p>
+                )}
             </div>
           )}
 
@@ -346,7 +364,7 @@ export function LeadStatusUpdater({
                           const [hours, minutes] = e.target.value.split(":").map(Number)
                           const newDate = new Date(callbackDate)
                           newDate.setHours(hours, minutes)
-                          newDate.setSeconds(0) // Ensure seconds are set to 0 for consistency
+                          newDate.setSeconds(0) 
                           setCallbackDate(newDate)
                         }
                       }}
@@ -373,7 +391,7 @@ export function LeadStatusUpdater({
 
           <Button 
             onClick={handleStatusUpdate} 
-            disabled={isUpdating || (status === currentStatus && !isCallInitiated)}
+            disabled={isUpdating || (status === currentStatus && !isCallInitiated) || **isFormInvalid**}
             className="w-full"
           >
             {isUpdating ? "Updating..." : isCallInitiated ? "Log Call & Update Status" : "Update Status"}
