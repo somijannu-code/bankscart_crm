@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input"
 import { LeadStatusDialog } from "@/components/lead-status-dialog"
 import { QuickActions } from "@/components/quick-actions"
-import { // <--- FIXED SYNTAX ERROR HERE
+import { 
   Dialog, DialogContent, DialogDescription, DialogFooter, 
   DialogHeader, DialogTitle, DialogTrigger 
 } from "@/components/ui/dialog"
@@ -83,8 +83,6 @@ interface SavedFilter {
 interface LeadsTableProps {
   leads: Lead[]
   telecallers: Array<{ id: string; full_name: string }>
-  // PROPOSED ADDITION for best practice (but not used in this fixed version)
-  // refreshLeads: () => void; 
 }
 
 export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
@@ -146,7 +144,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [showAutoAssignDialog, setShowAutoAssignDialog] = useState(false)
   const [autoAssignRules, setAutoAssignRules] = useState({
     enabled: false,
-    method: 'round-robin', // round-robin, location, loan-type
+    method: 'round-robin', // round-robin, workload, location, loan-type
     criteria: ''
   })
   
@@ -384,18 +382,28 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       headers.join(','),
       ...filteredLeads.map(lead => 
         headers.map(h => {
-          const val = lead[h as keyof Lead]
-          return typeof val === 'string' ? `"${val}"` : val
+          // Use a default value for complex or missing fields to prevent errors
+          let val: any = (lead as any)[h] 
+          if (h === 'assignedTo' && lead.assigned_user) {
+            val = lead.assigned_user.full_name
+          } else if (h === 'score') {
+            val = lead.lead_score
+          } else if (h === 'tags') {
+            val = (lead.tags || []).join('|')
+          }
+          
+          return typeof val === 'string' ? `"${val.replace(/"/g, '""')}"` : val ?? ''
         }).join(',')
       )
     ].join('\n')
     
-    const blob = new Blob([csvContent], { type: 'text/csv' })
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
     a.download = `leads-export-${new Date().toISOString()}.csv`
     a.click()
+    window.URL.revokeObjectURL(url)
   }
 
   // Save Filter
@@ -413,12 +421,13 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         tagFilter
       }
     }
-    setSavedFilters([...savedFilters, filter])
+    const newSavedFilters = [...savedFilters, filter]
+    setSavedFilters(newSavedFilters)
     setFilterName("")
     setShowSaveFilterDialog(false)
     
     // Save to localStorage
-    localStorage.setItem('savedFilters', JSON.stringify([...savedFilters, filter]))
+    localStorage.setItem('savedFilters', JSON.stringify(newSavedFilters))
   }
 
   // Load Filter
@@ -436,7 +445,12 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   useEffect(() => {
     const saved = localStorage.getItem('savedFilters')
     if (saved) {
-      setSavedFilters(JSON.parse(saved))
+      try {
+        setSavedFilters(JSON.parse(saved))
+      } catch (e) {
+        console.error("Error parsing saved filters from localStorage:", e)
+        setSavedFilters([])
+      }
     }
   }, [])
 
@@ -463,36 +477,30 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const handleBulkEmail = async () => {
     if (selectedLeads.length === 0) return
     
-    // Implementation would connect to email service
-    console.log('Sending email to', selectedLeads.length, 'leads')
-    console.log('Subject:', emailSubject)
-    console.log('Body:', emailBody)
-    
+    // Placeholder for actual email service integration
+    setSuccessMessage(`Simulated: Sent email to ${selectedLeads.length} leads.`)
     setShowEmailDialog(false)
     setEmailSubject("")
     setEmailBody("")
-    setSuccessMessage(`Successfully queued ${selectedLeads.length} emails.`)
     setSelectedLeads([])
+    setTimeout(() => setSuccessMessage(""), 5000)
   }
 
   const handleBulkSMS = async () => {
     if (selectedLeads.length === 0) return
     
-    // Implementation would connect to SMS service
-    console.log('Sending SMS to', selectedLeads.length, 'leads')
-    console.log('Message:', smsBody)
-    
+    // Placeholder for actual SMS service integration
+    setSuccessMessage(`Simulated: Sent SMS to ${selectedLeads.length} leads.`)
     setShowSMSDialog(false)
     setSmsBody("")
-    setSuccessMessage(`Successfully queued ${selectedLeads.length} SMS messages.`)
     setSelectedLeads([])
+    setTimeout(() => setSuccessMessage(""), 5000)
   }
 
-  // FIX: Removed window.location.reload()
   const handleBulkAssign = async (telecallerId: string) => {
     if (selectedLeads.length === 0) return
 
-    setSuccessMessage("")
+    setSuccessMessage(`Assigning ${selectedLeads.length} leads...`)
     setErrorMessage("")
     
     try {
@@ -515,25 +523,28 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       
       const errors = results.filter(result => result.error)
       if (errors.length > 0) {
-        throw new Error(`Failed to assign ${errors.length} leads`)
+        throw new Error(`Failed to assign ${errors.length} leads. See console for details.`)
       }
 
-      console.log(`Bulk assigned ${selectedLeads.length} leads to ${telecallerId}`)
+      setSuccessMessage(`Successfully bulk assigned ${selectedLeads.length} leads!`)
       setSelectedLeads([])
-      // window.location.reload() // REMOVED THIS
-      setSuccessMessage(`Successfully assigned ${selectedLeads.length} leads. Please refresh to see updates.`)
+      // Note: In a real app, you would use a global state update or fetch leads again, not window.location.reload()
+      // For this example, we keep reload to simulate a full data refresh
+      window.location.reload() 
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error bulk assigning leads:", error)
-      setErrorMessage('Error assigning leads. Please try again.')
+      setErrorMessage(`Error assigning leads: ${error.message || 'Unknown error'}`)
+    } finally {
+        setTimeout(() => setSuccessMessage(""), 5000)
+        setTimeout(() => setErrorMessage(""), 5000)
     }
   }
 
-  // FIX: Removed window.location.reload()
   const handleBulkStatusUpdate = async (newStatus: string) => {
     if (selectedLeads.length === 0) return
-
-    setSuccessMessage("")
+    
+    setSuccessMessage(`Updating status for ${selectedLeads.length} leads...`)
     setErrorMessage("")
 
     try {
@@ -553,25 +564,26 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       
       const errors = results.filter(result => result.error)
       if (errors.length > 0) {
-        throw new Error(`Failed to update status for ${errors.length} leads`)
+        throw new Error(`Failed to update status for ${errors.length} leads. See console for details.`)
       }
 
-      console.log(`Bulk updated status for ${selectedLeads.length} leads to ${newStatus}`)
+      setSuccessMessage(`Successfully updated status for ${selectedLeads.length} leads to ${newStatus}!`)
       setSelectedLeads([])
-      // window.location.reload() // REMOVED THIS
-      setSuccessMessage(`Successfully updated status for ${selectedLeads.length} leads to ${newStatus}. Please refresh to see updates.`)
+      window.location.reload()
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error bulk updating lead status:", error)
-      setErrorMessage('Error updating status. Please try again.')
+      setErrorMessage(`Error updating status: ${error.message || 'Unknown error'}`)
+    } finally {
+        setTimeout(() => setSuccessMessage(""), 5000)
+        setTimeout(() => setErrorMessage(""), 5000)
     }
   }
 
-  // FIX: Removed window.location.reload()
   const handleBulkAddTag = async (tag: string) => {
     if (selectedLeads.length === 0) return
 
-    setSuccessMessage("")
+    setSuccessMessage(`Adding tag to ${selectedLeads.length} leads...`)
     setErrorMessage("")
 
     try {
@@ -596,32 +608,34 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       
       const errors = results.filter(result => result.error)
       if (errors.length > 0) {
-        throw new Error(`Failed to add tag to ${errors.length} leads`)
+        throw new Error(`Failed to add tag to ${errors.length} leads. See console for details.`)
       }
 
-      console.log(`Added tag "${tag}" to ${selectedLeads.length} leads`)
+      setSuccessMessage(`Added tag "${tag}" to ${selectedLeads.length} leads!`)
       setSelectedLeads([])
-      // window.location.reload() // REMOVED THIS
-      setSuccessMessage(`Successfully added tag "${tag}" to ${selectedLeads.length} leads. Please refresh to see updates.`)
+      window.location.reload()
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error adding tag:", error)
-      setErrorMessage('Error adding tag. Please try again.')
+      setErrorMessage(`Error adding tag: ${error.message || 'Unknown error'}`)
+    } finally {
+        setTimeout(() => setSuccessMessage(""), 5000)
+        setTimeout(() => setErrorMessage(""), 5000)
     }
   }
 
-  // FIX: Changed alert to state message and removed window.location.reload()
   const handleAutoAssignLeads = async () => {
     if (!autoAssignRules.enabled || telecallers.length === 0) return
-
-    setSuccessMessage("")
+    
+    setSuccessMessage("Running auto-assignment...")
     setErrorMessage("")
 
     try {
       const unassignedLeads = enrichedLeads.filter(l => !l.assigned_to)
       
       if (unassignedLeads.length === 0) {
-        setSuccessMessage('No unassigned leads found to auto-assign.')
+        setSuccessMessage('No unassigned leads found. Auto-assignment complete.')
+        setShowAutoAssignDialog(false)
         return
       }
 
@@ -678,23 +692,23 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       
       const errors = results.filter(result => result.error)
       if (errors.length > 0) {
-        throw new Error(`Failed to auto-assign ${errors.length} leads`)
+        throw new Error(`Failed to auto-assign ${errors.length} leads. See console for details.`)
       }
 
-      console.log(`Auto-assigned ${unassignedLeads.length} leads using ${autoAssignRules.method}`)
-      setSuccessMessage(`Successfully auto-assigned ${unassignedLeads.length} leads! Please refresh to see updates.`)
-      // window.location.reload() // REMOVED THIS
+      setSuccessMessage(`Successfully auto-assigned ${unassignedLeads.length} leads using ${autoAssignRules.method}!`)
+      setShowAutoAssignDialog(false)
+      window.location.reload()
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error auto-assigning leads:", error)
-      setErrorMessage('Error auto-assigning leads. Please try again.')
+      setErrorMessage(`Error auto-assigning leads: ${error.message || 'Unknown error'}`)
+    } finally {
+        setTimeout(() => setSuccessMessage(""), 5000)
+        setTimeout(() => setErrorMessage(""), 5000)
     }
   }
 
-  // FIX: Removed window.location.reload()
   const handleAddTag = async (leadId: string, tag: string) => {
-    setSuccessMessage("")
-    setErrorMessage("")
     try {
       const { error } = await supabase
         .from("leads")
@@ -704,19 +718,13 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         .eq("id", leadId)
 
       if (error) throw error
-      setSelectedLeadForTags(null) // Close dialog
-      // window.location.reload() // REMOVED THIS
-      setSuccessMessage(`Tag "${tag}" added to lead. Please refresh to see updates.`)
+      window.location.reload()
     } catch (error) {
       console.error("Error adding tag:", error)
-      setErrorMessage('Error adding tag. Please try again.')
     }
   }
 
-  // FIX: Removed window.location.reload()
   const handleRemoveTag = async (leadId: string, tag: string) => {
-    setSuccessMessage("")
-    setErrorMessage("")
     try {
       const lead = enrichedLeads.find(l => l.id === leadId)
       const newTags = (lead?.tags || []).filter(t => t !== tag)
@@ -727,12 +735,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         .eq("id", leadId)
 
       if (error) throw error
-      setSelectedLeadForTags(null) // Close dialog
-      // window.location.reload() // REMOVED THIS
-      setSuccessMessage(`Tag "${tag}" removed from lead. Please refresh to see updates.`)
+      window.location.reload()
     } catch (error) {
       console.error("Error removing tag:", error)
-      setErrorMessage('Error removing tag. Please try again.')
     }
   }
 
@@ -939,16 +944,16 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                           <span className="text-xs text-muted-foreground">Assign to telecaller with least leads</span>
                         </div>
                       </SelectItem>
-                      <SelectItem value="location">
+                      <SelectItem value="location" disabled>
                         <div className="flex flex-col">
-                          <span className="font-medium">By Location</span>
-                          <span className="text-xs text-muted-foreground">Match lead city with telecaller (Coming soon)</span>
+                          <span className="font-medium">By Location (Coming Soon)</span>
+                          <span className="text-xs text-muted-foreground">Match lead city with telecaller</span>
                         </div>
                       </SelectItem>
-                      <SelectItem value="loan-type">
+                      <SelectItem value="loan-type" disabled>
                         <div className="flex flex-col">
-                          <span className="font-medium">By Loan Type</span>
-                          <span className="text-xs text-muted-foreground">Match loan type with specialist (Coming soon)</span>
+                          <span className="font-medium">By Loan Type (Coming Soon)</span>
+                          <span className="text-xs text-muted-foreground">Match loan type with specialist</span>
                         </div>
                       </SelectItem>
                     </SelectContent>
@@ -976,7 +981,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                 <Button onClick={() => {
                   setShowAutoAssignDialog(false)
                   handleAutoAssignLeads()
-                }}>
+                }} disabled={!autoAssignRules.enabled || telecallers.length === 0}>
                   <Zap className="h-4 w-4 mr-2" />
                   Run Auto-Assignment Now
                 </Button>
@@ -1164,6 +1169,14 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               <span className="text-sm font-medium">
                 {selectedLeads.length} lead{selectedLeads.length !== 1 ? 's' : ''} selected
               </span>
+
+              {/* Debugging Aid: Show if telecallers list is empty */}
+              {telecallers.length === 0 && (
+                  <Badge variant="destructive" className="flex items-center gap-1">
+                      <AlertTriangle className="h-4 w-4" />
+                      No Telecallers Available for Assignment
+                  </Badge>
+              )}
               
               <div className="flex flex-wrap gap-2">
                 <Dialog open={showEmailDialog} onOpenChange={setShowEmailDialog}>
@@ -1246,34 +1259,43 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                   </DialogContent>
                 </Dialog>
 
+                {/* ASSIGN DROPDOWN MENU */}
                 <DropdownMenu>
-  <DropdownMenuTrigger asChild>
-    <Button size="sm" variant="outline">
-      <User className="h-4 w-4 mr-2" />
-      Assign
-    </Button>
-  </DropdownMenuTrigger>
-  <DropdownMenuContent>
-    <DropdownMenuLabel>Assign to Telecaller</DropdownMenuLabel>
-    <DropdownMenuSeparator />
-    <DropdownMenuItem onClick={() => handleBulkAssign('unassigned')}>
-      Unassign All
-    </DropdownMenuItem>
-    {telecallers.map((telecaller) => (
-      <DropdownMenuItem 
-        key={telecaller.id}
-        onClick={() => handleBulkAssign(telecaller.id)}
-      >
-        <div className="flex items-center gap-2">
-          {telecallerStatus[telecaller.id] !== undefined && (
-            <div className={`w-2 h-2 rounded-full ${telecallerStatus[telecaller.id] ? 'bg-green-500' : 'bg-red-500'}`} />
-          )}
-          {telecaller.full_name}
-        </div>
-      </DropdownMenuItem>
-    ))}
-  </DropdownMenuContent>
-</DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" variant="outline" disabled={telecallers.length === 0}>
+                      <User className="h-4 w-4 mr-2" />
+                      Assign
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuLabel>Assign to Telecaller</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => handleBulkAssign('unassigned')}>
+                      <div className="flex items-center gap-2">
+                          <X className="h-4 w-4 mr-2 text-red-500" />
+                          Unassign All
+                      </div>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    {telecallers.map((telecaller) => (
+                      <DropdownMenuItem 
+                        key={telecaller.id}
+                        onClick={() => handleBulkAssign(telecaller.id)}
+                      >
+                        <div className="flex items-center gap-2">
+                          {/* Online/Offline Status Indicator */}
+                          {telecallerStatus[telecaller.id] !== undefined && (
+                            <div 
+                              className={`w-2 h-2 rounded-full ${telecallerStatus[telecaller.id] ? 'bg-green-500' : 'bg-red-500'}`} 
+                              title={telecallerStatus[telecaller.id] ? 'Online' : 'Offline'}
+                            />
+                          )}
+                          {telecaller.full_name}
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -1303,17 +1325,18 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     <DropdownMenuItem onClick={() => handleBulkStatusUpdate('Disbursed')}>
                       Disbursed
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleBulkStatusUpdate('Not_Interested')}>
-                      Not Interested
-                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleBulkStatusUpdate('Call_Back')}>
                       Call Back
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => handleBulkStatusUpdate('Not_Interested')}>
+                      Not Interested
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleBulkStatusUpdate('not_eligible')}>
                       Not Eligible
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => handleBulkStatusUpdate('nr')}>
-                      NR
+                      NR (No Response)
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -1356,6 +1379,33 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       {/* Table or Kanban View */}
       {viewMode === 'table' ? (
         <div className="rounded-md border">
+          {/* Column Visibility Controls */}
+          <div className="p-2 border-b flex justify-end">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Layout className="h-4 w-4 mr-2" />
+                  Columns
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Toggle Columns</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {Object.keys(visibleColumns).map((columnKey) => (
+                  <DropdownMenuCheckboxItem
+                    key={columnKey}
+                    checked={visibleColumns[columnKey]}
+                    onCheckedChange={(checked) =>
+                      setVisibleColumns({ ...visibleColumns, [columnKey]: checked })
+                    }
+                  >
+                    {columnKey.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
           <Table>
             <TableHeader>
               <TableRow>
@@ -1392,7 +1442,11 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                 {visibleColumns.source && <TableHead>Source</TableHead>}
                 {visibleColumns.tags && <TableHead>Tags</TableHead>}
                 {visibleColumns.assignedTo && <TableHead>Assigned To</TableHead>}
-                {visibleColumns.created && <TableHead>Created</TableHead>}
+                {visibleColumns.created && (
+                  <TableHead className="cursor-pointer" onClick={() => handleSort('created_at')}>
+                    Created {sortField === 'created_at' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
+                  </TableHead>
+                )}
                 {visibleColumns.actions && <TableHead>Actions</TableHead>}
               </TableRow>
             </TableHeader>
@@ -1402,6 +1456,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                 const ScoreIcon = scoreBadge.icon
                 const isExpanded = expandedRows.has(lead.id)
                 
+                // Determine visible column count dynamically for colspan
+                const visibleColCount = Object.values(visibleColumns).filter(Boolean).length
+
                 return (
                   <>
                     <TableRow key={lead.id} className="hover:bg-gray-50">
@@ -1453,12 +1510,12 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <Button variant="ghost" size="sm" asChild>
-                              <a href={`tel:${lead.phone}`}>
+                              <a href={`tel:${lead.phone}`} title={`Call ${lead.phone}`}>
                                 <Phone className="h-4 w-4" />
                               </a>
                             </Button>
                             <Button variant="ghost" size="sm" asChild>
-                              <a href={`mailto:${lead.email}`}>
+                              <a href={`mailto:${lead.email}`} title={`Email ${lead.email}`}>
                                 <Mail className="h-4 w-4" />
                               </a>
                             </Button>
@@ -1471,7 +1528,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                       {visibleColumns.status && (
                         <TableCell>
                           <Badge className={getStatusColor(lead.status)}>
-                            {lead.status.replace('_', ' ').toUpperCase()}
+                            {lead.status.replace(/_/g, ' ').toUpperCase()}
                           </Badge>
                         </TableCell>
                       )}
@@ -1562,13 +1619,13 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     {/* Expandable Activity Timeline Row */}
                     {isExpanded && (
                       <TableRow>
-                        <TableCell colSpan={Object.values(visibleColumns).filter(Boolean).length + 2}>
+                        <TableCell colSpan={visibleColCount + 2}>
                           <Card className="m-2">
                             <CardHeader>
-                              <CardTitle className="text-sm">Activity Timeline</CardTitle>
+                              <CardTitle className="text-sm">Activity Timeline & Quick Info</CardTitle>
                             </CardHeader>
                             <CardContent>
-                              <div className="space-y-3">
+                              <div className="grid grid-cols-2 gap-4">
                                 <div className="flex items-start gap-3">
                                   <div className="p-2 bg-blue-100 rounded-full">
                                     <PhoneCall className="h-4 w-4 text-blue-600" />
@@ -1597,12 +1654,23 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                                 </div>
                                 <div className="flex items-start gap-3">
                                   <div className="p-2 bg-purple-100 rounded-full">
-                                    <FileText className="h-4 w-4 text-purple-600" />
+                                    <Building className="h-4 w-4 text-purple-600" />
                                   </div>
                                   <div className="flex-1">
-                                    <p className="text-sm font-medium">Notes & Activities</p>
+                                    <p className="text-sm font-medium">City</p>
                                     <p className="text-xs text-muted-foreground">
-                                      View full history in lead details
+                                      {lead.city || 'N/A'}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-start gap-3">
+                                  <div className="p-2 bg-amber-100 rounded-full">
+                                    <FileText className="h-4 w-4 text-amber-600" />
+                                  </div>
+                                  <div className="flex-1">
+                                    <p className="text-sm font-medium">Loan Type</p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {lead.loan_type || 'N/A'}
                                     </p>
                                   </div>
                                 </div>
@@ -1627,51 +1695,63 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         </div>
       ) : (
         /* Kanban Pipeline View */
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          {['new', 'contacted', 'Interested', 'Documents_Sent', 'Disbursed'].map((status) => {
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          {['new', 'contacted', 'Interested', 'Documents_Sent', 'Login', 'Disbursed', 'Call_Back', 'Not_Interested', 'not_eligible', 'nr'].map((status) => {
             const statusLeads = filteredLeads.filter(l => l.status === status)
+            // Skip columns with no leads or explicitly excluded statuses for Kanban if desired
+            // if (statusLeads.length === 0) return null
+            
             return (
-              <Card key={status}>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm flex items-center justify-between">
-                    <span>{status.replace('_', ' ')}</span>
-                    <Badge variant="secondary">{statusLeads.length}</Badge>
+              <Card key={status} className="bg-gray-50 flex-shrink-0 w-full min-w-[200px]">
+                <CardHeader className="pb-3 sticky top-0 bg-gray-50 z-10 border-b">
+                  <CardTitle className="text-sm font-semibold flex items-center justify-between">
+                    <span className="capitalize">{status.replace(/_/g, ' ')}</span>
+                    <Badge className={getStatusColor(status)}>{statusLeads.length}</Badge>
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
+                <CardContent className="space-y-2 max-h-[70vh] overflow-y-auto pt-3">
                   {statusLeads.slice(0, 10).map((lead) => {
                     const scoreBadge = getScoreBadge(lead.lead_score || 0)
                     return (
-                      <Card key={lead.id} className="p-3 hover:shadow-md transition-shadow cursor-pointer">
-                        <div className="space-y-2">
-                          <div className="flex items-start justify-between">
-                            <Link 
-                              href={`/admin/leads/${lead.id}`}
-                              className="font-medium text-sm hover:underline"
-                            >
-                              {lead.name}
-                            </Link>
-                            <Badge className={scoreBadge.color} className="text-xs">
-                              {lead.lead_score}
-                            </Badge>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            {formatCurrency(lead.loan_amount)}
-                          </p>
-                          <div className="flex items-center gap-1">
-                            {(lead.tags || []).slice(0, 2).map((tag) => (
-                              <Badge key={tag} variant="outline" className="text-[10px] px-1 py-0">
-                                {tag}
+                      <Link href={`/admin/leads/${lead.id}`} key={lead.id}>
+                        <Card className="p-3 hover:shadow-lg transition-shadow cursor-pointer border-l-4" 
+                              style={{ borderLeftColor: status === 'Disbursed' ? 'green' : (status === 'Not_Interested' ? 'red' : '#3b82f6') }}>
+                          <div className="space-y-2">
+                            <div className="flex items-start justify-between">
+                              <span className="font-medium text-sm hover:text-blue-600">
+                                {lead.name}
+                              </span>
+                              <Badge className={`${scoreBadge.color} text-[10px] px-1 py-0`}>
+                                {lead.lead_score}
                               </Badge>
-                            ))}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {formatCurrency(lead.loan_amount)} - {lead.city || 'N/A'}
+                            </p>
+                            <div className="flex items-center gap-1">
+                              {(lead.tags || []).slice(0, 2).map((tag) => (
+                                <Badge key={tag} variant="outline" className="text-[10px] px-1 py-0">
+                                  {tag}
+                                </Badge>
+                              ))}
+                            </div>
+                            {lead.assigned_user && (
+                              <p className="text-[10px] text-gray-500 flex items-center gap-1">
+                                <User className="h-3 w-3" />
+                                {lead.assigned_user.full_name}
+                              </p>
+                            )}
                           </div>
-                        </div>
-                      </Card>
+                        </Card>
+                      </Link>
                     )
                   })}
+                  {statusLeads.length === 0 && (
+                    <p className="text-sm text-center text-muted-foreground py-4">No leads here</p>
+                  )}
                   {statusLeads.length > 10 && (
-                    <p className="text-xs text-center text-muted-foreground">
-                      +{statusLeads.length - 10} more
+                    <p className="text-xs text-center text-muted-foreground mt-2">
+                      +{statusLeads.length - 10} more (Apply filters to view all)
                     </p>
                   )}
                 </CardContent>
@@ -1685,7 +1765,10 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       {viewMode === 'table' && totalPages > 1 && (
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Select value={pageSize.toString()} onValueChange={(v) => setPageSize(parseInt(v))}>
+            <Select value={pageSize.toString()} onValueChange={(v) => {
+              setPageSize(parseInt(v))
+              setCurrentPage(1) // Reset to first page on size change
+            }}>
               <SelectTrigger className="w-24">
                 <SelectValue />
               </SelectTrigger>
@@ -1727,41 +1810,46 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
           <DialogHeader>
             <DialogTitle>Duplicate Leads Detected</DialogTitle>
             <DialogDescription>
-              {duplicates.length} potential duplicates found
+              {duplicates.length} potential duplicate group(s) found
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            {duplicates.map((dup, idx) => (
-              <Card key={idx}>
-                <CardHeader>
-                  <CardTitle className="text-sm">
-                    Duplicate by {dup.type}: {dup.value}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    {dup.leads.map((lead: Lead) => (
-                      <div key={lead.id} className="flex items-center justify-between p-2 border rounded">
-                        <div>
-                          <p className="font-medium">{lead.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Created: {new Date(lead.created_at).toLocaleDateString()}
-                          </p>
+            {duplicates.length === 0 ? (
+                <p className="text-center text-gray-500">No duplicates found based on phone or email.</p>
+            ) : (
+                duplicates.map((dup, idx) => (
+                <Card key={idx}>
+                    <CardHeader>
+                    <CardTitle className="text-sm flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-orange-500" />
+                        Duplicate by {dup.type}: <span className="font-bold">{dup.value}</span> ({dup.leads.length} leads)
+                    </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                    <div className="space-y-2">
+                        {dup.leads.map((lead: Lead) => (
+                        <div key={lead.id} className="flex items-center justify-between p-2 border rounded hover:bg-gray-50">
+                            <div>
+                            <p className="font-medium">{lead.name} <Badge variant="secondary">{lead.status.replace('_', ' ')}</Badge></p>
+                            <p className="text-xs text-muted-foreground">
+                                Created: {new Date(lead.created_at).toLocaleDateString()}
+                            </p>
+                            </div>
+                            <div className="flex gap-2">
+                            <Button size="sm" variant="outline" asChild>
+                                <Link href={`/admin/leads/${lead.id}`}>View</Link>
+                            </Button>
+                            {/* <Button size="sm" variant="destructive">
+                                Delete
+                            </Button> */}
+                            </div>
                         </div>
-                        <div className="flex gap-2">
-                          <Button size="sm" variant="outline" asChild>
-                            <Link href={`/admin/leads/${lead.id}`}>View</Link>
-                          </Button>
-                          <Button size="sm" variant="destructive">
-                            Delete
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                        ))}
+                    </div>
+                    </CardContent>
+                </Card>
+                ))
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -1794,7 +1882,13 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
             <div className="space-y-2">
               <Label>Add Tag</Label>
               <div className="flex gap-2">
-                <Select onValueChange={(value) => handleAddTag(selectedLeadForTags!.id, value)}>
+                <Select 
+                  onValueChange={(value) => {
+                    handleAddTag(selectedLeadForTags!.id, value)
+                    setSelectedLeadForTags(null) // Close dialog or refresh state after selection
+                  }}
+                  value="" // controlled input
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select a tag" />
                   </SelectTrigger>
