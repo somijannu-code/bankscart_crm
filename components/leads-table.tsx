@@ -1216,8 +1216,12 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                       Assign
                     </Button>
                   </DropdownMenuTrigger>
-                  {/* FIX APPLIED HERE: Added forceMount to DropdownMenuContent */}
-                  <DropdownMenuContent forceMount>
+                  {/* FIX APPLIED: Added forceMount and high z-index class for clipping/stacking issues */}
+                  <DropdownMenuContent 
+                    forceMount 
+                    align="start" 
+                    className="z-[9999]" // High z-index to fix potential stacking context issue
+                  >
                     <DropdownMenuLabel>Assign to Telecaller</DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => handleBulkAssign('unassigned')}>
@@ -1297,7 +1301,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                         key={tag}
                         onClick={() => handleBulkAddTag(tag)}
                       >
-                        <Tag className="h-3 w-3 mr-2" />
+                        <Tag className="h-4 w-4 mr-2" />
                         {tag}
                       </DropdownMenuItem>
                     ))}
