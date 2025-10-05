@@ -20,7 +20,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input"
 import { LeadStatusDialog } from "@/components/lead-status-dialog"
 import { QuickActions } from "@/components/quick-actions"
- { 
+// 
+// --- FIX FOR SYNTAX ERROR BELOW ---
+//
+import { // <--- ADDED 'import' KEYWORD HERE
   Dialog, DialogContent, DialogDescription, DialogFooter, 
   DialogHeader, DialogTitle, DialogTrigger 
 } from "@/components/ui/dialog"
@@ -1247,7 +1250,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                   </DialogContent>
                 </Dialog>
                 
-                {/* *** UPDATED: Bulk Assignment Multi-Select DropdownMenu *** */}
+                {/* *** Bulk Assignment Multi-Select DropdownMenu *** */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button size="sm" variant="outline">
@@ -1531,7 +1534,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                         <TableCell>
                           {lead.assigned_user ? (
                             <div className="flex items-center gap-2">
-                              {/* *** UPDATED: Telecaller Status Badge in Table *** */}
+                              {/* *** Telecaller Status Badge in Table *** */}
                               {statusLoading ? (
                                   <span className="h-2 w-2 rounded-full bg-gray-400 animate-pulse" />
                               ) : (
