@@ -1,12 +1,11 @@
 import { createClient } from "@/lib/supabase/server"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Users, Filter, Download, BarChart3 } from "lucide-react"
+import { Users, Filter, BarChart3 } from "lucide-react"
 import { TelecallerLeadsTable } from "@/components/telecaller-leads-table"
 import { TelecallerLeadFilters } from "@/components/telecaller-lead-filters"
 import { redirect } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { LeadStatsCards } from "@/components/lead-stats-cards"
-import { ExportLeadsButton } from "@/components/export-leads-button"
 
 interface SearchParams {
   status?: string
@@ -88,19 +87,16 @@ export default async function TelecallerLeadsPage({
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header with Actions */}
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">My Leads</h1>
           <p className="text-gray-600 mt-1">Manage your assigned leads and track performance</p>
         </div>
-        <div className="flex items-center gap-3">
-          <ExportLeadsButton leads={leads || []} />
-          <Button variant="outline" className="flex items-center gap-2">
-            <BarChart3 className="h-4 w-4" />
-            Performance
-          </Button>
-        </div>
+        <Button variant="outline" className="flex items-center gap-2">
+          <BarChart3 className="h-4 w-4" />
+          Performance
+        </Button>
       </div>
 
       {/* Lead Statistics Dashboard */}
