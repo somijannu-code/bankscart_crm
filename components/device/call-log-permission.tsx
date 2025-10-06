@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Phone, Shield, CheckCircle } from "lucide-react"
-import { callLogsManager } from "@/components/ui/call-logs"
+import { callLogsManager } from "@/lib/device/call-logs"
 import { toast } from "sonner"
 
 interface CallLogPermissionProps {
