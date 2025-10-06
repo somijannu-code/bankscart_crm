@@ -9,13 +9,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Calendar } from "@/components/ui/calendar"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { CalendarIcon, X, Phone, Clock, MessageSquare, IndianRupee } from "lucide-react" 
-import { format } from "date-fns"
-import { cn } from "@/lib/utils"
+// REMOVED: Calendar, Popover, PopoverContent, PopoverTrigger
+// REMOVED: CalendarIcon, X 
+import { Phone, Clock, MessageSquare, IndianRupee } from "lucide-react" 
+// REMOVED: format, cn
 import { useCallTracking } from "@/context/call-tracking-context"
 import { toast } from "sonner"
+// NEW IMPORT for the modal
+import { ScheduleFollowUpModal } from "./schedule-follow-up-modal" 
+// Re-import format and cn (kept in case they are used elsewhere, e.g., useCallTracking)
+import { format } from "date-fns"
+import { cn } from "@/lib/utils"
+
 
 interface LeadStatusUpdaterProps {
   leadId: string
@@ -52,10 +57,13 @@ export function LeadStatusUpdater({
   const [isUpdating, setIsUpdating] = useState(false)
   const [note, setNote] = useState("") // This holds the 'Reason for Not Eligible'
   const [remarks, setRemarks] = useState("")
-  const [callbackDate, setCallbackDate] = useState<Date>()
+  // REMOVED: const [callbackDate, setCallbackDate] = useState<Date>()
   const [callNotes, setCallNotes] = useState("")
   const [callDuration, setCallDuration] = useState(0)
   const [loanAmount, setLoanAmount] = useState<number | null>(initialLoanAmount)
+  // NEW STATE for modal control
+  const [isModalOpen, setIsModalOpen] = useState(false) 
+  const [tempStatus, setTempStatus] = useState(currentStatus) // State to hold status before modal confirmation
 
   const supabase = createClient()
   const { activeCall, startCall, endCall, updateCallDuration, formatDuration } = useCallTracking()
@@ -70,6 +78,50 @@ export function LeadStatusUpdater({
     setLoanAmount(initialLoanAmount)
   }, [initialLoanAmount])
 
+  // NEW FUNCTION: Updates only the status to 'follow_up' after modal success
+  const updateLeadStatusToFollowUp = async () => {
+    try {
+      const updateData: any = { 
+        status: "follow_up",
+        last_contacted: new Date().toISOString()
+      }
+
+      // Add loan_amount if provided and valid
+      if (loanAmount !== null && !isNaN(loanAmount) && loanAmount >= 0) {
+        updateData.loan_amount = loanAmount
+      }
+
+      // Add general remarks/notes if provided
+      if (remarks.trim()) {
+        // We append the new remarks to the existing notes, if applicable
+        updateData.notes = remarks
+      }
+
+      const { error } = await supabase
+        .from("leads")
+        .update(updateData)
+        .eq("id", leadId)
+        
+      if (error) throw error
+      
+      // Update local state and notify parent
+      setStatus("follow_up")
+      onStatusUpdate?.("follow_up", note) 
+      
+      // OPTIONAL: Reset remarks/notes after successful update
+      setRemarks("")
+      setNote("")
+
+      toast.success("Lead status set to Call Back (Follow-up scheduled separately).");
+
+    } catch (error) {
+      console.error("Error updating lead status to follow_up:", error)
+      toast.error("Error setting lead status to Call Back", {
+        description: "Please update status manually."
+      })
+    }
+  }
+
 
   const handleStatusUpdate = async () => {
     
@@ -81,8 +133,15 @@ export function LeadStatusUpdater({
       toast.error("Validation Failed", {
         description: "Please specify the 'Reason for Not Eligible' before updating the status."
       })
-      // Exit the function if validation fails
       return 
+    }
+    // If 'follow_up' is selected, the update is handled by the modal's success callback,
+    // so we should only continue here if it's NOT 'follow_up'.
+    if (status === "follow_up") {
+      toast.error("Action required", {
+        description: "Please use the 'Schedule Follow-up' modal to set the callback date and time."
+      })
+      return
     }
     // --- END VALIDATION CHECK ---
 
@@ -108,10 +167,7 @@ export function LeadStatusUpdater({
         updateData.notes = updateData.notes ? `${updateData.notes}\n\nReason for Not Eligible: ${note}` : `Reason for Not Eligible: ${note}`
       }
 
-      // Add callback date if provided for Call Back status
-      if (status === "follow_up" && callbackDate) {
-        updateData.next_follow_up = callbackDate.toISOString()
-      }
+      // REMOVED: Logic for follow_up/callbackDate was here
 
       const { error } = await supabase
         .from("leads")
@@ -125,12 +181,13 @@ export function LeadStatusUpdater({
         await logCall()
       }
 
-      onStatusUpdate?.(status, note, callbackDate?.toISOString())
+      // We no longer pass callbackDate here
+      onStatusUpdate?.(status, note) 
       
       // Reset form
       setNote("")
       setRemarks("")
-      setCallbackDate(undefined)
+      // REMOVED: setCallbackDate(undefined)
       setCallNotes("")
       setCallDuration(0)
       
@@ -147,6 +204,7 @@ export function LeadStatusUpdater({
   }
 
   const logCall = async () => {
+    // ... (logCall remains unchanged)
     try {
       const {
         data: { user },
@@ -196,13 +254,16 @@ export function LeadStatusUpdater({
     }
   }
 
+
   const currentStatusOption = statusOptions.find((option) => option.value === status)
 
   const showNoteField = status === "not_eligible"
-  const showCallbackField = status === "follow_up"
+  // REMOVED: const showCallbackField = status === "follow_up"
   
   // Logic to determine if the update button should be disabled
-  const isFormInvalid = (status === "not_eligible" && !note.trim())
+  // Also disable if 'follow_up' is selected, as the status is updated by the modal success.
+  const isFormInvalid = (status === "not_eligible" && !note.trim()) || (status === "follow_up" && !isCallInitiated)
+
 
   return (
     <Card>
@@ -211,7 +272,6 @@ export function LeadStatusUpdater({
           {isCallInitiated ? "Log Call & Update Status" : "Lead Status"}
         </CardTitle>
       </CardHeader>
-      {/* Added 'max-h-[80vh] overflow-y-auto' to CardContent to make it scrollable */}
       <CardContent className="space-y-4 max-h-[80vh] overflow-y-auto">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">Current Status:</span>
@@ -233,7 +293,17 @@ export function LeadStatusUpdater({
         <div className="space-y-4">
           <div className="space-y-2">
             <label className="text-sm font-medium">Update Status:</label>
-            <Select value={status} onValueChange={setStatus}>
+            <Select 
+              value={status} 
+              onValueChange={(newStatus) => {
+                setTempStatus(newStatus) // Store the status temporarily
+                if (newStatus === "follow_up") {
+                  setIsModalOpen(true) // Open the modal
+                } else {
+                  setStatus(newStatus) // Update status immediately for others
+                }
+              }}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -246,6 +316,25 @@ export function LeadStatusUpdater({
               </SelectContent>
             </Select>
           </div>
+          
+          {/* Display a reminder/button if 'follow_up' is selected */}
+          {status === "follow_up" && (
+            <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-indigo-800">
+                  Follow-up selected. Please schedule the time.
+                </span>
+                <Button 
+                  size="sm" 
+                  variant="secondary"
+                  onClick={() => setIsModalOpen(true)}
+                >
+                  Schedule Now
+                </Button>
+              </div>
+            </div>
+          )}
+
 
           {/* New field for Loan Amount */}
           <div className="space-y-2">
@@ -332,73 +421,40 @@ export function LeadStatusUpdater({
             </div>
           )}
 
-          {/* Callback date field for Call Back status */}
-          {showCallbackField && (
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Schedule Call Back:</label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant={"outline"}
-                    className={cn(
-                      "w-full justify-start text-left font-normal",
-                      !callbackDate && "text-muted-foreground"
-                    )}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {callbackDate ? format(callbackDate, "PPP") : "Pick a date and time"}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0">
-                  <Calendar
-                    mode="single"
-                    selected={callbackDate}
-                    onSelect={setCallbackDate}
-                    initialFocus
-                  />
-                  <div className="p-3 border-t">
-                    <Input
-                      type="time"
-                      value={callbackDate ? format(callbackDate, "HH:mm") : ""}
-                      onChange={(e) => {
-                        if (callbackDate && e.target.value) {
-                          const [hours, minutes] = e.target.value.split(":").map(Number)
-                          const newDate = new Date(callbackDate)
-                          newDate.setHours(hours, minutes)
-                          newDate.setSeconds(0) 
-                          setCallbackDate(newDate)
-                        }
-                      }}
-                      className="w-full"
-                    />
-                  </div>
-                </PopoverContent>
-              </Popover>
-              {callbackDate && (
-                <div className="flex items-center gap-2 text-sm text-green-600">
-                  <span>Callback scheduled for: {format(callbackDate, "PPP 'at' h:mm a")}</span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setCallbackDate(undefined)}
-                    className="h-6 w-6 p-0"
-                  >
-                    <X className="h-3 w-3" />
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
+          {/* REMOVED: Callback date field for Call Back status */}
+          
 
           <Button 
             onClick={handleStatusUpdate} 
-            disabled={isUpdating || (status === currentStatus && !isCallInitiated) || isFormInvalid}
+            disabled={isUpdating || (status === currentStatus && !isCallInitiated && status !== "follow_up") || isFormInvalid || status === "follow_up"}
             className="w-full"
           >
             {isUpdating ? "Updating..." : isCallInitiated ? "Log Call & Update Status" : "Update Status"}
           </Button>
+          {(status === "follow_up" && !isCallInitiated) && (
+             <p className="text-sm text-gray-500 text-center">
+                The "Call Back" status is updated after scheduling a follow-up.
+            </p>
+          )}
         </div>
       </CardContent>
+      {/* NEW: ScheduleFollowUpModal Integration */}
+      <ScheduleFollowUpModal
+        open={isModalOpen}
+        onOpenChange={(open) => {
+          setIsModalOpen(open)
+          // If modal is closed (e.g., via Cancel or Esc) AND the original intention was follow_up,
+          // revert the status back if it hasn't been successfully set to 'follow_up'.
+          if (!open && tempStatus === "follow_up" && status !== "follow_up") {
+            setStatus(currentStatus) 
+          }
+        }}
+        onScheduleSuccess={() => {
+          // If scheduling is successful, update the lead status in the leads table
+          updateLeadStatusToFollowUp() 
+        }}
+        defaultLeadId={leadId}
+      />
     </Card>
   )
 }
