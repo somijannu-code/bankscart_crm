@@ -5,22 +5,21 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Phone, Shield, CheckCircle } from "lucide-react"
+import { CallTrackingProvider, useCallTracking } from "@/components/ui/call-tracking"
 
-export function CallLogPermission({ 
-  onPermissionGranted, 
-  onPermissionDenied 
-}: { 
+// Main component that uses the hook
+function CallLogPermissionContent({ onPermissionGranted, onPermissionDenied }: { 
   onPermissionGranted?: () => void 
   onPermissionDenied?: () => void 
 }) {
   const [permissionState, setPermissionState] = useState<"granted" | "denied" | "prompt">("prompt")
   const [isLoading, setIsLoading] = useState(false)
-  const [isSupported, setIsSupported] = useState(true)
+  const { isSupported } = useCallTracking()
 
   const requestPermission = async () => {
     setIsLoading(true)
     try {
-      // Simple permission request without external hooks
+      // Simulate permission request
       await new Promise(resolve => setTimeout(resolve, 1000))
       setPermissionState("granted")
       onPermissionGranted?.()
@@ -30,6 +29,24 @@ export function CallLogPermission({
     } finally {
       setIsLoading(false)
     }
+  }
+
+  if (!isSupported) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Phone className="h-5 w-5" />
+            Call Log Access
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-sm text-muted-foreground">
+            Automatic call logging not supported.
+          </div>
+        </CardContent>
+      </Card>
+    )
   }
 
   return (
@@ -71,5 +88,17 @@ export function CallLogPermission({
         )}
       </CardContent>
     </Card>
+  )
+}
+
+// Export the wrapped component
+export function CallLogPermission(props: { 
+  onPermissionGranted?: () => void 
+  onPermissionDenied?: () => void 
+}) {
+  return (
+    <CallTrackingProvider>
+      <CallLogPermissionContent {...props} />
+    </CallTrackingProvider>
   )
 }
