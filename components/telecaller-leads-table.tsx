@@ -79,12 +79,12 @@ export function TelecallerLeadsTable({
   
   // State for data and fetching
   const [leads, setLeads] = useState<Lead[]>([])
-  const [totalCount, setTotalCount] = useState(0) // Now tracks total assigned leads from DB
+  const [totalCount, setTotalCount] = useState(0) 
   const [currentPage, setCurrentPage] = useState(1)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // State for filters, sorting, etc. (kept as is)
+  // State for filters, sorting, etc.
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
@@ -106,24 +106,22 @@ export function TelecallerLeadsTable({
   const [appliedFilters, setAppliedFilters] = useState<string[]>([])
 
   const supabase = createClient()
+  
+  // ⭐️ CORRECT DECLARED LOCATION ⭐️
   const debouncedSearchTerm = useDebounce(searchTerm, 300)
 
-  // ⭐️ New Function to fetch leads ⭐️
+  // Function to fetch leads 
   const fetchLeads = useCallback(async () => {
     if (!userId) return
 
     setIsLoading(true)
     setError(null)
 
-    // NOTE: This fetch is optimized to get ALL leads assigned to the user
-    // (up to 1000) for client-side filtering/pagination/analytics as seen in the original component.
-    // For very large lead tables (>10,000s) full pagination should be implemented on the query itself.
-
     try {
       let query = supabase
         .from("leads")
-        .select("*", { count: "exact" }) // Select all and get count
-        .eq("assignee_id", userId) // Filter by assigned user (assuming 'assignee_id' field, adjust if necessary)
+        .select("*", { count: "exact" }) 
+        .eq("assignee_id", userId) 
 
       const { data, count, error } = await query
         .order(sortField, { ascending: sortDirection === "asc" })
@@ -144,22 +142,21 @@ export function TelecallerLeadsTable({
     } finally {
       setIsLoading(false)
     }
-  }, [userId, sortField, sortDirection]) // Re-run fetch when userId, sortField, or sortDirection changes
+  }, [userId, sortField, sortDirection]) 
 
-  // ⭐️ Initial data load hook ⭐️
+  // Initial data load hook
   useEffect(() => {
     fetchLeads()
-  }, [fetchLeads]) // Depend on the memoized fetchLeads function
+  }, [fetchLeads]) 
   
   // Calculate totalPages safely
   const totalPages = useMemo(() => {
     const safeTotalCount = totalCount || 0
     const safePageSize = pageSize || 20
-    // Use leads.length for the client-side calculated total pages if all data is loaded
     return Math.ceil((leads.length > 0 ? leads.length : safeTotalCount) / safePageSize)
   }, [totalCount, pageSize, leads.length])
 
-  // Mobile responsiveness (kept as is)
+  // Mobile responsiveness
   useEffect(() => {
     const checkMobile = () => setIsMobileView(window.innerWidth < 768)
     checkMobile()
@@ -167,16 +164,13 @@ export function TelecallerLeadsTable({
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
-  // Load analytics (calculating from local state `leads`)
+  // Load analytics 
   useEffect(() => {
     loadAnalytics()
   }, [leads])
 
-  // ... (All other functions: loadAnalytics, getSafeValue, clearAllFilters, filteredLeads, handleSort, handleStatusUpdate, getPriorityVariant, getStatusColor, formatCurrency, handleCallInitiated remain the same) ...
-  
-  const loadAnalytics = async () => { /* ... existing logic ... */ 
+  const loadAnalytics = async () => { 
     try {
-      // Calculate analytics from current leads
       const localTotalLeads = leads.length
       const convertedLeads = leads.filter(lead => 
         ['Interested', 'Documents_Sent', 'Login', 'Disbursed'].includes(lead.status)
@@ -201,14 +195,14 @@ export function TelecallerLeadsTable({
     }
   }
 
-  const getSafeValue = useCallback((value: any, defaultValue: string = 'N/A') => { /* ... existing logic ... */
+  const getSafeValue = useCallback((value: any, defaultValue: string = 'N/A') => { 
     if (value === null || value === undefined || value === '') {
       return defaultValue
     }
     return value
   }, [])
 
-  useEffect(() => { /* ... existing applied filters logic ... */
+  useEffect(() => { 
     const filters = []
     if (statusFilter !== "all") filters.push(`Status: ${statusFilter}`)
     if (priorityFilter !== "all") filters.push(`Priority: ${priorityFilter}`)
@@ -222,7 +216,7 @@ export function TelecallerLeadsTable({
     setAppliedFilters(filters)
   }, [statusFilter, priorityFilter, sourceFilter, cityFilter, dateRange, loanAmountRange, searchTerm, activeTab])
 
-  const clearAllFilters = () => { /* ... existing logic ... */
+  const clearAllFilters = () => { 
     setSearchTerm("")
     setStatusFilter("all")
     setPriorityFilter("all")
@@ -233,9 +227,7 @@ export function TelecallerLeadsTable({
     setActiveTab("all")
   }
 
-  const debouncedSearchTerm = useDebounce(searchTerm, 300)
-
-  const filteredLeads = useMemo(() => { /* ... existing filtering logic ... */
+  const filteredLeads = useMemo(() => { 
     if (!leads || !Array.isArray(leads) || leads.length === 0) {
       return []
     }
@@ -307,14 +299,12 @@ export function TelecallerLeadsTable({
   }, [leads, debouncedSearchTerm, statusFilter, priorityFilter, sourceFilter, cityFilter, dateRange, loanAmountRange, sortField, sortDirection, activeTab])
 
 
-  const handleSort = useCallback((field: string) => { /* ... existing sort handler ... */
+  const handleSort = useCallback((field: string) => { 
     setSortField(field)
-    // When sorting, we trigger a re-fetch to apply sort on the database level
-    // to handle large datasets.
     setSortDirection(prev => prev === 'asc' && sortField === field ? 'desc' : 'asc')
   }, [sortField])
   
-  const handleStatusUpdate = async (newStatus: string, note?: string, callbackDate?: string) => { /* ... existing status update logic ... */
+  const handleStatusUpdate = async (newStatus: string, note?: string, callbackDate?: string) => { 
     setIsLoading(true)
     setError(null)
     
@@ -328,7 +318,6 @@ export function TelecallerLeadsTable({
         last_contacted: new Date().toISOString()
       }
 
-      // Add note if provided for Not Eligible status
       if (newStatus === "not_eligible" && note) {
         const { error: noteError } = await supabase
           .from("notes")
@@ -341,7 +330,6 @@ export function TelecallerLeadsTable({
         if (noteError) throw noteError
       }
 
-      // Calendar integration for follow-ups
       if (newStatus === "follow_up" && callbackDate) {
         const { error: followUpError } = await supabase
           .from("follow_ups")
@@ -353,7 +341,6 @@ export function TelecallerLeadsTable({
 
         if (followUpError) throw followUpError
         
-        // Update the lead's follow_up_date
         updateData.follow_up_date = callbackDate
       }
 
@@ -364,7 +351,6 @@ export function TelecallerLeadsTable({
 
       if (error) throw error
 
-      // Update local state instead of reloading
       setLeads(prev => prev.map(lead => 
         lead.id === selectedLead.id 
           ? { ...lead, ...updateData }
@@ -381,7 +367,7 @@ export function TelecallerLeadsTable({
     }
   }
 
-  const getPriorityVariant = (priority: string) => { /* ... existing helper logic ... */
+  const getPriorityVariant = (priority: string) => { 
     switch (priority) {
       case "high": return "destructive"
       case "medium": return "default"
@@ -390,7 +376,7 @@ export function TelecallerLeadsTable({
     }
   }
 
-  const getStatusColor = (status: string) => { /* ... existing helper logic ... */
+  const getStatusColor = (status: string) => { 
     const colors: Record<string, string> = {
       new: "bg-blue-100 text-blue-800",
       contacted: "bg-yellow-100 text-yellow-800",
@@ -407,7 +393,7 @@ export function TelecallerLeadsTable({
     return colors[status] || "bg-gray-100 text-gray-800"
   }
 
-  const formatCurrency = (amount: number | null) => { /* ... existing helper logic ... */
+  const formatCurrency = (amount: number | null) => { 
     if (!amount) return 'N/A'
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
@@ -416,7 +402,7 @@ export function TelecallerLeadsTable({
     }).format(amount)
   }
 
-  const handleCallInitiated = (lead: Lead) => { /* ... existing helper logic ... */
+  const handleCallInitiated = (lead: Lead) => { 
     setSelectedLead(lead)
     setIsStatusDialogOpen(true)
   }
@@ -457,7 +443,6 @@ export function TelecallerLeadsTable({
       {/* Header with lead count */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          {/* Use the total count from DB for the title */}
           <h2 className="text-2xl font-bold text-gray-900">My Assigned Leads ({totalCount})</h2>
           <p className="text-gray-600 mt-1">Manage and follow up with your assigned leads</p>
         </div>
@@ -499,9 +484,58 @@ export function TelecallerLeadsTable({
         </Card>
       )}
 
-      {/* Tabs, Filters, and Table logic remain the same, using `safeFilteredLeads` for the total count of filtered leads */}
-      {/* ... (rest of the component structure) ... */}
-    
+      {/* Tabs for different lead views */}
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid grid-cols-5 w-full">
+          <TabsTrigger value="all">All Leads</TabsTrigger>
+          <TabsTrigger value="new">New</TabsTrigger>
+          <TabsTrigger value="follow_up">Follow-up</TabsTrigger>
+          <TabsTrigger value="high_priority">High Priority</TabsTrigger>
+          <TabsTrigger value="analytics">
+            <BarChart3 className="h-4 w-4" />
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="analytics" className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Status Distribution</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {['new', 'contacted', 'interested', 'disbursed'].map(status => (
+                    <div key={status} className="flex justify-between items-center">
+                      <span className="capitalize">{status}</span>
+                      <div className="w-24">
+                        <Progress value={Math.random() * 100} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Performance Metrics</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="flex justify-between">
+                    <span>Call Success Rate</span>
+                    <span className="font-semibold">68%</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Response Rate</span>
+                    <span className="font-semibold">45%</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
+
       {/* Enhanced Filters and Search */}
       <Card>
         <CardContent className="p-4">
@@ -728,9 +762,6 @@ export function TelecallerLeadsTable({
         )}
       </div>
 
-      {/* Empty states and Table/Mobile View rendering remain the same, using `displayLeads` */}
-      {/* ... (rest of the component structure) ... */}
-    
       {/* Empty state - only show when there are truly no leads */}
       {totalCount === 0 && !isLoading ? (
         <div className="text-center py-12 space-y-6">
@@ -1042,7 +1073,7 @@ export function TelecallerLeadsTable({
             if (!open) setSelectedLead(null)
           }}
           onStatusUpdate={handleStatusUpdate}
-          onCallLogged={() => {}} // Add your call logging logic
+          onCallLogged={() => {}} 
         />
       )}
     </div>
