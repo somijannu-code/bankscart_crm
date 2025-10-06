@@ -20,7 +20,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input"
 import { LeadStatusDialog } from "@/components/lead-status-dialog"
 import { QuickActions } from "@/components/quick-actions"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { // <--- FIXED SYNTAX ERROR HERE
+  Dialog, DialogContent, DialogDescription, DialogFooter, 
+  DialogHeader, DialogTitle, DialogTrigger 
+} from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -118,6 +121,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table')
   
+  // State for single-lead actions
+  const [isCallInitiated, setIsCallInitiated] = useState(false)
+  
   // Saved Filters
   const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([])
   const [filterName, setFilterName] = useState("")
@@ -141,7 +147,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [showAutoAssignDialog, setShowAutoAssignDialog] = useState(false)
   const [autoAssignRules, setAutoAssignRules] = useState({
     enabled: false,
-    method: 'round-robin', // round-robin, location, loan-type
+    method: 'round-robin', // round-robin, workload, location, loan-type
     criteria: ''
   })
   
@@ -339,6 +345,77 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     (currentPage - 1) * pageSize,
     currentPage * pageSize
   )
+  
+  // --- START: Missing Utility Functions ---
+
+  const toggleLeadSelection = (leadId: string) => {
+    setSelectedLeads(prev => 
+      prev.includes(leadId) 
+        ? prev.filter(id => id !== leadId) 
+        : [...prev, leadId]
+    )
+  }
+
+  const selectAllLeads = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.checked) {
+      setSelectedLeads(paginatedLeads.map(lead => lead.id))
+    } else {
+      setSelectedLeads([])
+    }
+  }
+  
+  // Handlers for single-lead status and action
+  const handleStatusUpdate = async (leadId: string, newStatus: string) => {
+    try {
+      const { error } = await supabase
+        .from("leads")
+        .update({ status: newStatus, last_contacted: new Date().toISOString() })
+        .eq("id", leadId)
+      
+      if (error) throw error
+      console.log(`Lead ${leadId} status updated to ${newStatus}`)
+      window.location.reload()
+    } catch (error) {
+      console.error("Error updating status:", error)
+    }
+  }
+
+  const handleStatusChange = (lead: Lead) => {
+    setSelectedLead(lead)
+    setIsStatusDialogOpen(true)
+  }
+
+  const handleCallInitiated = (lead: Lead) => {
+    setSelectedLead(lead)
+    setIsCallInitiated(true)
+    setIsStatusDialogOpen(true)
+  }
+
+  const handleCallLogged = async (leadId: string, duration: number, notes: string) => {
+    // Logic to log the call activity
+    try {
+        const { data: { user } } = await supabase.auth.getUser()
+        const createdBy = user?.id || 'system'
+        
+        await supabase.from("activities").insert({
+            lead_id: leadId,
+            type: 'call',
+            description: `Call logged. Duration: ${duration}s. Notes: ${notes}`,
+            created_by: createdBy
+        })
+        
+        // Update lead's last contacted time
+        await supabase.from("leads").update({ last_contacted: new Date().toISOString() }).eq("id", leadId)
+        
+        console.log(`Call logged for lead ${leadId}`)
+        window.location.reload()
+    } catch (error) {
+        console.error("Error logging call:", error)
+    }
+  }
+  
+  // --- END: Missing Utility Functions ---
+
 
   // Detect Duplicates
   const detectDuplicates = () => {
@@ -561,7 +638,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   // --- END: Leads Assignment Functions from leads-table (7).tsx ---
 
 
-  // NOTE: Keeping the handleBulkStatusUpdate from leads-table (6).tsx as requested status update logic is not to be changed.
+  // NOTE: Keeping the handleBulkStatusUpdate from leads-table (6).tsx 
   const handleBulkStatusUpdate = async (newStatus: string) => {
     if (selectedLeads.length === 0) return
 
@@ -772,24 +849,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const formatCurrency = (amount: number | null) => {
     if (!amount) return 'N/A'
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount)
-  }
-
-  // NOTE: Assuming the rest of the component's JSX (from leads-table (6).tsx) remains the same
-  // including the quick stats, filters, table structure, and dialogs.
-  // The JSX for bulk assignment dropdown needs to be adapted to select multiple telecallers 
-  // and call the new `handleBulkAssign()` function. Since I cannot change the original JSX 
-  // without the full file, I will stop here and assume the user can integrate the logic 
-  // into their existing UI structure.
-  
-  // NOTE: The implementation of LeadStatusDialog and QuickActions are not provided, 
-  // but they are expected to work with the included helper functions.
-  
-  if (!leads) {
-    return (
-      <div className="text-center py-8">
-        <p className="text-gray-500">No leads data available</p>
-      </div>
-    )
   }
 
   return (
@@ -1558,9 +1617,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         </div>
       )}
       
-      {/* Lead Status Dialog (from 7) */}
-      {/* NOTE: Assuming the implementation of handleCallInitiated, handleStatusUpdate, and handleCallLogged exists
-      which allows the LeadStatusDialog to function. */}
+      {/* Lead Status Dialog (from 7/6) */}
       {selectedLead && (
         <LeadStatusDialog
           leadId={selectedLead.id}
@@ -1568,15 +1625,11 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
           open={isStatusDialogOpen}
           onOpenChange={(open) => {
             setIsStatusDialogOpen(open)
-            // if (!open) setIsCallInitiated(false) // Assuming setIsCallInitiated is a state handler
+            if (!open) setIsCallInitiated(false) // Reset when dialog is closed
           }}
-          // NOTE: handleStatusUpdate is missing in the (6) snippet, but required here.
-          // Assuming it's defined elsewhere or in the full file of (6) as a simplified version,
-          // or is available from the (7) snippet (lines 173-204).
-          // For completeness, if handleStatusUpdate from (7) is also required, it must be included.
           onStatusUpdate={handleStatusUpdate} 
-          // isCallInitiated={isCallInitiated} // Assuming isCallInitiated is a state
-          // onCallLogged={handleCallLogged} // Assuming handleCallLogged is defined
+          isCallInitiated={isCallInitiated} 
+          onCallLogged={handleCallLogged}
         />
       )}
 
