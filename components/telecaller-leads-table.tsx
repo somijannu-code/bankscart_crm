@@ -165,6 +165,13 @@ export function TelecallerLeadsTable({
   const { toast } = useToast()
   const debouncedSearchTerm = useDebounce(searchTerm, 300)
 
+  // Calculate totalPages safely
+  const totalPages = useMemo(() => {
+    const safeTotalCount = totalCount || 0
+    const safePageSize = pageSize || 20
+    return Math.ceil(safeTotalCount / safePageSize)
+  }, [totalCount, pageSize])
+
   // Real-time updates
   const realtimeLeads = useRealtimeLeads("current-user-id")
 
