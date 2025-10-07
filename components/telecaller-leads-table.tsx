@@ -64,15 +64,10 @@ export function TelecallerLeadsTable({
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
     name: true,
     contact: true,
-    company: true,
     status: true,
     priority: true,
     created: true,
-    lastContacted: true,
     loanAmount: true,
-    loanType: true,
-    source: true,
-    actions: true
   })
   const supabase = createClient()
 
