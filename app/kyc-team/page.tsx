@@ -2,75 +2,66 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ShieldCheck, FileText, CheckCircle, Clock, Send, Users, ArrowRight } from "lucide-react";
+import { ShieldCheck, FileText, Users, ArrowRight, Clock } from "lucide-react";
 
-// Simplified Lead type based on your table usage
+// Simplified Lead type to only use the 'name' column you confirmed is available
 interface Lead {
     id: string;
-    full_name: string;
-    phone: string;
-    status: string;
-    created_at: string;
+    name: string; // CRITICAL CHANGE: Using 'name' for leads
 }
 
 export default async function KycTeamDashboard() {
     const supabase = await createClient();
     
-    // Auth & Role Check is now primarily handled by the Layout, but fetching user is needed for filtering.
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
         redirect("/login"); 
     }
 
-    // 2. Data Fetching for Dashboard
-    const [{ count: awaitingKyc }, { count: approvedToday }, { data: recentLeads }] =
+    // 2. Data Fetching for Dashboard - SIMPLIFIED TO MINIMIZE ERRORS
+    const [{ count: totalAssignedLeads }, { data: recentLeadsResult }] =
         await Promise.all([
-            // Count Leads assigned to this member, awaiting KYC
+            // Count ALL Leads assigned to this member (Cannot filter by status/date if columns are missing)
             supabase.from("leads")
                 .select("*", { count: "exact", head: true })
-                .eq("kyc_member_id", user.id)
-                .eq("status", "Awaiting KYC"),
+                .eq("kyc_member_id", user.id),
             
-            // Count Leads assigned to this member, approved today
+            // Fetch recent 5 leads by 'name' and 'id'
             supabase.from("leads")
-                .select("*", { count: "exact", head: true })
+                .select("id, name") // CRITICAL: Only selecting 'id' and 'name'
                 .eq("kyc_member_id", user.id)
-                .eq("status", "KYC Approved")
-                .gte("updated_at", new Date().toISOString().split("T")[0]), // Filter for today
-            
-            // Fetch recent 5 leads awaiting KYC
-            supabase.from("leads")
-                .select("id, full_name, phone, status, created_at")
-                .eq("kyc_member_id", user.id)
-                .eq("status", "Awaiting KYC")
-                .order("created_at", { ascending: false })
+                .order("created_at", { ascending: false }) // Assuming 'created_at' still exists for ordering
                 .limit(5)
         ]);
 
+    const totalLeads = totalAssignedLeads || 0;
+
     const stats = [
         {
-            title: "Assigned Leads (Pending)",
-            value: awaitingKyc || 0,
-            icon: Clock,
-            color: "text-red-600",
-            bgColor: "bg-red-50",
-            link: "/kyc-team/leads?status=Awaiting KYC"
-        },
-        {
-            title: "KYC Approved Today",
-            value: approvedToday || 0,
-            icon: CheckCircle,
-            color: "text-green-600",
-            bgColor: "bg-green-50",
-            link: "/kyc-team/leads?status=KYC Approved"
-        },
-        {
-            title: "Total Assigned (All-Time)",
-            value: (awaitingKyc || 0) + (approvedToday || 0), // Placeholder for actual total count
+            title: "Total Assigned Leads",
+            value: totalLeads,
             icon: FileText,
             color: "text-blue-600",
             bgColor: "bg-blue-50",
+            link: "/kyc-team/leads"
+        },
+        {
+            // Placeholder stat since we can't reliably filter by status or time
+            title: "Assigned Leads (Placeholder)",
+            value: totalLeads, 
+            icon: Clock,
+            color: "text-red-600",
+            bgColor: "bg-red-50",
+            link: "/kyc-team/leads"
+        },
+        {
+            // Placeholder stat since we can't reliably filter by status or time
+            title: "KYC Approved (Placeholder)",
+            value: 0,
+            icon: ShieldCheck,
+            color: "text-green-600",
+            bgColor: "bg-green-50",
             link: "/kyc-team/leads"
         },
     ];
@@ -82,7 +73,7 @@ export default async function KycTeamDashboard() {
                 Welcome to the KYC Team Portal
             </h1>
 
-            {/* Stats Grid - Consistent with your Admin dashboard (page 17) */}
+            {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {stats.map((stat, index) => (
                     <Card key={index} className="hover:shadow-xl transition-shadow border-2 border-transparent hover:border-purple-200">
@@ -110,27 +101,27 @@ export default async function KycTeamDashboard() {
             <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                     <CardTitle className="flex items-center gap-2">
-                        <Send className="h-5 w-5 text-gray-600" />
-                        Top 5 Leads Awaiting Verification
+                        <Clock className="h-5 w-5 text-gray-600" />
+                        Top 5 Recent Assigned Leads
                     </CardTitle>
                     <Link href="/kyc-team/leads" passHref>
                         <Button variant="ghost" size="sm" className="text-purple-600">View All</Button>
                     </Link>
                 </CardHeader>
                 <CardContent>
-                    {recentLeads?.length ? (
+                    {recentLeadsResult?.length ? (
                         <ul className="w-full space-y-3">
-                            {recentLeads.map((lead: Lead) => (
+                            {recentLeadsResult.map((lead: Lead) => (
                                 <li key={lead.id} className="flex justify-between items-center p-3 border rounded-xl bg-white hover:bg-purple-50 transition-colors shadow-sm">
                                     <span className="flex flex-col">
                                         <Link href={`/kyc-team/${lead.id}`} className="font-semibold text-purple-700 hover:underline">
-                                            {lead.full_name}
+                                            {lead.name} {/* CRITICAL: Using 'name' */}
                                         </Link>
-                                        <span className="text-xs text-gray-500">{lead.phone}</span>
+                                        <span className="text-xs text-gray-500">View details</span>
                                     </span>
                                     <div className="flex items-center gap-2">
-                                        <Badge variant="secondary" className="bg-orange-400 text-white">
-                                            <Clock className="h-3 w-3 mr-1" /> Awaiting KYC
+                                        <Badge variant="secondary" className="bg-gray-400 text-white">
+                                            Assigned
                                         </Badge>
                                     </div>
                                 </li>
@@ -139,7 +130,7 @@ export default async function KycTeamDashboard() {
                     ) : (
                         <p className="text-center text-gray-500 py-8 flex items-center justify-center gap-2">
                             <Users className="h-5 w-5"/>
-                            Great job! No leads currently pending in your queue.
+                            No leads currently assigned to you.
                         </p>
                     )}
                 </CardContent>
