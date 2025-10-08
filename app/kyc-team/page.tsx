@@ -27,16 +27,18 @@ export default async function KycTeamDashboard() {
                 .select("*", { count: "exact", head: true })
                 .eq("kyc_member_id", user.id),
             
-            // Fetch recent 5 leads by 'name' and 'id'
+            // Fetch recent 5 leads by 'name' and 'id'. 
+            // CRITICAL: We can no longer order by 'created_at'.
+            // The list will be ordered arbitrarily (by primary key ID).
             supabase.from("leads")
-                .select("id, name") // CRITICAL: Only selecting 'id' and 'name'
+                .select("id, name") 
                 .eq("kyc_member_id", user.id)
-                .order("created_at", { ascending: false }) // Assuming 'created_at' still exists for ordering
                 .limit(5)
         ]);
 
     const totalLeads = totalAssignedLeads || 0;
 
+    // All status-specific stats must be placeholders since the 'status' column is missing.
     const stats = [
         {
             title: "Total Assigned Leads",
@@ -47,8 +49,7 @@ export default async function KycTeamDashboard() {
             link: "/kyc-team/leads"
         },
         {
-            // Placeholder stat since we can't reliably filter by status or time
-            title: "Assigned Leads (Placeholder)",
+            title: "Pending Leads (Placeholder)",
             value: totalLeads, 
             icon: Clock,
             color: "text-red-600",
@@ -56,7 +57,6 @@ export default async function KycTeamDashboard() {
             link: "/kyc-team/leads"
         },
         {
-            // Placeholder stat since we can't reliably filter by status or time
             title: "KYC Approved (Placeholder)",
             value: 0,
             icon: ShieldCheck,
@@ -102,7 +102,7 @@ export default async function KycTeamDashboard() {
                 <CardHeader className="flex flex-row items-center justify-between">
                     <CardTitle className="flex items-center gap-2">
                         <Clock className="h-5 w-5 text-gray-600" />
-                        Top 5 Recent Assigned Leads
+                        Top 5 Assigned Leads (No sorting available)
                     </CardTitle>
                     <Link href="/kyc-team/leads" passHref>
                         <Button variant="ghost" size="sm" className="text-purple-600">View All</Button>
@@ -115,7 +115,7 @@ export default async function KycTeamDashboard() {
                                 <li key={lead.id} className="flex justify-between items-center p-3 border rounded-xl bg-white hover:bg-purple-50 transition-colors shadow-sm">
                                     <span className="flex flex-col">
                                         <Link href={`/kyc-team/${lead.id}`} className="font-semibold text-purple-700 hover:underline">
-                                            {lead.name} {/* CRITICAL: Using 'name' */}
+                                            {lead.name}
                                         </Link>
                                         <span className="text-xs text-gray-500">View details</span>
                                     </span>
