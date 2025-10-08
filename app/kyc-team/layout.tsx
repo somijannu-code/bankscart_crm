@@ -4,8 +4,8 @@ import KycSidebar from "@/components/kyc-team/KycSidebar";
 
 // Define the structure for the user's profile data
 interface UserProfile {
-  full_name: string | null;
-  role: string | null; // role can be null if profile fetch failed
+  name: string | null; // CRITICAL CHANGE: Assuming 'name' column based on your feedback
+  role: string | null; 
 }
 
 export default async function KycTeamLayout({ children }: { children: React.ReactNode }) {
@@ -18,16 +18,20 @@ export default async function KycTeamLayout({ children }: { children: React.Reac
   }
 
   // 2. Fetch the user's profile (name and role)
+  // FIX: Switched from 'full_name' to 'name' to align with likely schema
   const { data: profile, error } = await supabase
     .from('users')
-    .select('full_name, role')
+    .select('name, role') // Only selecting 'name' and 'role'
     .eq('id', user.id)
     .single();
     
   // 3. Check for errors or missing profile
   if (error) {
-      // Log the specific error for debugging on the server
+      // This error likely means the 'users' table or selected columns don't exist.
       console.error("Profile fetch error in KYC Layout:", error);
+      // Cannot determine role, so deny access and redirect to prevent crash
+      redirect("/"); 
+      return null;
   }
   
   // 4. Role Check: If profile is missing or role is incorrect, deny access
@@ -37,7 +41,7 @@ export default async function KycTeamLayout({ children }: { children: React.Reac
   }
 
   const userProfile: UserProfile = {
-    full_name: profile.full_name,
+    name: profile.name, // Accessing 'name'
     role: profile.role,
   };
 
