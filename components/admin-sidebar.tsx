@@ -19,14 +19,25 @@ const usePathname = () => "/admin";
 
 /**
  * Mock implementation of 'next/link'
- * Replaced with simple anchor tags or divs, preventing Next.js specific errors.
+ * FIX: Now uses window.location.href for actual navigation/redirection.
  */
-const Link = ({ children, href, title }) => (
-  // Use a simple div or anchor tag as a placeholder for navigation
-  <div onClick={(e) => console.log(`Navigating to ${href}`)} title={title} className="cursor-pointer">
-    {children}
-  </div>
-);
+const Link = ({ children, href, title }) => {
+    // Perform navigation when the component is clicked
+    const handleNavigation = (e) => {
+        // Prevent default action if it were an anchor tag, but using div/onClick here.
+        e.preventDefault(); 
+        console.log(`Navigating to ${href}`);
+        // Use standard browser navigation for redirection
+        window.location.href = href; 
+    };
+
+    return (
+        // Use a div wrapper that acts as the clickable area for the link
+        <div onClick={handleNavigation} title={title} className="cursor-pointer">
+            {children}
+        </div>
+    );
+};
 
 /**
  * Mock implementation of the generic Button component (based on shadcn/ui)
@@ -51,7 +62,7 @@ const Button = ({ children, className, variant, ...props }) => {
 
 /**
  * Self-contained Mock LogoutButton
- * Handles the logic for showing text/icon based on collapse state.
+ * Triggers a simple log and page reload on click.
  */
 const LogoutButton = ({ isCollapsed }) => (
     <Button
@@ -60,7 +71,11 @@ const LogoutButton = ({ isCollapsed }) => (
             "w-full text-red-600 hover:bg-red-50 hover:text-red-700 transition-all duration-300",
             isCollapsed ? "px-2 h-10 flex justify-center" : "px-4 gap-3 justify-start"
         )}
-        onClick={() => console.log("Logout triggered")}
+        onClick={() => {
+            console.log("Logout triggered. Refreshing page.");
+            // For a mock, a hard reload is sufficient to simulate state change
+            window.location.reload(); 
+        }}
     >
         <LogOut className={cn("h-5 w-5", !isCollapsed && "mr-1")} />
         {/* Text name is conditionally shown */}
@@ -89,16 +104,11 @@ const navigation = [
 
 export function AdminSidebar() {
   const pathname = usePathname()
-  // 1. State for managing the collapsed status
   const [isCollapsed, setIsCollapsed] = useState(false)
 
   const toggleCollapse = () => setIsCollapsed(!isCollapsed)
 
-  // 2. Dynamic classes for width control
   const sidebarWidthClass = isCollapsed ? "w-[70px]" : "w-64"
-
-  // 3. Class to hide text content smoothly
-  // Note: This is used within the Link buttons to hide the name
   const textVisibilityClass = isCollapsed ? "opacity-0 w-0 h-0 overflow-hidden" : "opacity-100 w-auto h-auto"
 
   return (
@@ -137,7 +147,6 @@ export function AdminSidebar() {
       {/* Navigation Links */}
       <nav className="flex-1 p-4 space-y-2">
         {navigation.map((item) => {
-          // Use hardcoded/mocked pathname for active check
           const isActive = pathname === item.href
           const Icon = item.icon
           return (
