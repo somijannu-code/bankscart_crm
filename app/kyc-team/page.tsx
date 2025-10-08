@@ -2,15 +2,28 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button"; // ADDED: Import Button
-import { Badge } from "@/components/ui/badge";   // ADDED: Import Badge
-import { ShieldCheck, FileText, Users, ArrowRight, Clock } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { 
+  ShieldCheck, FileText, Users, ArrowRight, Clock, 
+  CheckCircle, TrendingUp, XCircle
+} from "lucide-react";
 
-// Simplified Lead type to only use the 'name' column you confirmed is available
+// Updated Lead type now includes the 'status' column
 interface Lead {
     id: string;
-    name: string; // CRITICAL CHANGE: Using 'name' for leads
+    name: string;
+    status: string; // Assuming 'status' column is now available
 }
+
+// Define the available statuses for consistency
+const STATUSES = {
+    LOGIN_DONE: "Login Done",
+    UNDERWRITING: "Underwriting",
+    REJECTED: "Rejected",
+    APPROVED: "Approved",
+    DISBURSED: "Disbursed",
+} as const;
 
 export default async function KycTeamDashboard() {
     const supabase = await createClient();
@@ -21,58 +34,90 @@ export default async function KycTeamDashboard() {
         redirect("/login"); 
     }
 
-    // 2. Data Fetching for Dashboard - SIMPLIFIED TO MINIMIZE ERRORS
-    const [{ count: totalAssignedLeads }, { data: recentLeadsResult }] =
+    // 2. Data Fetching for Dashboard - Now filtering and counting by status
+    const [
+      { count: pendingUnderwriting }, 
+      { count: approvedToday }, 
+      { count: totalRejected },
+      { data: recentLeadsResult }
+    ] =
         await Promise.all([
-            // Count ALL Leads assigned to this member (Cannot filter by status/date if columns are missing)
+            // Count Leads in Underwriting
             supabase.from("leads")
                 .select("*", { count: "exact", head: true })
-                .eq("kyc_member_id", user.id),
-            
-            // Fetch recent 5 leads by 'name' and 'id'. 
-            // CRITICAL: We can no longer order by 'created_at'.
-            // The list will be ordered arbitrarily (by primary key ID).
-            supabase.from("leads")
-                .select("id, name") 
                 .eq("kyc_member_id", user.id)
+                .eq("status", STATUSES.UNDERWRITING),
+            
+            // Count Leads Approved today
+            supabase.from("leads")
+                .select("*", { count: "exact", head: true })
+                .eq("kyc_member_id", user.id)
+                .eq("status", STATUSES.APPROVED)
+                .gte("updated_at", new Date().toISOString().split("T")[0]), // Assuming 'updated_at' is now available
+            
+            // Count Total Rejected Leads
+            supabase.from("leads")
+                .select("*", { count: "exact", head: true })
+                .eq("kyc_member_id", user.id)
+                .eq("status", STATUSES.REJECTED),
+            
+            // Fetch recent 5 leads that are not yet Disbursed or Rejected
+            supabase.from("leads")
+                .select("id, name, status") // Now selecting 'status'
+                .eq("kyc_member_id", user.id)
+                .not("status", "in", [STATUSES.REJECTED, STATUSES.DISBURSED].join(',')) // Filters out final states
                 .limit(5)
         ]);
 
-    const totalLeads = totalAssignedLeads || 0;
-
-    // All status-specific stats must be placeholders since the 'status' column is missing.
     const stats = [
         {
-            title: "Total Assigned Leads",
-            value: totalLeads,
-            icon: FileText,
-            color: "text-blue-600",
-            bgColor: "bg-blue-50",
-            link: "/kyc-team/leads"
-        },
-        {
-            title: "Pending Leads (Placeholder)",
-            value: totalLeads, 
+            title: "Pending Underwriting",
+            value: pendingUnderwriting || 0,
             icon: Clock,
-            color: "text-red-600",
-            bgColor: "bg-red-50",
-            link: "/kyc-team/leads"
+            color: "text-amber-600",
+            bgColor: "bg-amber-50",
+            link: `/kyc-team/leads?status=${STATUSES.UNDERWRITING}`
         },
         {
-            title: "KYC Approved (Placeholder)",
-            value: 0,
-            icon: ShieldCheck,
+            title: "Approved (Today)",
+            value: approvedToday || 0,
+            icon: CheckCircle,
             color: "text-green-600",
             bgColor: "bg-green-50",
-            link: "/kyc-team/leads"
+            link: `/kyc-team/leads?status=${STATUSES.APPROVED}`
+        },
+        {
+            title: "Total Rejected",
+            value: totalRejected || 0,
+            icon: XCircle,
+            color: "text-red-600",
+            bgColor: "bg-red-50",
+            link: `/kyc-team/leads?status=${STATUSES.REJECTED}`
         },
     ];
+
+    const getStatusBadge = (status: string) => {
+        switch (status) {
+            case STATUSES.LOGIN_DONE:
+                return <Badge variant="secondary" className="bg-blue-400 text-white hover:bg-blue-500">Login Done</Badge>;
+            case STATUSES.UNDERWRITING:
+                return <Badge variant="secondary" className="bg-amber-500 text-white hover:bg-amber-600">Underwriting</Badge>;
+            case STATUSES.REJECTED:
+                return <Badge variant="secondary" className="bg-red-600 text-white hover:bg-red-700">Rejected</Badge>;
+            case STATUSES.APPROVED:
+                return <Badge variant="secondary" className="bg-green-600 text-white hover:bg-green-700">Approved</Badge>;
+            case STATUSES.DISBURSED:
+                return <Badge variant="secondary" className="bg-purple-600 text-white hover:bg-purple-700">Disbursed</Badge>;
+            default:
+                return <Badge variant="secondary">Unknown</Badge>;
+        }
+    };
 
     return (
         <div className="space-y-8 pb-8">
             <h1 className="text-3xl font-bold flex items-center gap-2 text-gray-800">
                 <ShieldCheck className="w-8 h-8 text-purple-600" />
-                Welcome to the KYC Team Portal
+                KYC Verification Dashboard
             </h1>
 
             {/* Stats Grid */}
@@ -103,8 +148,8 @@ export default async function KycTeamDashboard() {
             <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                     <CardTitle className="flex items-center gap-2">
-                        <Clock className="h-5 w-5 text-gray-600" />
-                        Top 5 Assigned Leads (No sorting available)
+                        <TrendingUp className="h-5 w-5 text-gray-600" />
+                        Top 5 Active Leads
                     </CardTitle>
                     <Link href="/kyc-team/leads" passHref>
                         <Button variant="ghost" size="sm" className="text-purple-600">View All</Button>
@@ -122,9 +167,7 @@ export default async function KycTeamDashboard() {
                                         <span className="text-xs text-gray-500">View details</span>
                                     </span>
                                     <div className="flex items-center gap-2">
-                                        <Badge variant="secondary" className="bg-gray-400 text-white">
-                                            Assigned
-                                        </Badge>
+                                        {getStatusBadge(lead.status)}
                                     </div>
                                 </li>
                             ))}
@@ -132,7 +175,7 @@ export default async function KycTeamDashboard() {
                     ) : (
                         <p className="text-center text-gray-500 py-8 flex items-center justify-center gap-2">
                             <Users className="h-5 w-5"/>
-                            No leads currently assigned to you.
+                            No active leads in your queue.
                         </p>
                     )}
                 </CardContent>
