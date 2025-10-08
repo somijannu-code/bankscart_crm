@@ -1,90 +1,11 @@
 "use client"
 
-import { useState } from 'react'
-import { LayoutDashboard, Users, UserPlus, FileSpreadsheet, BarChart3, Settings, MessageCircle, Calendar, FileText, ChevronLeft, LogOut } from "lucide-react"
-
-// --- Local Utility and Mock Components to ensure file is self-contained ---
-
-/**
- * Local implementation of 'cn' (classNames utility)
- * @param {...string} classes - Class strings to conditionally join.
- */
-const cn = (...classes) => classes.filter(Boolean).join(' ');
-
-/**
- * Mock implementation of 'next/navigation' usePathname
- * Hardcoded to '/admin' to simulate the active route for styling purposes.
- */
-const usePathname = () => "/admin";
-
-/**
- * Mock implementation of 'next/link'
- * Now uses window.location.href for actual navigation/redirection.
- */
-const Link = ({ children, href, title }) => {
-    // Perform navigation when the component is clicked
-    const handleNavigation = () => {
-        // Use standard browser navigation for redirection
-        window.location.href = href; 
-    };
-
-    return (
-        // Use a div wrapper that acts as the clickable area for the link
-        <div onClick={handleNavigation} title={title} className="cursor-pointer">
-            {children}
-        </div>
-    );
-};
-
-/**
- * Mock implementation of the generic Button component (based on shadcn/ui)
- */
-const Button = ({ children, className, variant, ...props }) => {
-    const baseClasses = "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ring-offset-background h-10";
-
-    const variantClasses = {
-        default: "bg-blue-600 text-white hover:bg-blue-700",
-        ghost: "hover:bg-gray-100 hover:text-gray-900",
-    };
-
-    return (
-        <button
-            className={cn(baseClasses, variantClasses[variant] || variantClasses.default, className)}
-            {...props}
-        >
-            {children}
-        </button>
-    );
-};
-
-/**
- * Self-contained Mock LogoutButton
- * Simulates a successful logout by redirecting to the root page ('/').
- */
-const LogoutButton = ({ isCollapsed }) => (
-    <Button
-        variant="ghost"
-        className={cn(
-            "w-full text-red-600 hover:bg-red-50 hover:text-red-700 transition-all duration-300",
-            isCollapsed ? "px-2 h-10 flex justify-center" : "px-4 gap-3 justify-start"
-        )}
-        onClick={() => {
-            // Simulate logout by redirecting to the root path
-            window.location.href = "/";
-        }}
-    >
-        <LogOut className={cn("h-5 w-5", !isCollapsed && "mr-1")} />
-        {/* Text name is conditionally shown */}
-        <span className={cn(
-            "whitespace-nowrap transition-all duration-300 ease-in-out",
-            isCollapsed ? "opacity-0 w-0 h-0 overflow-hidden" : "opacity-100 w-auto h-auto"
-        )}>
-            Logout
-        </span>
-    </Button>
-);
-
-// --- AdminSidebar Component ---
+import { Button } from "@/components/ui/button"
+import { LogoutButton } from "@/components/logout-button"
+import { LayoutDashboard, Users, UserPlus, FileSpreadsheet, BarChart3, Settings, MessageCircle, Calendar, FileText } from "lucide-react"
+import Link from "next/link"
+import { usePathname } from "next/navigation"
+import { cn } from "@/lib/utils"
 
 const navigation = [
   { name: "Dashboard", href: "/admin", icon: LayoutDashboard },
@@ -100,83 +21,33 @@ const navigation = [
 
 export function AdminSidebar() {
   const pathname = usePathname()
-  const [isCollapsed, setIsCollapsed] = useState(false)
-
-  const toggleCollapse = () => setIsCollapsed(!isCollapsed)
-
-  const sidebarWidthClass = isCollapsed ? "w-[70px]" : "w-64"
-  const textVisibilityClass = isCollapsed ? "opacity-0 w-0 h-0 overflow-hidden" : "opacity-100 w-auto h-auto"
 
   return (
-    // Main container with dynamic width and transition
-    <div className={cn(
-        "bg-white shadow-xl flex flex-col h-screen transition-all duration-300 ease-in-out relative z-10 border-r",
-        sidebarWidthClass
-    )}>
-
-      {/* Toggle Button - positioned absolutely on the right edge */}
-      <button
-        onClick={toggleCollapse}
-        className={cn(
-          "absolute top-6 right-[-12px] h-6 w-6 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg transition-transform duration-300 z-20 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500",
-          isCollapsed ? "rotate-180" : ""
-        )}
-        aria-expanded={!isCollapsed}
-        aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-      >
-        <ChevronLeft className="h-4 w-4" />
-      </button>
-
-      {/* Header/Logo Section */}
-      <div className="p-4 border-b">
-        <div className={cn("overflow-hidden transition-all duration-300", isCollapsed ? "h-6" : "h-auto")}>
-            <h1 className="text-xl font-bold text-gray-900 leading-tight">
-                {/* Show a shortened version when collapsed */}
-                {isCollapsed ? "BC" : "Bankscart CRM"}
-            </h1>
-            <p className={cn("text-sm text-gray-600 mt-1 transition-opacity duration-150", isCollapsed ? "opacity-0 h-0" : "opacity-100 h-auto")}>
-                Admin Panel
-            </p>
-        </div>
+    <div className="w-64 bg-white shadow-lg flex flex-col">
+      <div className="p-6 border-b">
+        <h1 className="text-xl font-bold text-gray-900">Bankscart CRM</h1>
+        <p className="text-sm text-gray-600 mt-1">Admin Panel</p>
       </div>
 
-      {/* Navigation Links */}
       <nav className="flex-1 p-4 space-y-2">
         {navigation.map((item) => {
           const isActive = pathname === item.href
-          const Icon = item.icon
           return (
-            <Link key={item.name} href={item.href} title={item.name}>
+            <Link key={item.name} href={item.href}>
               <Button
                 variant={isActive ? "default" : "ghost"}
-                className={cn(
-                  "w-full justify-start transition-all duration-300",
-                  isCollapsed ? "px-2 h-10 flex justify-center" : "px-4 gap-3", // Adjusted spacing for collapse
-                  isActive
-                    ? "bg-blue-600 text-white hover:bg-blue-700"
-                    : "text-gray-700 hover:bg-gray-100"
-                )}
+                className={cn("w-full justify-start gap-3", isActive && "bg-blue-600 text-white hover:bg-blue-700")}
               >
-                {/* Icon is always visible */}
-                <Icon className={cn("h-5 w-5", isCollapsed && "mx-auto")} />
-
-                {/* Text name is conditionally shown */}
-                <span className={cn(
-                    "whitespace-nowrap transition-all duration-300 ease-in-out",
-                    textVisibilityClass
-                )}>
-                  {item.name}
-                </span>
+                <item.icon className="h-4 w-4" />
+                {item.name}
               </Button>
             </Link>
           )
         })}
       </nav>
 
-      {/* Footer/Logout Section */}
       <div className="p-4 border-t">
-        {/* Pass isCollapsed to ensure the logout button collapses visually */}
-        <LogoutButton isCollapsed={isCollapsed} />
+        <LogoutButton />
       </div>
     </div>
   )
