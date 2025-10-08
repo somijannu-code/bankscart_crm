@@ -19,14 +19,11 @@ const usePathname = () => "/admin";
 
 /**
  * Mock implementation of 'next/link'
- * FIX: Now uses window.location.href for actual navigation/redirection.
+ * Now uses window.location.href for actual navigation/redirection.
  */
 const Link = ({ children, href, title }) => {
     // Perform navigation when the component is clicked
-    const handleNavigation = (e) => {
-        // Prevent default action if it were an anchor tag, but using div/onClick here.
-        e.preventDefault(); 
-        console.log(`Navigating to ${href}`);
+    const handleNavigation = () => {
         // Use standard browser navigation for redirection
         window.location.href = href; 
     };
@@ -62,7 +59,7 @@ const Button = ({ children, className, variant, ...props }) => {
 
 /**
  * Self-contained Mock LogoutButton
- * FIX: Now redirects to the root page ('/') instead of refreshing.
+ * Simulates a successful logout by redirecting to the root page ('/').
  */
 const LogoutButton = ({ isCollapsed }) => (
     <Button
@@ -72,7 +69,6 @@ const LogoutButton = ({ isCollapsed }) => (
             isCollapsed ? "px-2 h-10 flex justify-center" : "px-4 gap-3 justify-start"
         )}
         onClick={() => {
-            console.log("Logout successful. Redirecting to root.");
             // Simulate logout by redirecting to the root path
             window.location.href = "/";
         }}
@@ -179,6 +175,7 @@ export function AdminSidebar() {
 
       {/* Footer/Logout Section */}
       <div className="p-4 border-t">
+        {/* Pass isCollapsed to ensure the logout button collapses visually */}
         <LogoutButton isCollapsed={isCollapsed} />
       </div>
     </div>
