@@ -2,10 +2,11 @@
 
 import { Button } from "@/components/ui/button"
 import { LogoutButton } from "@/components/logout-button"
-import { LayoutDashboard, Users, UserPlus, FileSpreadsheet, BarChart3, Settings, MessageCircle, Calendar, FileText } from "lucide-react"
+import { LayoutDashboard, Users, UserPlus, FileSpreadsheet, BarChart3, Settings, MessageCircle, Calendar, FileText, ChevronLeft, ChevronRight } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
+import { useState } from "react"
 
 const navigation = [
   { name: "Dashboard", href: "/admin", icon: LayoutDashboard },
@@ -21,33 +22,90 @@ const navigation = [
 
 export function AdminSidebar() {
   const pathname = usePathname()
+  const [isCollapsed, setIsCollapsed] = useState(false)
+
+  const toggleSidebar = () => {
+    setIsCollapsed(!isCollapsed)
+  }
 
   return (
-    <div className="w-64 bg-white shadow-lg flex flex-col">
-      <div className="p-6 border-b">
-        <h1 className="text-xl font-bold text-gray-900">Bankscart CRM</h1>
-        <p className="text-sm text-gray-600 mt-1">Admin Panel</p>
+    <div className={cn(
+      "bg-white shadow-lg flex flex-col transition-all duration-300 ease-in-out relative",
+      isCollapsed ? "w-16" : "w-64"
+    )}>
+      {/* Toggle Button */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className="absolute -right-3 top-6 h-6 w-6 rounded-full border bg-white shadow-md hover:bg-gray-50 z-10"
+        onClick={toggleSidebar}
+      >
+        {isCollapsed ? (
+          <ChevronRight className="h-3 w-3" />
+        ) : (
+          <ChevronLeft className="h-3 w-3" />
+        )}
+      </Button>
+
+      {/* Header */}
+      <div className={cn(
+        "p-6 border-b transition-all duration-300",
+        isCollapsed && "p-4"
+      )}>
+        <h1 className={cn(
+          "text-xl font-bold text-gray-900 transition-all duration-300",
+          isCollapsed && "text-center text-lg"
+        )}>
+          {isCollapsed ? "BC" : "Bankscart CRM"}
+        </h1>
+        {!isCollapsed && (
+          <p className="text-sm text-gray-600 mt-1">Admin Panel</p>
+        )}
       </div>
 
-      <nav className="flex-1 p-4 space-y-2">
+      {/* Navigation */}
+      <nav className={cn(
+        "flex-1 p-4 space-y-2 transition-all duration-300",
+        isCollapsed && "px-2"
+      )}>
         {navigation.map((item) => {
           const isActive = pathname === item.href
           return (
             <Link key={item.name} href={item.href}>
               <Button
                 variant={isActive ? "default" : "ghost"}
-                className={cn("w-full justify-start gap-3", isActive && "bg-blue-600 text-white hover:bg-blue-700")}
+                className={cn(
+                  "w-full justify-start gap-3 transition-all duration-200",
+                  isActive && "bg-blue-600 text-white hover:bg-blue-700",
+                  isCollapsed && "justify-center px-2"
+                )}
+                title={isCollapsed ? item.name : undefined}
               >
-                <item.icon className="h-4 w-4" />
-                {item.name}
+                <item.icon className="h-4 w-4 flex-shrink-0" />
+                <span className={cn(
+                  "transition-all duration-300",
+                  isCollapsed ? "w-0 opacity-0 hidden" : "w-auto opacity-100"
+                )}>
+                  {item.name}
+                </span>
               </Button>
             </Link>
           )
         })}
       </nav>
 
-      <div className="p-4 border-t">
-        <LogoutButton />
+      {/* Footer */}
+      <div className={cn(
+        "p-4 border-t transition-all duration-300",
+        isCollapsed && "px-2"
+      )}>
+        <LogoutButton 
+          className={cn(
+            "w-full justify-start gap-3",
+            isCollapsed && "justify-center px-2"
+          )}
+          showText={!isCollapsed}
+        />
       </div>
     </div>
   )
