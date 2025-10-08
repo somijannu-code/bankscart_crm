@@ -116,7 +116,7 @@ const LeadTransferModule = ({ lead, onTransferSuccess }: LeadTransferModuleProps
             const { data, error } = await supabase
                 .from('users') 
                 .select('id, email, full_name')
-                .eq('role', 'kyc-team')
+                .eq('role', 'kyc_team')
                 .limit(100);
 
             if (error) {
