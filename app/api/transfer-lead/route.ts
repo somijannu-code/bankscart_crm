@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
-import { transferLeadToKyc } from "@/lib/utils";
+import { transferLeadToKyc } from "@/lib/kyc-utils"; // UPDATED IMPORT PATH
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -10,8 +10,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   
-  // NOTE: Best practice is to check if 'user' has the 'telecaller' role here.
-
   try {
     const { leadId, kycMemberId } = await request.json();
 
