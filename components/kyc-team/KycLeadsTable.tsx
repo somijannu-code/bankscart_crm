@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { 
-  FileText, Search, Filter, ChevronDown, ChevronUp, MoreHorizontal, 
+  Phone, Search, Filter, ChevronDown, ChevronUp, MoreHorizontal, 
   Clock, CheckCircle, XCircle, Loader2, RefreshCw, Eye, Calendar, DollarSign
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ interface Lead {
   loan_amount: number | null;
   status: string;
   created_at: string;
+  kyc_member_id: string; // Include for real-time check
 }
 
 interface KycLeadsTableProps {
@@ -59,64 +60,69 @@ export default function KycLeadsTable({ currentUserId }: KycLeadsTableProps) {
 
   const supabase = createClient();
 
-  // 1. Data Fetching and Real-time Listener
-  const fetchLeads = () => {
-    setIsLoading(true);
-    // Create the base query: leads assigned to the current KYC member
-    let q = supabase
+  // 1. Data Fetching function
+  const fetchLeads = async (setLoading = false) => {
+    if (setLoading) setIsLoading(true);
+    
+    // Fetch leads assigned to the current KYC member
+    const { data, error } = await supabase
       .from("leads")
-      .select("id, full_name, phone, loan_amount, status, created_at")
+      // Ensure all necessary columns are selected, including kyc_member_id for data check
+      .select("id, full_name, phone, loan_amount, status, created_at, kyc_member_id")
       .eq("kyc_member_id", currentUserId)
-      .limit(1000); // Fetch a reasonable limit for in-memory filtering
+      .limit(1000); 
 
-    // We use onSnapshot for real-time updates
-    const subscription = q.on('d-t', payload => {
-        // If there's an insert, update, or delete, re-run the full query if necessary
-        // However, for simplicity and filtering complexity, we'll refetch on any change 
-        // that matches our criteria.
-        console.log("Real-time update received. Refetching leads...");
-        // Re-run the initial query without the listener attached
-        supabase
-            .from("leads")
-            .select("id, full_name, phone, loan_amount, status, created_at")
-            .eq("kyc_member_id", currentUserId)
-            .limit(1000)
-            .then(({ data, error }) => {
-                if (error) {
-                    console.error("Error fetching leads on update:", error);
-                } else {
-                    setLeads(data as Lead[]);
-                }
-                setIsLoading(false);
-            });
-    }).subscribe();
-
-    // Initial fetch
-    supabase
-        .from("leads")
-        .select("id, full_name, phone, loan_amount, status, created_at")
-        .eq("kyc_member_id", currentUserId)
-        .limit(1000)
-        .then(({ data, error }) => {
-            if (error) {
-                console.error("Initial leads fetch error:", error);
-            } else {
-                setLeads(data as Lead[]);
-            }
-            setIsLoading(false);
-        });
-
-    // Cleanup function for the listener
-    return () => {
-        subscription.unsubscribe();
-    };
+    if (error) {
+      console.error("Error fetching leads:", error);
+    } else {
+      setLeads(data as Lead[]);
+    }
+    if (setLoading) setIsLoading(false);
   };
 
+  // 2. Real-time Listener and Initial Load
   useEffect(() => {
-    return fetchLeads();
-  }, [currentUserId]);
+    // Initial fetch to populate the table
+    fetchLeads(true); 
 
-  // 2. Filtering, Sorting, and Pagination Logic
+    // Setup Real-time Listener for the 'leads' table
+    const channel = supabase.channel(`kyc_leads_user_${currentUserId}`);
+
+    const subscription = channel
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'leads' },
+        (payload) => {
+          // Determine if the change (insert, update, delete) is relevant to the current user
+          const changedLead = payload.new as Lead | null;
+          const oldLead = payload.old as Lead | null;
+          
+          // The lead is relevant if it is assigned to the current user either before or after the change
+          const isRelevant = 
+             changedLead?.kyc_member_id === currentUserId || 
+             oldLead?.kyc_member_id === currentUserId; 
+
+          if (isRelevant) {
+             console.log("Relevant lead change detected. Refetching leads...");
+             // Refetch all leads to maintain current filters, sorting, and pagination
+             fetchLeads(false); 
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log(`Subscribed to KYC leads changes for user: ${currentUserId}`);
+        }
+      });
+
+    // Cleanup function: remove the channel when the component unmounts or userId changes
+    return () => {
+        supabase.removeChannel(channel);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUserId]); // currentUserId is the dependency
+
+  // 3. Filtering, Sorting, and Pagination Logic
   const sortedLeads = useMemo(() => {
     let filtered = leads;
 
@@ -141,6 +147,9 @@ export default function KycLeadsTable({ currentUserId }: KycLeadsTableProps) {
         const aValue = a[sortConfig.key!];
         const bValue = b[sortConfig.key!];
 
+        if (aValue === null || aValue === undefined) return 1;
+        if (bValue === null || bValue === undefined) return -1;
+
         if (aValue < bValue) {
           return sortConfig.direction === 'ascending' ? -1 : 1;
         }
@@ -163,7 +172,7 @@ export default function KycLeadsTable({ currentUserId }: KycLeadsTableProps) {
 
   const totalPages = Math.ceil(sortedLeads.length / PAGE_SIZE);
 
-  // 3. UI Handlers
+  // 4. UI Handlers
   const requestSort = (key: keyof Lead) => {
     let direction: 'ascending' | 'descending' = 'ascending';
     if (sortConfig.key === key && sortConfig.direction === 'ascending') {
@@ -215,7 +224,7 @@ export default function KycLeadsTable({ currentUserId }: KycLeadsTableProps) {
               ))}
             </SelectContent>
           </Select>
-          <Button onClick={() => fetchLeads()} variant="outline" size="icon" disabled={isLoading}>
+          <Button onClick={() => fetchLeads(true)} variant="outline" size="icon" disabled={isLoading}>
             <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
           </Button>
         </div>
@@ -242,7 +251,7 @@ export default function KycLeadsTable({ currentUserId }: KycLeadsTableProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? (
+              {isLoading && leads.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="h-24 text-center">
                     <Loader2 className="w-6 h-6 animate-spin mx-auto text-primary" />
