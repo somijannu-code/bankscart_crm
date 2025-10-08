@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button"; // ADDED: Import Button
+import { Badge } from "@/components/ui/badge";   // ADDED: Import Badge
 import { ShieldCheck, FileText, Users, ArrowRight, Clock } from "lucide-react";
 
 // Simplified Lead type to only use the 'name' column you confirmed is available
