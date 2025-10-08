@@ -53,7 +53,7 @@ interface Lead {
   created_at: string
   updated_at: string
   assigned_to: string | null // Telecaller assignment
-  kyc_assigned_to: string | null // KYC Team assignment
+  kyc_member_id: string | null // KYC Team assignment (***UPDATED COLUMN NAME***)
   loan_amount: number | null;
   loan_type: string | null;
 }
@@ -116,12 +116,11 @@ const LeadTransferModule = ({ lead, onTransferSuccess }: LeadTransferModuleProps
             const { data, error } = await supabase
                 .from('users') 
                 .select('id, email, full_name')
-                .eq('role', 'kyc_team')
+                .eq('role', 'kyc-team')
                 .limit(100);
 
             if (error) {
                 console.error('Error fetching KYC users:', error);
-                // ** IMPROVED ERROR MESSAGE FOR RLS DEBUGGING **
                 setTransferError(`Could not load KYC team list. (Error: ${error.message}). Check RLS policies on 'users' table.`);
             } else if (data) {
                 console.log(`Successfully fetched ${data.length} KYC users.`);
@@ -145,9 +144,10 @@ const LeadTransferModule = ({ lead, onTransferSuccess }: LeadTransferModuleProps
         setIsTransferring(true);
         setTransferError(null);
 
+        // *** UPDATED PAYLOAD TO USE kyc_member_id ***
         const updatePayload = { 
             status: STATUSES.TRANSFERRED_TO_KYC,
-            kyc_assigned_to: selectedKycUserId,
+            kyc_member_id: selectedKycUserId, // <-- Writing to kyc_member_id
             updated_at: new Date().toISOString()
         };
 
@@ -163,7 +163,6 @@ const LeadTransferModule = ({ lead, onTransferSuccess }: LeadTransferModuleProps
 
         if (error) {
             console.error("Error transferring lead:", error);
-            // ** IMPROVED ERROR MESSAGE FOR UPDATE FAILURE **
             setTransferError(`Failed to transfer lead. (Error: ${error.message}). Check RLS 'UPDATE' policy on 'leads' table.`);
             toast({
                 title: "Transfer Failed",
@@ -183,8 +182,9 @@ const LeadTransferModule = ({ lead, onTransferSuccess }: LeadTransferModuleProps
     const isAlreadyTransferred = lead.status === STATUSES.TRANSFERRED_TO_KYC;
     const isButtonDisabled = isTransferring || isFetchingUsers || !selectedKycUserId || isAlreadyTransferred || kycUsers.length === 0;
 
-    const currentKycAssignee = lead.kyc_assigned_to 
-        ? kycUsers.find(u => u.id === lead.kyc_assigned_to)?.full_name || kycUsers.find(u => u.id === lead.kyc_assigned_to)?.email || lead.kyc_assigned_to.substring(0, 8) + '...'
+    // *** UPDATED DISPLAY LOGIC TO USE kyc_member_id ***
+    const currentKycAssignee = lead.kyc_member_id 
+        ? kycUsers.find(u => u.id === lead.kyc_member_id)?.full_name || kycUsers.find(u => u.id === lead.kyc_member_id)?.email || lead.kyc_member_id.substring(0, 8) + '...'
         : null;
 
     return (
@@ -304,13 +304,13 @@ export default function LeadDetailPage({ params }: EditLeadPageProps) {
         }
         setUser(userData?.user)
         
-        // Fetch Lead details (including the new kyc_assigned_to field)
+        // Fetch Lead details (***UPDATED SELECT QUERY FOR kyc_member_id***)
         const { data: leadData, error: leadError } = await supabase
             .from('leads')
             .select(`
                 id, name, email, phone, company, designation, source, 
                 status, priority, created_at, updated_at, assigned_to, 
-                kyc_assigned_to, loan_amount, loan_type
+                kyc_member_id, loan_amount, loan_type 
             `)
             .eq('id', leadId)
             .single()
@@ -423,7 +423,7 @@ export default function LeadDetailPage({ params }: EditLeadPageProps) {
         const newLead = { 
             ...(lead as Lead), 
             status: STATUSES.TRANSFERRED_TO_KYC, 
-            kyc_assigned_to: kycUserId 
+            kyc_member_id: kycUserId // <-- Update local state with new column name
         }
         setLead(newLead);
         setEditableLeadData(newLead);
@@ -591,8 +591,8 @@ export default function LeadDetailPage({ params }: EditLeadPageProps) {
                             {/* Read-Only Fields */}
                             <DetailItem label="Lead Source" value={lead.source || 'N/A'} />
                             <DetailItem label="Assigned Telecaller ID" value={lead.assigned_to ? lead.assigned_to.substring(0, 8) + '...' : 'Unassigned'} />
-                            {/* KYC ASSIGNMENT COLUMN (Read-only) */}
-                            <DetailItem label="Assigned KYC ID" value={lead.kyc_assigned_to ? lead.kyc_assigned_to.substring(0, 8) + '...' : 'None'} />
+                            {/* KYC ASSIGNMENT COLUMN (Read-only) - ***NOW USES kyc_member_id*** */}
+                            <DetailItem label="Assigned KYC ID" value={lead.kyc_member_id ? lead.kyc_member_id.substring(0, 8) + '...' : 'None'} />
                         </CardContent>
                     </Card>
 
