@@ -4,7 +4,7 @@ import KycSidebar from "@/components/kyc-team/KycSidebar";
 
 // Define the structure for the user's profile data
 interface UserProfile {
-  full_name: string | null; // CRITICAL CHANGE: Assuming 'name' column based on your feedback
+  full_name: string | null; // Corrected back to 'full_name'
   role: string | null; 
 }
 
@@ -17,31 +17,29 @@ export default async function KycTeamLayout({ children }: { children: React.Reac
     redirect("/login");
   }
 
-  // 2. Fetch the user's profile (name and role)
-  // FIX: Switched from 'full_name' to 'name' to align with likely schema
+  // 2. Fetch the user's profile (full_name and role)
   const { data: profile, error } = await supabase
     .from('users')
-    .select('full_name, role') // Only selecting 'name' and 'role'
+    .select('full_name, role') // CRITICAL: Selecting 'full_name'
     .eq('id', user.id)
     .single();
     
-  // 3. Check for errors or missing profile
-  if (error) {
-      // This error likely means the 'users' table or selected columns don't exist.
-      console.error("Profile fetch error in KYC Layout:", error);
-      // Cannot determine role, so deny access and redirect to prevent crash
+  // 3. Robust Error/Missing Profile Check
+  if (error || !profile) {
+      // If we can't get the profile or an error occurs, we assume they don't have access.
+      console.error("Profile fetch error in KYC Layout:", error || "Profile not found.");
+      // Redirect to a safe route to prevent the Server Component render from crashing.
       redirect("/"); 
-      return null;
   }
   
-  // 4. Role Check: If profile is missing or role is incorrect, deny access
-  if (!profile || profile.role !== 'kyc_team') {
-    console.warn(`Access denied for user ${user.id}. Role is ${profile?.role || 'null'}.`);
-    redirect("/"); // Redirect to a safe route (e.g., general dashboard or home)
+  // 4. Role Check
+  if (profile.role !== 'kyc_team') {
+    console.warn(`Access denied for user ${user.id}. Role is ${profile.role}.`);
+    redirect("/"); 
   }
 
   const userProfile: UserProfile = {
-    full_name: profile.full_name, // Accessing 'name'
+    full_name: profile.full_name,
     role: profile.role,
   };
 
