@@ -125,28 +125,31 @@ const fetchLeads = async (setLoading = false) => {
     const channel = supabase.channel(`kyc_leads_user_${currentUserId}`);
 
     const subscription = channel
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'leads' },
-        (payload) => {
-          const changedLead = payload.new as Lead | null;
-          const oldLead = payload.old as Lead | null;
-          
-          const isRelevant = 
-             changedLead?.kyc_member_id === currentUserId || 
-             oldLead?.kyc_member_id === currentUserId; 
+  .on(
+    'postgres_changes',
+    { event: '*', schema: 'public', table: 'leads' },
+    (payload) => {
+      const changedLead = payload.new as Lead | null;
+      const oldLead = payload.old as Lead | null;
+      
+      // Check both kyc_member_id and kyc_assigned_to columns
+      const isRelevant = 
+         changedLead?.kyc_member_id === currentUserId || 
+         changedLead?.kyc_assigned_to === currentUserId ||
+         oldLead?.kyc_member_id === currentUserId ||
+         oldLead?.kyc_assigned_to === currentUserId;
 
-          if (isRelevant) {
-             console.log("Relevant lead change detected. Refetching leads...");
-             fetchLeads(false); 
-          }
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log(`Subscribed to KYC leads changes for user: ${currentUserId}`);
-        }
-      });
+      if (isRelevant) {
+         console.log("Relevant lead change detected. Refetching leads...");
+         fetchLeads(false); 
+      }
+    }
+  )
+  .subscribe((status) => {
+    if (status === 'SUBSCRIBED') {
+      console.log(`Subscribed to KYC leads changes for user: ${currentUserId}`);
+    }
+  });
 
     return () => {
         supabase.removeChannel(channel);
