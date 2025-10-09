@@ -1,3 +1,4 @@
+// app/kyc-team/leads/page.tsx
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import KycLeadsTable from "@/components/kyc-team/KycLeadsTable";
@@ -12,9 +13,18 @@ export default async function KycLeadsPage() {
         redirect("/login");
     }
 
-    // Role check is handled by the layout, but a safety check here is fine
-    // In a real app, you might want to pre-fetch the initial leads data here
-    // for the server component to pass down to the client component.
+    // Get user role from the database
+    const { data: userData, error } = await supabase
+        .from("users") // or whatever your users table is called
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
+    if (error) {
+        console.error("Error fetching user role:", error);
+    }
+
+    const userRole = userData?.role || "unknown";
 
     return (
         <div className="space-y-6">
@@ -31,8 +41,12 @@ export default async function KycLeadsPage() {
                     <CardTitle>Leads Requiring Action</CardTitle>
                 </CardHeader>
                 <CardContent>
-                    {/* Client component handles filtering, fetching, and real-time updates */}
-                    <KycLeadsTable currentUserId={user.id} />
+                    {/* Pass all required props */}
+                    <KycLeadsTable 
+                        currentUserId={user.id} 
+                        initialStatus="all"
+                        userRole={userRole}
+                    />
                 </CardContent>
             </Card>
         </div>
