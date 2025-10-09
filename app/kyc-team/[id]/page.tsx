@@ -1,237 +1,48 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { 
-    Phone, Mail, MapPin, Calendar, MessageSquare, ArrowLeft, Clock, Save, User, DollarSign, 
-    Loader2, RefreshCw, XCircle, Hash, Briefcase, Ruler, Banknote, Percent, Building2, 
-    Home, Users, Heart, Gavel, FileText
-} from "lucide-react";
-
-// --- START: Firebase Global Declarations and Dynamic Loader ---
-// We use a React component wrapper to ensure the Firebase CDN scripts are loaded
-// before the application logic runs, making the functions globally available.
-
-// 1. Declare global Firebase functions as they would be imported via CDN
-declare const initializeApp: (config: any) => any;
-declare const getAuth: (app: any) => any;
-declare const signInAnonymously: (auth: any) => any;
-declare const signInWithCustomToken: (auth: any, token: string) => any;
-declare const getFirestore: (app: any) => any;
-declare const collection: (db: any, ...paths: string[]) => any;
-declare const query: (collectionRef: any, ...queryConstraints: any[]) => any;
-declare const where: (field: string, op: string, value: any) => any;
-declare const getDoc: (docRef: any) => any;
-declare const updateDoc: (docRef: any, updates: any) => any;
-declare const doc: (db: any, ...paths: string[]) => any;
-declare const onSnapshot: (ref: any, onNext: any, onError: any) => () => void;
-declare const setLogLevel: (level: string) => void;
-declare const getDocs: (query: any) => any;
-
-// Global variables provided by the Canvas environment
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-let dbInstance: any = null;
-let authInstance: any = null;
-let currentUserIdRef: string | null = null;
-let isFirebaseInitialized = false;
-
-const initializeFirebase = async () => {
-    if (isFirebaseInitialized) return;
-
-    // Wait until global functions are available (after CDN load)
-    if (typeof initializeApp === 'undefined') {
-        console.warn("initializeApp not yet available globally. Waiting...");
-        // In a real execution environment, the CDN load will resolve this.
-        // We rely on the environment's global scope being populated.
-        // If this still fails, the CDN loading needs to be checked externally.
-        if (typeof window !== 'undefined' && window.setTimeout) {
-             await new Promise(resolve => setTimeout(resolve, 500));
-        } else {
-             console.error("Firebase functions are not globally available. Cannot initialize.");
-             return;
-        }
-    }
-    
-    try {
-        setLogLevel('Debug');
-        const app = initializeApp(firebaseConfig);
-        dbInstance = getFirestore(app);
-        authInstance = getAuth(app);
-
-        if (initialAuthToken) {
-            await signInWithCustomToken(authInstance, initialAuthToken);
-        } else {
-            await signInAnonymously(authInstance);
-        }
-        currentUserIdRef = authInstance.currentUser?.uid || crypto.randomUUID();
-        isFirebaseInitialized = true;
-        console.log("Firebase initialized. User ID:", currentUserIdRef);
-
-    } catch (error) {
-        console.error("Error initializing Firebase/Supabase client:", error);
-    }
-};
-
-// Mock createClient to return an object that mimics Supabase functions using Firestore
+// --- START: FIX FOR UNRESOLVABLE IMPORTS ---
+// FIX 1: Mock createClient to avoid "@/lib/supabase/client" resolution error.
+// This mock object is structured to allow the .from().select() and .update() 
+// methods used in the component to compile, and provides mock data for preview.
 const createClient = () => {
-    if (!dbInstance) {
-        console.error("Firebase not initialized. Call initializeFirebase first.");
-        return null;
-    }
-
-    const getLeadsCollection = () => {
-        // Public data path for collaboration
-        return collection(dbInstance, 'artifacts', appId, 'public', 'data', 'kyc_leads');
-    };
-
     return {
-        from: (tableName: string) => ({
-            select: (fields: string) => ({
-                eq: (key: string, value: string) => ({
+        from: (table: string) => ({
+            select: (query: string) => ({
+                eq: (column: string, value: string) => ({
                     single: async () => {
-                        try {
-                            // Try fetching by doc ID first (most efficient)
-                            const leadDocRef = doc(getLeadsCollection(), value);
-                            const docSnap = await getDoc(leadDocRef);
-                            
-                            if (docSnap.exists()) {
-                                return { data: { id: docSnap.id, ...docSnap.data() }, error: null };
-                            } else {
-                                // Fallback: Query by field if doc ID failed (less efficient)
-                                const q = query(getLeadsCollection(), where(key, '==', value));
-                                const snapshot = await getDocs(q);
-                                if (snapshot.docs.length > 0) {
-                                    return { data: { id: snapshot.docs[0].id, ...snapshot.docs[0].data() }, error: null };
-                                }
-                                return { data: null, error: { message: "Lead not found" } };
-                            }
-                        } catch (e) {
-                            console.error("Firestore Select Error:", e);
-                            return { data: null, error: e };
-                        }
-                    }
+                        // This mock error will trigger the mock data display below.
+                        return { data: null, error: new Error("Mock error: Supabase not connected.") };
+                    },
                 }),
             }),
-            update: (updates: Partial<Lead>) => ({
-                eq: (key: string, value: string) => ({
-                    get: async () => {
-                        try {
-                            // We assume 'value' is the lead ID when 'key' is 'id'
-                            const leadDocRef = doc(getLeadsCollection(), value);
-                            await updateDoc(leadDocRef, { ...updates, updated_at: new Date().toISOString() } as any);
-                            return { error: null };
-                        } catch (e) {
-                            console.error("Firestore Update Error:", e);
-                            return { error: e };
-                        }
-                    }
-                })
-            })
+            update: async (data: any) => ({ error: null }),
         }),
         channel: (channelName: string) => ({
-            on: (type: string, options: any, callback: (payload: any) => void) => ({
-                subscribe: (statusCallback: (status: string) => void) => {
-                    const leadIdFromFilter = options.filter.split('=eq.')[1];
-                    const leadDocRef = doc(getLeadsCollection(), leadIdFromFilter);
-                    
-                    const unsubscribe = onSnapshot(leadDocRef, (docSnap: any) => {
-                        if (docSnap.exists()) {
-                            const payload = {
-                                new: { id: docSnap.id, ...docSnap.data() } as Lead,
-                                old: null,
-                                event: 'UPDATE'
-                            };
-                            callback(payload);
-                        }
-                    }, (error: any) => {
-                        console.error("Firestore Snapshot Error:", error);
-                    });
-                    
-                    statusCallback('SUBSCRIBED');
-                    
-                    return { unsubscribe, status: 'SUBSCRIBED' };
-                }
-            }),
-            subscribe: () => ({ status: 'SUBSCRIBED' }),
-            removeChannel: () => {}
-        })
+            on: () => ({ subscribe: () => ({ unsubscribe: () => {} }) }),
+            subscribe: () => ({ unsubscribe: () => {} }),
+        }),
     };
 };
-// --- END: Firebase Global Declarations and Dynamic Loader ---
 
-// Import necessary UI components (assuming they are available or mocked by the environment)
-const Card = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => <div className={`bg-white rounded-xl shadow-lg border border-gray-100 p-6 ${className}`}>{children}</div>;
-const CardHeader = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => <div className={`mb-4 ${className}`}>{children}</div>;
-const CardTitle = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => <h2 className={`text-xl font-semibold text-gray-800 ${className}`}>{children}</h2>;
-const CardContent = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => <div className={`space-y-4 ${className}`}>{children}</div>;
-const Badge = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => <span className={`inline-flex items-center px-3 py-0.5 rounded-full text-sm font-medium ${className}`}>{children}</span>;
-const Button = ({ children, onClick, disabled, className = "", variant = "default", size = "default" }: { children: React.ReactNode, onClick?: () => void, disabled?: boolean, className?: string, variant?: 'default' | 'outline' | 'ghost', size?: 'default' | 'sm' | 'icon' }) => (
-    <button 
-        onClick={onClick} 
-        disabled={disabled} 
-        className={`inline-flex items-center justify-center rounded-lg font-medium transition-colors 
-                    ${variant === 'default' ? 'bg-purple-600 text-white hover:bg-purple-700' : 
-                      variant === 'outline' ? 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50' :
-                      'text-gray-700 hover:bg-gray-100'}
-                    ${size === 'default' ? 'px-4 py-2 text-base' : 
-                      size === 'sm' ? 'px-3 py-1.5 text-sm' : 
-                      size === 'icon' ? 'h-10 w-10 p-0' : ''}
-                    ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${className}`}
-    >
-        {children}
-    </button>
-);
-const Input = ({ type = 'text', value, onChange, placeholder, className = "", disabled }: { type?: string, value: string, onChange: (e: React.ChangeEvent<HTMLInputElement>) => void, placeholder?: string, className?: string, disabled?: boolean }) => (
-    <input 
-        type={type} 
-        value={value} 
-        onChange={onChange} 
-        placeholder={placeholder} 
-        disabled={disabled}
-        className={`flex h-10 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm ring-offset-white 
-                    file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-gray-400 
-                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 focus-visible:ring-offset-2 
-                    disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
-    />
-);
-const Label = ({ children, htmlFor, className = "" }: { children: React.ReactNode, htmlFor?: string, className?: string }) => (
-    <label htmlFor={htmlFor} className={`text-sm font-medium text-gray-700 leading-none ${className}`}>{children}</label>
-);
-const Select = ({ value, onValueChange, disabled, children }: { value: string, onValueChange: (value: string) => void, disabled?: boolean, children: React.ReactNode }) => (
-    <select 
-        value={value} 
-        onChange={(e) => onValueChange(e.target.value)} 
-        disabled={disabled}
-        className="flex h-10 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 disabled:opacity-50"
-    >
-        {children}
-    </select>
-);
-const SelectItem = ({ value, children, disabled }: { value: string, children: React.ReactNode, disabled?: boolean }) => <option value={value} disabled={disabled}>{children}</option>;
-const Textarea = ({ value, onChange, placeholder, className = "", rows = 3, disabled }: { value: string, onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void, placeholder?: string, className?: string, rows?: number, disabled?: boolean }) => (
-    <textarea 
-        rows={rows} 
-        value={value} 
-        onChange={onChange} 
-        placeholder={placeholder} 
-        disabled={disabled}
-        className={`flex min-h-[80px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 disabled:opacity-50 ${className}`}
-    ></textarea>
-);
-const Tabs = ({ children }: { children: React.ReactNode }) => <div>{children}</div>;
-const TabsList = ({ children, className = "" }: { children: React.ReactNode, className?: string }) => <div className={`flex p-1 bg-gray-100 rounded-lg ${className}`}>{children}</div>;
-const TabsTrigger = ({ value, children, className = "", isActive, onClick }: { value: string, children: React.ReactNode, className?: string, isActive: boolean, onClick: (value: string) => void }) => (
-    <button 
-        onClick={() => onClick(value)} 
-        className={`flex-grow py-2 text-sm font-medium rounded-md transition-colors ${isActive ? 'bg-white shadow text-purple-700' : 'text-gray-500 hover:text-gray-700'} ${className}`}
-    >
-        {children}
-    </button>
-);
-const TabsContent = ({ children, value, currentTab }: { children: React.ReactNode, value: string, currentTab: string }) => currentTab === value ? <div className="mt-4">{children}</div> : null;
+// FIX 2: Mock useRouter to avoid "next/navigation" resolution error.
+// Uses console logging for navigation actions.
+const useRouter = () => ({
+    push: (path: string) => console.log('Navigation: Pushing to', path),
+    back: () => console.log('Navigation: Going back'),
+    replace: (path: string) => console.log('Navigation: Replacing with', path),
+});
+// --- END: FIX FOR UNRESOLVABLE IMPORTS ---
 
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Phone, Mail, MapPin, MessageSquare, ArrowLeft, Clock, Save, User, DollarSign, Loader2, XCircle, Briefcase, Banknote } from "lucide-react"; 
+import { useState, useEffect, useCallback } from "react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+// Assuming a toast library is available for notifications (like react-hot-toast)
 
 // --- 1. CONSTANTS AND UTILITIES ---
 
@@ -243,58 +54,70 @@ const STATUSES = {
     APPROVED: "Approved",
     DISBURSED: "Disbursed",
 } as const;
+
+// All possible status values for the Select component
 const STATUS_OPTIONS = Object.values(STATUSES);
 
-// Static options for Select inputs
-const GENDER_OPTIONS = ['MALE', 'FEMALE', 'OTHER'];
-const MARITAL_OPTIONS = ['MARRIED', 'UNMARRIED'];
-const RESIDENCE_OPTIONS = ['SELF_OWNED', 'RENTED', 'COMPANY_PROVIDED'];
-const OCCUPATION_OPTIONS = ['PRIVATE', 'GOVERNMENT', 'PUBLIC'];
-const PRIORITY_OPTIONS = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'];
-
-// Lead interface with ALL required fields
+// Updated Lead interface to include all requested fields
 interface Lead {
   id: string;
   name: string;
+  email: string | null; // Personal Mail ID
   phone: string;
-  loan_amount: number | null;
+  company: string | null;
+  designation: string | null;
+  source: string | null;
   status: string;
+  priority: string;
+  assigned_to: string | null;
   created_at: string;
-  updated_at: string; // Add updated_at for tracking changes
-  
-  // --- CONTACT/PERSONAL FIELDS ---
-  personal_email: string | null;
-  alt_phone: string | null; 
-  gender: 'MALE' | 'FEMALE' | 'OTHER' | null;
-  marital_status: 'MARRIED' | 'UNMARRIED' | null;
-  
-  // --- KYC/ADDRESS FIELDS ---
+  updated_at: string;
+  loan_amount: number | null;
+  loan_type: string | null;
+  // Existing address fields (assuming 'address' is Residence Address)
+  address: string | null; 
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  zip_code: string | null;
+
+  // --- NEW FIELDS ---
   pan_number: string | null;
-  application_number: string | null;
-  residence_address: string | null;
+  residence_address: string | null; // Added for explicit separation
   permanent_address: string | null;
   office_address: string | null;
-  residence_type: 'SELF_OWNED' | 'RENTED' | 'COMPANY_PROVIDED' | null;
-  
-  // --- PROFESSIONAL FIELDS ---
-  occupation: 'PRIVATE' | 'GOVERNMENT' | 'PUBLIC' | null;
-  designation: string | null;
-  monthly_salary: number | null; 
-  office_email: string | null; 
-  years_of_experience: number | null;
-  
-  // --- LOAN/BANKING FIELDS ---
+  application_number: string | null;
+  nth_salary: number | null;
+  office_mail_id: string | null;
   disbursed_amount: number | null;
-  roi_percent: number | null;
-  loan_tenure_months: number | null;
+  roi_percentage: number | null;
+  tenure: number | null; // in months
+  gender: 'Male' | 'Female' | 'Other' | null;
+  marital_status: 'Married' | 'Unmarried' | 'Divorced' | 'Widowed' | null;
+  residence_type: 'Self Owned' | 'Rented' | 'Company Provided' | null;
+  experience_years: number | null;
+  occupation: 'Private' | 'Government' | 'Public' | 'Self-Employed' | null;
+  alternative_mobile_number: string | null;
   bank_name: string | null;
   account_number: string | null;
-  
-  // --- CRM/ASSIGNMENT FIELDS ---
   telecaller_name: string | null;
-  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT' | null; // Nullable
-  assigned_to: string | null;
 }
+
+// Utility to format currency
+const formatCurrency = (value: number | null) => {
+    if (value === null || isNaN(Number(value))) return "N/A";
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0,
+    }).format(Number(value));
+};
+
+// Utility to format number
+const formatNumber = (value: number | null) => {
+    if (value === null || isNaN(Number(value))) return "N/A";
+    return new Intl.NumberFormat('en-IN').format(Number(value));
+};
 
 // Utility to get the status badge style
 const getStatusBadge = (status: string) => {
@@ -310,127 +133,111 @@ const getStatusBadge = (status: string) => {
         case STATUSES.DISBURSED:
             return <Badge className="bg-purple-600 text-white hover:bg-purple-700">Disbursed</Badge>;
         default:
-            return <Badge className="bg-gray-400 text-white">New/Unknown</Badge>;
+            return <Badge variant="secondary">New</Badge>;
     }
 };
 
-// Debounce utility (copied from previous fix)
-const debounce = (func: (...args: any[]) => void, delay: number) => {
-  let timeout: NodeJS.Timeout;
-  return function(this: any, ...args: any[]) {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func.apply(this, args), delay);
-  };
-};
+// --- 2. INLINE STATUS UPDATER COMPONENT ---
 
-
-// --- 2. EDITABLE FIELD COMPONENT (CORE) ---
-
-interface EditableFieldProps<T extends keyof Lead> {
-    lead: Lead;
-    field: T;
-    label: string;
-    type: 'text' | 'number' | 'email' | 'tel' | 'textarea' | 'select';
-    options?: string[]; // Required if type is 'select'
-    handleUpdate: (id: string, field: T, value: string | number | null) => void;
-    placeholder?: string;
-    icon: React.ReactNode;
-    maxLength?: number;
-    inputClass?: string;
+interface LeadStatusUpdaterProps {
+    leadId: string;
+    currentStatus: string;
+    onStatusUpdate: (newStatus: string) => void;
 }
 
-const EditableField = <T extends keyof Lead>({ 
-    lead, field, label, type, options, handleUpdate, placeholder, icon, maxLength, inputClass = ''
-}: EditableFieldProps<T>) => {
-    
-    // Type checking and conversion helpers
-    const getValueAsString = (val: Lead[T]): string => {
-        if (val === null || val === undefined) return '';
-        return String(val);
-    };
+const LeadStatusUpdater = ({ leadId, currentStatus, onStatusUpdate }: LeadStatusUpdaterProps) => {
+    const [newStatus, setNewStatus] = useState(currentStatus);
+    const [isUpdating, setIsUpdating] = useState(false);
+    const supabase = createClient();
 
-    const convertStringToValue = (str: string): string | number | null => {
-        if (str.trim() === '') return null;
-        if (type === 'number') {
-            const num = parseFloat(str);
-            return isNaN(num) ? null : num;
-        }
-        return str;
-    };
-    
-    const initialValue = getValueAsString(lead[field]);
-    const [value, setValue] = useState(initialValue);
-    const [isSaving, setIsSaving] = useState(false);
-
-    // Sync local state when parent data changes (e.g., real-time update)
+    // Reset status selector if parent component updates currentStatus (e.g., from real-time listener)
     useEffect(() => {
-        setValue(initialValue);
-    }, [initialValue]);
+        setNewStatus(currentStatus);
+    }, [currentStatus]);
 
-    // Debounced update function
-    const debouncedUpdate = useMemo(() => {
-        return debounce((id: string, field: T, finalValue: string | number | null) => {
-            handleUpdate(id, field, finalValue);
-            setIsSaving(false);
-        }, 1200);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [handleUpdate]);
-
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-        const newValue = e.target.value;
-        setValue(newValue);
-        setIsSaving(true);
-        
-        const finalValue = convertStringToValue(newValue);
-        debouncedUpdate(lead.id, field, finalValue as string | number | null);
-    };
-
-    const renderInput = () => {
-        const commonProps = {
-            value: value,
-            onChange: handleChange,
-            placeholder: placeholder || `Enter ${label}`,
-            disabled: isSaving,
-            className: `w-full ${inputClass}`
-        };
-
-        switch (type) {
-            case 'textarea':
-                return <Textarea {...commonProps as any} rows={3} />;
-            case 'select':
-                return (
-                    <Select value={value} onValueChange={(v) => handleChange({ target: { value: v } } as any)} disabled={isSaving}>
-                        <SelectItem value="" disabled>{placeholder || `Select ${label}`}</SelectItem>
-                        {options?.map(option => (
-                            <SelectItem key={option} value={option}>
-                                {option.replace(/_/g, ' ').toUpperCase()}
-                            </SelectItem>
-                        ))}
-                    </Select>
-                );
-            case 'number':
-                // Use type="text" with inputMode="numeric" for better cross-browser compatibility 
-                // and to prevent browser default number step controls.
-                return <Input {...commonProps} type="text" inputMode="numeric" pattern="[0-9]*" />;
-            default: // text, email, tel
-                return <Input {...commonProps} type={type} maxLength={maxLength} />;
+    const handleUpdate = useCallback(async () => {
+        if (newStatus === currentStatus) {
+            return;
         }
-    };
+
+        setIsUpdating(true);
+        // This will call the mocked supabase.update, which logs the update but doesn't persist it.
+        const { error } = await supabase
+            .from('leads')
+            .update({ status: newStatus, updated_at: new Date().toISOString() })
+            .eq('id', leadId);
+        
+        setIsUpdating(false);
+
+        if (error) {
+            console.error("Error updating status:", error);
+            // toast.error("Failed to update status. Please try again.");
+            setNewStatus(currentStatus); 
+        } else {
+            // toast.success(`Status updated to ${newStatus}`);
+            onStatusUpdate(newStatus); 
+        }
+    }, [newStatus, currentStatus, leadId, supabase, onStatusUpdate]);
+
+    const isSaveDisabled = isUpdating || newStatus === currentStatus;
 
     return (
-        <div className="flex flex-col space-y-1">
-            <Label className="flex items-center gap-2 text-gray-700">
-                {icon}
-                <span className="font-semibold text-sm">{label}</span>
-                {isSaving && <Loader2 className="h-4 w-4 animate-spin text-purple-500" />}
-            </Label>
-            {renderInput()}
-        </div>
+        <Card className="shadow-lg border-2 border-purple-200">
+            <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-xl text-purple-700">
+                    <Clock className="h-5 w-5" />
+                    Update Loan Status
+                </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <div className="flex items-center gap-4">
+                    <Label htmlFor="status-select" className="min-w-[80px]">Current Status:</Label>
+                    <div className="flex-grow">
+                        {getStatusBadge(currentStatus)}
+                    </div>
+                </div>
+                <div className="flex items-center gap-4">
+                    <Label htmlFor="status-select" className="min-w-[80px]">Set New Status:</Label>
+                    <Select 
+                        value={newStatus} 
+                        onValueChange={setNewStatus}
+                        disabled={isUpdating}
+                    >
+                        <SelectTrigger id="status-select" className="w-full">
+                            <SelectValue placeholder="Select a new status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {STATUS_OPTIONS.map(status => (
+                                <SelectItem key={status} value={status}>
+                                    {status}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <Button 
+                    onClick={handleUpdate} 
+                    disabled={isSaveDisabled}
+                    className="w-full bg-purple-600 hover:bg-purple-700 transition-colors"
+                >
+                    {isUpdating ? (
+                        <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Updating...
+                        </>
+                    ) : (
+                        <>
+                            <Save className="h-4 w-4 mr-2" />
+                            Save Status Change
+                        </>
+                    )}
+                </Button>
+            </CardContent>
+        </Card>
     );
 };
 
-
-// --- 3. MAIN LEAD PROFILE PAGE COMPONENT ---
+// --- 3. MAIN LEAD PROFILE PAGE ---
 
 interface LeadProfilePageProps {
   params: {
@@ -438,154 +245,157 @@ interface LeadProfilePageProps {
   };
 }
 
-function LeadProfileContent({ params }: LeadProfilePageProps) {
-  const router = { back: () => console.log('Simulating router back') }; // Mock router for this single-file environment
+export default function KycLeadProfilePage({ params }: LeadProfilePageProps) {
+  const router = useRouter();
   const leadId = params.id;
   const [lead, setLead] = useState<Lead | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [supabaseClient, setSupabaseClient] = useState<ReturnType<typeof createClient> | null>(null);
-  const [currentTab, setCurrentTab] = useState('kyc_details'); // Default tab
-  
-  // State to track Firebase initialization readiness
-  const [isFirebaseReady, setIsFirebaseReady] = useState(false);
+  const supabase = createClient();
 
-
-  useEffect(() => {
-    const init = async () => {
-        // Wait for initializeFirebase to complete and set global instances
-        await initializeFirebase(); 
-        setIsFirebaseReady(true);
-    };
-    init();
-  }, []);
-
-  useEffect(() => {
-      if (isFirebaseReady) {
-          const client = createClient();
-          setSupabaseClient(client);
-      }
-  }, [isFirebaseReady]);
-
-  const ALL_FIELDS_STRING = [
-    'id', 'name', 'phone', 'loan_amount', 'status', 'created_at', 'updated_at',
-    'personal_email', 'alt_phone', 'gender', 'marital_status',
-    'pan_number', 'application_number', 'residence_address', 'permanent_address', 'office_address', 'residence_type',
-    'occupation', 'designation', 'monthly_salary', 'office_email', 'years_of_experience',
-    'disbursed_amount', 'roi_percent', 'loan_tenure_months', 'bank_name', 'account_number',
-    'telecaller_name', 'priority', 'assigned_to'
-  ].join(', ');
-  
-  const fetchLead = useCallback(async (client: ReturnType<typeof createClient>) => {
+  const fetchLead = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     
-    // Note: We are using eq('id', leadId) which assumes the doc ID in Firestore 
-    // is the same as the lead ID, as per the mock setup simplification.
-    const { data, error } = await client
+    // Fetch all columns, including the new fields
+    const { data, error } = await supabase
       .from('leads')
-      .select(ALL_FIELDS_STRING)
+      .select(`
+        id, name, email, phone, company, designation, source, 
+        status, priority, assigned_to, created_at, updated_at, 
+        loan_amount, loan_type, address, city, state, country, zip_code,
+        
+        -- NEW KYC/PERSONAL FIELDS
+        pan_number, gender, marital_status, residence_type, alternative_mobile_number,
+        
+        -- NEW EMPLOYMENT FIELDS
+        occupation, experience_years:experience, office_mail_id,
+        
+        -- NEW ADDRESS FIELDS (assuming existing 'address' is residence)
+        permanent_address, office_address, residence_address, 
+        
+        -- NEW LOAN/FINANCIAL FIELDS
+        application_number, nth_salary, disbursed_amount, roi_percentage:roi, tenure,
+        
+        -- NEW BANK FIELDS
+        bank_name, account_number, 
+        
+        -- METADATA
+        telecaller_name
+      `)
       .eq('id', leadId)
       .single();
 
     if (error) {
-      console.error("Error fetching lead:", error);
-      setError(`Lead not found or error fetching data: ${error.message}`);
-      setLead(null);
+        // Provide sensible mock data if the fetch fails due to the unresolvable Supabase client mock.
+        if (error.message.includes("Mock error")) {
+             const mockData: Lead = {
+                id: leadId,
+                name: "Rohan Sharma (MOCK)",
+                email: "rohan.sharma@example.com",
+                phone: "9876543210",
+                company: "Tech Innovations Pvt Ltd",
+                designation: "Senior Software Engineer",
+                source: "Website",
+                status: "UNDERWRITING",
+                priority: "high",
+                assigned_to: "kyc_user_123",
+                created_at: new Date(Date.now() - 86400000).toISOString(),
+                updated_at: new Date().toISOString(),
+                loan_amount: 500000,
+                loan_type: "Personal Loan",
+                address: "45, Sector 14, Vashi",
+                city: "Navi Mumbai",
+                state: "Maharashtra",
+                country: "India",
+                zip_code: "400703",
+                
+                // NEW FIELDS (MOCKED)
+                pan_number: "ABCDE1234F",
+                residence_address: "45, Sector 14, Vashi, Navi Mumbai, Maharashtra",
+                permanent_address: "101, Green Apts, Pune, Maharashtra",
+                office_address: "B-201, Infinity Tower, CBD Belapur, Navi Mumbai",
+                application_number: "LMS-987654",
+                nth_salary: 85000,
+                office_mail_id: "rohan.sharma@techinnovations.com",
+                disbursed_amount: 450000,
+                roi_percentage: 12.5,
+                tenure: 36,
+                gender: 'Male',
+                marital_status: 'Married',
+                residence_type: 'Rented',
+                experience_years: 7,
+                occupation: 'Private',
+                alternative_mobile_number: "9988776655",
+                bank_name: "HDFC Bank",
+                account_number: "50100123456789",
+                telecaller_name: "Priya Singh",
+             };
+            setLead(mockData);
+            setError("Note: Live data fetching failed. Displaying mock data for component preview.");
+        } else {
+            // Real Supabase error
+            console.error("Error fetching lead:", error);
+            setError(`Lead not found or error fetching data: ${error.message}`);
+            setLead(null);
+        }
     } else {
-      // Ensure all fields are present, defaulting to null if missing from DB
-      const defaultLead: Partial<Lead> = {
-          pan_number: null, monthly_salary: null, residence_type: null, 
-          priority: null, assigned_to: null, updated_at: new Date().toISOString(),
-          personal_email: null, alt_phone: null, gender: null, marital_status: null,
-          application_number: null, residence_address: null, permanent_address: null, office_address: null,
-          occupation: null, designation: null, office_email: null, years_of_experience: null,
-          disbursed_amount: null, roi_percent: null, loan_tenure_months: null, bank_name: null, account_number: null,
-          telecaller_name: null, loan_amount: null, status: 'UNKNOWN', created_at: new Date().toISOString()
-          // ... added all missing fields for type safety
-      };
-      setLead({ ...defaultLead, ...data } as Lead);
+      // Map 'address' to 'residence_address' if needed, 
+      const leadData: Lead = {
+          ...(data as Lead),
+          residence_address: data.residence_address || data.address,
+      }
+      setLead(leadData);
     }
     setIsLoading(false);
-  }, [leadId, ALL_FIELDS_STRING]);
+  }, [leadId, supabase]);
 
-
-  // Real-time Listener and Initial Load
   useEffect(() => {
-    if (!supabaseClient) return;
-    
-    fetchLead(supabaseClient);
+    fetchLead();
 
-    // Setup Real-time Listener for the specific lead
-    const channel = supabaseClient.channel(`lead_${leadId}_changes`);
+    // Setup Real-time Listener for the specific lead to update status automatically
+    // This relies on the mocked 'supabase' object's 'channel' method to compile.
+    const channel = supabase.channel(`lead_${leadId}_changes`);
 
     const subscription = channel
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'leads', filter: `id=eq.${leadId}` },
-        (payload: any) => {
-          console.log("Real-time update received for lead:", payload.new);
-          // Only update the state with new data
-          setLead(prev => (prev ? { ...prev, ...(payload.new as Lead) } : null));
+        (payload) => {
+          // In a live environment, this would update the lead state.
+          console.log("Real-time update received (mock listener):", payload.new);
         }
       )
-      .subscribe((status: string) => {
-        if (status === 'SUBSCRIBED') {
-          console.log(`Subscribed to lead changes for ID: ${leadId}`);
-        }
-      });
+      .subscribe();
 
     return () => {
-        // Assuming the mock unsubscribe works
-        // The mock setup returns an object with unsubscribe
-        if (subscription && typeof subscription.unsubscribe === 'function') {
-            subscription.unsubscribe();
-        }
+        supabase.removeChannel(channel);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leadId, supabaseClient]); 
-  
-  // Debounced Update Handler for ALL editable fields
-  const handleUpdate = useCallback(debounce(async (id: string, field: keyof Lead, value: string | number | null) => {
-      if (!supabaseClient) return;
-      console.log(`Saving ${field} for lead ${id} to ${value}`);
-      
-      const updateQuery = supabaseClient
-          .from('leads')
-          // Firestore uses null for deletion of a field, which is acceptable for optional fields
-          .update({ [field]: value === '' ? null : value }) 
-          .eq('id', id);
+  }, [leadId]); 
 
-      const { error } = await updateQuery.get(); 
-
-      if (error) {
-          console.error(`Error updating lead ${id} field ${field}:`, error);
-          // In a real app, you would revert the local state and show a toast error
-      } else {
-          console.log("Update successful.");
-          // The real-time listener will update the state, but we manually update 
-          // the 'updated_at' to ensure the header time changes instantly
-          setLead(prev => (prev ? { ...prev, updated_at: new Date().toISOString() } : null));
-      }
-  }, 1000), [supabaseClient]); // 1 second debounce
+  const handleStatusUpdate = (newStatus: string) => {
+      // Update the local state instantly after successful update from LeadStatusUpdater
+      setLead(prev => (prev ? { ...prev, status: newStatus } : null));
+  };
 
 
-  if (isLoading || !supabaseClient) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
         <Loader2 className="h-8 w-8 animate-spin text-purple-600" />
-        <p className="ml-2 text-lg text-gray-600">Initializing & Loading Lead Profile...</p>
+        <p className="ml-2 text-lg text-gray-600">Loading Lead Profile...</p>
       </div>
     );
   }
 
-  if (error || !lead) {
+  if (!lead) {
     return (
-      <div className="p-8 text-center bg-red-50 border border-red-200 rounded-xl max-w-lg mx-auto mt-20">
+      <div className="p-8 text-center bg-red-50 border border-red-200 rounded-xl">
         <XCircle className="h-10 w-10 text-red-500 mx-auto" />
         <h1 className="text-2xl font-bold mt-4 text-red-700">Error Loading Lead</h1>
         <p className="text-gray-600 mt-2">{error || "The requested lead could not be found."}</p>
-        <Button onClick={() => router.back()} className="mt-4 bg-purple-600 hover:bg-purple-700">
+        <Button onClick={() => router.push('/kyc-team/leads')} className="mt-4 bg-purple-600 hover:bg-purple-700">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Leads List
         </Button>
@@ -594,266 +404,219 @@ function LeadProfileContent({ params }: LeadProfilePageProps) {
   }
 
   return (
-    <div className="space-y-6 pb-8 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+    <div className="space-y-6 pb-8">
       {/* Header and Quick Status */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-3">
           <Button onClick={() => router.back()} variant="outline" size="icon">
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <div className="flex flex-col">
-            <h1 className="text-3xl font-bold text-gray-900">{lead.name}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">ID: {lead.id.substring(0, 12)}...</p>
-          </div>
+          <h1 className="text-3xl font-bold text-gray-900">{lead.name}</h1>
           {getStatusBadge(lead.status)}
         </div>
-        <div className="text-sm text-gray-500 flex flex-col items-end">
-            <p>Last Activity: {new Date(lead.updated_at).toLocaleTimeString()} ({new Date(lead.updated_at).toLocaleDateString()})</p>
-            <Button onClick={() => fetchLead(supabaseClient)} variant="ghost" size="sm" className="mt-1 text-purple-600 hover:text-purple-700">
-                <RefreshCw className="h-4 w-4 mr-1"/> Force Refresh
-            </Button>
+        <div className="text-sm text-gray-500">
+            Last Updated: {new Date(lead.updated_at).toLocaleString()}
         </div>
       </div>
+      
+      {/* Error/Mock Data Notification */}
+      {error && (
+        <div className="p-3 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-800 rounded-md shadow-sm">
+            <p className="text-sm font-medium">{error}</p>
+        </div>
+      )}
+
 
       {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* Left/Middle Column: Editable Data Tabs (3/4 width on large screens) */}
-        <div className="lg:col-span-3 space-y-6">
+        {/* Left Column: Lead Details & Loan Info (2/3 width on large screens) */}
+        <div className="lg:col-span-2 space-y-6">
             
-            <Tabs>
-                <TabsList className="grid w-full grid-cols-3">
-                    <TabsTrigger value="kyc_details" isActive={currentTab === 'kyc_details'} onClick={setCurrentTab}>KYC & Address Details</TabsTrigger>
-                    <TabsTrigger value="loan_details" isActive={currentTab === 'loan_details'} onClick={setCurrentTab}>Loan & Professional Details</TabsTrigger>
-                    <TabsTrigger value="crm_notes" isActive={currentTab === 'crm_notes'} onClick={setCurrentTab}>CRM & Notes</TabsTrigger>
+            {/* 1. KYC & Personal Details (Updated) */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-purple-700">
+                        <User className="h-5 w-5" />
+                        KYC & Personal Information
+                    </CardTitle>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                    <DetailItem label="Full Name" value={lead.name} valueClass="font-semibold" />
+                    <DetailItem icon={<Phone className="h-4 w-4 text-gray-500" />} label="Mobile Number" value={lead.phone} />
+                    <DetailItem icon={<Phone className="h-4 w-4 text-gray-500" />} label="Alternative Mobile" value={lead.alternative_mobile_number || 'N/A'} />
+                    <DetailItem icon={<Mail className="h-4 w-4 text-gray-500" />} label="Personal Email" value={lead.email || 'N/A'} />
+                    <DetailItem label="PAN Number" value={lead.pan_number || 'N/A'} valueClass="font-mono text-base" />
+                    <DetailItem label="Gender" value={lead.gender || 'N/A'} />
+                    <DetailItem label="Marital Status" value={lead.marital_status || 'N/A'} />
+                    <DetailItem label="Residence Type" value={lead.residence_type || 'N/A'} />
+                    <DetailItem label="Telecaller Name" value={lead.telecaller_name || 'N/A'} />
+                </CardContent>
+            </Card>
+
+            {/* 2. Employment & Financial Details (New Card for better grouping) */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-purple-700">
+                        <Briefcase className="h-5 w-5" />
+                        Employment & Salary Details
+                    </CardTitle>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                    <DetailItem label="Company Name" value={lead.company || 'N/A'} />
+                    <DetailItem label="Occupation" value={lead.occupation || 'N/A'} />
+                    <DetailItem label="Designation" value={lead.designation || 'N/A'} />
+                    <DetailItem label="Work Experience (Yrs)" value={lead.experience_years ? `${lead.experience_years} Years` : 'N/A'} />
+                    <DetailItem icon={<Mail className="h-4 w-4 text-gray-500" />} label="Office Mail ID" value={lead.office_mail_id || 'N/A'} />
+                    <DetailItem label="Net Take Home Salary" value={formatCurrency(lead.nth_salary)} valueClass="font-bold text-base text-purple-600" />
+                </CardContent>
+            </Card>
+
+            {/* 3. Loan Details (Updated) */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-purple-700">
+                        <DollarSign className="h-5 w-5" />
+                        Loan & Approval Details
+                    </CardTitle>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                    <DetailItem label="Application Number" value={lead.application_number || 'N/A'} valueClass="font-semibold text-blue-600" />
+                    <DetailItem label="Requested Amount" value={formatCurrency(lead.loan_amount)} valueClass="font-bold text-lg text-green-700" />
+                    <DetailItem label="Disbursed Amount" value={formatCurrency(lead.disbursed_amount)} valueClass="font-bold text-lg text-purple-700" />
+                    <DetailItem label="Loan Type" value={lead.loan_type || 'N/A'} />
+                    <DetailItem label="ROI (Percentage)" value={lead.roi_percentage ? `${lead.roi_percentage}%` : 'N/A'} />
+                    <DetailItem label="Tenure (Months)" value={lead.tenure ? `${lead.tenure} Months` : 'N/A'} />
+                    <DetailItem label="Priority" value={<Badge variant="secondary" className={`capitalize ${lead.priority === 'urgent' ? 'bg-red-500 text-white' : lead.priority === 'high' ? 'bg-amber-500 text-white' : 'bg-gray-200'}`}>{lead.priority}</Badge>} />
+                    <DetailItem label="Current Status" value={getStatusBadge(lead.status)} valueClass="flex items-center" />
+                    <DetailItem label="Assigned To" value={lead.assigned_to ? lead.assigned_to.substring(0, 8) + '...' : 'Unassigned'} />
+                </CardContent>
+            </Card>
+
+            {/* 4. Address Details (Updated for multiple addresses) */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-purple-700">
+                        <MapPin className="h-5 w-5" />
+                        Address Details
+                    </CardTitle>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 gap-6">
+                    {/* Residence Address (using existing fields) */}
+                    <div className="p-3 border rounded-lg bg-white shadow-sm">
+                        <p className="text-sm font-semibold text-purple-600 mb-1">Residence Address</p>
+                        <p className="text-gray-700 text-sm">
+                            {lead.residence_address || lead.address || 'N/A (No Street/Locality)'}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                            {lead.city}, {lead.state} - {lead.zip_code} ({lead.country})
+                        </p>
+                        {(!lead.address && !lead.city) && <p className="text-gray-500 italic text-sm mt-1">No Residence Address details available.</p>}
+                    </div>
+
+                    {/* Permanent Address */}
+                    <div className="p-3 border rounded-lg bg-white shadow-sm">
+                        <p className="text-sm font-semibold text-purple-600 mb-1">Permanent Address</p>
+                        <p className="text-gray-700 text-sm">
+                            {lead.permanent_address || <span className="italic text-gray-500">N/A</span>}
+                        </p>
+                    </div>
+
+                    {/* Office Address */}
+                    <div className="p-3 border rounded-lg bg-white shadow-sm">
+                        <p className="text-sm font-semibold text-purple-600 mb-1">Office Address</p>
+                        <p className="text-gray-700 text-sm">
+                            {lead.office_address || <span className="italic text-gray-500">N/A</span>}
+                        </p>
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* 5. Bank Details (New Card) */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-purple-700">
+                        <Banknote className="h-5 w-5" />
+                        Bank Details
+                    </CardTitle>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <DetailItem label="Bank Name" value={lead.bank_name || 'N/A'} />
+                    <DetailItem label="Account Number" value={lead.account_number || 'N/A'} valueClass="font-mono text-base" />
+                </CardContent>
+            </Card>
+        </div>
+
+        {/* Right Column: Status Updater & Tabs (1/3 width on large screens) */}
+        <div className="lg:col-span-1 space-y-6">
+            {/* Status Update Component */}
+            <LeadStatusUpdater 
+                leadId={lead.id} 
+                currentStatus={lead.status} 
+                onStatusUpdate={handleStatusUpdate}
+            />
+
+            {/* Activity Tabs (Simplified stubs) */}
+            <Tabs defaultValue="timeline" className="w-full">
+                <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="timeline">Timeline</TabsTrigger>
+                    <TabsTrigger value="notes">Notes/Calls</TabsTrigger>
                 </TabsList>
-
-                {/* --- 3.1. KYC & ADDRESS DETAILS TAB --- */}
-                <TabsContent value="kyc_details" currentTab={currentTab}>
-                    
-                    {/* PERSONAL & KYC INFO */}
+                
+                {/* Timeline Content Stub */}
+                <TabsContent value="timeline">
                     <Card>
                         <CardHeader>
-                            <CardTitle className="flex items-center gap-2 text-purple-700">
-                                <FileText className="h-5 w-5" />
-                                Personal & Identity Verification
-                            </CardTitle>
+                            <CardTitle>Activity Timeline</CardTitle>
                         </CardHeader>
-                        <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            <EditableField lead={lead} field="name" label="Full Name" type="text" handleUpdate={handleUpdate} icon={<User className="h-4 w-4" />} />
-                            <EditableField lead={lead} field="phone" label="Primary Phone" type="tel" handleUpdate={handleUpdate} icon={<Phone className="h-4 w-4" />} maxLength={10} />
-                            <EditableField lead={lead} field="alt_phone" label="Alternative Phone" type="tel" handleUpdate={handleUpdate} icon={<Phone className="h-4 w-4" />} maxLength={10} />
-                            <EditableField lead={lead} field="personal_email" label="Personal Email" type="email" handleUpdate={handleUpdate} icon={<Mail className="h-4 w-4" />} />
-                            <EditableField lead={lead} field="pan_number" label="PAN Number" type="text" handleUpdate={handleUpdate} icon={<Hash className="h-4 w-4" />} maxLength={10} inputClass="uppercase" />
-                            <EditableField lead={lead} field="application_number" label="Application No" type="text" handleUpdate={handleUpdate} icon={<Hash className="h-4 w-4" />} />
-                            
-                            <EditableField lead={lead} field="gender" label="Gender" type="select" options={GENDER_OPTIONS} handleUpdate={handleUpdate} icon={<Users className="h-4 w-4" />} placeholder="Select Gender" />
-                            <EditableField lead={lead} field="marital_status" label="Marital Status" type="select" options={MARITAL_OPTIONS} handleUpdate={handleUpdate} icon={<Heart className="h-4 w-4" />} placeholder="Select Status" />
-                        </CardContent>
-                    </Card>
-
-                    {/* ADDRESS INFO */}
-                    <Card className="mt-6">
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2 text-purple-700">
-                                <MapPin className="h-5 w-5" />
-                                Address Information
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-6">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <EditableField lead={lead} field="residence_type" label="Residence Type" type="select" options={RESIDENCE_OPTIONS} handleUpdate={handleUpdate} icon={<Home className="h-4 w-4" />} placeholder="Select Type" />
-                            </div>
-
-                            <EditableField lead={lead} field="residence_address" label="Current Residence Address" type="textarea" handleUpdate={handleUpdate} icon={<MapPin className="h-4 w-4" />} placeholder="Enter full residence address" />
-                            <EditableField lead={lead} field="permanent_address" label="Permanent Address" type="textarea" handleUpdate={handleUpdate} icon={<MapPin className="h-4 w-4" />} placeholder="Enter full permanent address" />
-                            <EditableField lead={lead} field="office_address" label="Office Address" type="textarea" handleUpdate={handleUpdate} icon={<Building2 className="h-4 w-4" />} placeholder="Enter full office address" />
-                        </CardContent>
-                    </Card>
-                </TabsContent>
-
-                {/* --- 3.2. LOAN & PROFESSIONAL DETAILS TAB --- */}
-                <TabsContent value="loan_details" currentTab={currentTab}>
-                    
-                    {/* PROFESSIONAL INFO */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2 text-purple-700">
-                                <Briefcase className="h-5 w-5" />
-                                Professional Details
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            <EditableField lead={lead} field="occupation" label="Occupation Type" type="select" options={OCCUPATION_OPTIONS} handleUpdate={handleUpdate} icon={<Gavel className="h-4 w-4" />} placeholder="Select Occupation" />
-                            <EditableField lead={lead} field="designation" label="Designation" type="text" handleUpdate={handleUpdate} icon={<User className="h-4 w-4" />} />
-                            <EditableField lead={lead} field="years_of_experience" label="Years of Experience" type="number" handleUpdate={handleUpdate} icon={<Calendar className="h-4 w-4" />} />
-                            <EditableField lead={lead} field="monthly_salary" label="Monthly Salary (INR)" type="number" handleUpdate={handleUpdate} icon={<DollarSign className="h-4 w-4" />} />
-                            <EditableField lead={lead} field="office_email" label="Office Email" type="email" handleUpdate={handleUpdate} icon={<Mail className="h-4 w-4" />} />
-                        </CardContent>
-                    </Card>
-                    
-                    {/* LOAN & BANKING INFO */}
-                    <Card className="mt-6">
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2 text-purple-700">
-                                <Banknote className="h-5 w-5" />
-                                Loan & Banking Information
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            <EditableField lead={lead} field="loan_amount" label="Loan Required (INR)" type="number" handleUpdate={handleUpdate} icon={<DollarSign className="h-4 w-4" />} />
-                            <EditableField lead={lead} field="disbursed_amount" label="Disbursed Amount (INR)" type="number" handleUpdate={handleUpdate} icon={<DollarSign className="h-4 w-4" />} />
-                            <EditableField lead={lead} field="loan_tenure_months" label="Loan Tenure (Months)" type="number" handleUpdate={handleUpdate} icon={<Clock className="h-4 w-4" />} />
-                            <EditableField lead={lead} field="roi_percent" label="ROI (in %)" type="number" handleUpdate={handleUpdate} icon={<Percent className="h-4 w-4" />} />
-                            <EditableField lead={lead} field="bank_name" label="Bank Name" type="text" handleUpdate={handleUpdate} icon={<Building2 className="h-4 w-4" />} />
-                            <EditableField lead={lead} field="account_number" label="Account Number" type="text" handleUpdate={handleUpdate} icon={<Hash className="h-4 w-4" />} />
-                        </CardContent>
-                    </Card>
-                </TabsContent>
-
-                {/* --- 3.3. CRM & NOTES TAB --- */}
-                <TabsContent value="crm_notes" currentTab={currentTab}>
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2 text-purple-700">
-                                <MessageSquare className="h-5 w-5" />
-                                CRM & Notes
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-6">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <EditableField lead={lead} field="telecaller_name" label="Telecaller Name" type="text" handleUpdate={handleUpdate} icon={<User className="h-4 w-4" />} />
-                                <EditableField lead={lead} field="assigned_to" label="Assigned To (User ID)" type="text" handleUpdate={handleUpdate} icon={<User className="h-4 w-4" />} />
-                                <EditableField lead={lead} field="priority" label="Priority" type="select" options={PRIORITY_OPTIONS} handleUpdate={handleUpdate} icon={<Ruler className="h-4 w-4" />} placeholder="Select Priority" />
-                            </div>
-                            
-                            <Textarea placeholder="Add a new follow-up note..." rows={5} value="" onChange={() => {}} disabled />
-                            <Button className="w-full bg-purple-600 hover:bg-purple-700" disabled>Save Note (Notes functionality needs separate implementation)</Button>
-                            
-                            <div className="pt-4 border-t">
-                                <h3 className="text-lg font-semibold text-gray-800 mb-3">Activity Timeline</h3>
-                                <div className="text-sm text-gray-500 space-y-2">
-                                    <div className="p-2 border-l-4 border-purple-400">
-                                        <p className="font-semibold">Status changed to {lead.status}</p>
-                                        <p className="text-xs">{new Date(lead.updated_at).toLocaleString()}</p>
-                                    </div>
-                                    <div className="p-2 border-l-4 border-gray-300">
-                                        <p className="font-semibold">Lead created</p>
-                                        <p className="text-xs">{new Date(lead.created_at).toLocaleString()}</p>
-                                    </div>
+                        <CardContent>
+                            <div className="text-sm text-gray-500 space-y-2">
+                                <div className="p-2 border-l-4 border-purple-400">
+                                    <p className="font-semibold">Status changed to {lead.status}</p>
+                                    <p className="text-xs">{new Date(lead.updated_at).toLocaleString()}</p>
+                                </div>
+                                <div className="p-2 border-l-4 border-gray-300">
+                                    <p className="font-semibold">Lead created</p>
+                                    <p className="text-xs">{new Date(lead.created_at).toLocaleString()}</p>
                                 </div>
                             </div>
                         </CardContent>
                     </Card>
                 </TabsContent>
+
+                {/* Notes/Calls Content Stub */}
+                <TabsContent value="notes">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <MessageSquare className="h-5 w-5" />
+                                Notes & Follow-ups
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <p className="text-sm text-gray-500">
+                                Feature coming soon: Add notes, call logs, and follow-ups.
+                            </p>
+                            <Textarea placeholder="Add a quick note..." className="mt-3" rows={3} />
+                            <Button size="sm" className="mt-2 w-full bg-purple-600 hover:bg-purple-700">Save Note</Button>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
             </Tabs>
-        </div>
-
-        {/* Right Column: Status Updater (1/4 width on large screens) */}
-        <div className="lg:col-span-1 space-y-6">
-            
-            {/* Status Update Component */}
-            <Card className="sticky top-4 shadow-xl border-2 border-purple-200">
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-purple-700">
-                        <Clock className="h-5 w-5" />
-                        Update Loan Status
-                    </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    <div className="flex items-center gap-4">
-                        <Label className="min-w-[80px]">Current:</Label>
-                        <div className="flex-grow">
-                            {getStatusBadge(lead.status)}
-                        </div>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                        <Label htmlFor="status-select">Set New Status:</Label>
-                        {/* Status update is handled via EditableField logic for consistency */}
-                        <EditableField 
-                            lead={lead} 
-                            field="status" 
-                            label="Status" 
-                            type="select" 
-                            options={STATUS_OPTIONS.filter(s => s !== lead.status)} // Don't show current status
-                            handleUpdate={handleUpdate} 
-                            icon={<Clock className="h-4 w-4" />} 
-                            placeholder="Select New Status" 
-                            inputClass="border-purple-500"
-                        />
-                    </div>
-                </CardContent>
-            </Card>
-
         </div>
       </div>
     </div>
   );
 }
 
-// --- 4. EXPORT WRAPPER TO ENSURE CDN LOAD ---
-
-export default function KycLeadProfilePage(props: LeadProfilePageProps) {
-    const [isLoaded, setIsLoaded] = useState(false);
-    
-    // Dynamically load Firebase SDK via script tags
-    useEffect(() => {
-        if (typeof window === 'undefined') return;
-
-        const firebaseScripts = [
-            "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js",
-            "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js",
-            "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js",
-        ];
-        
-        let loadedCount = 0;
-        const totalScripts = firebaseScripts.length;
-
-        const loadScript = (url: string) => {
-            const script = document.createElement('script');
-            script.src = url;
-            script.type = 'text/javascript';
-            script.onload = () => {
-                loadedCount++;
-                if (loadedCount === totalScripts) {
-                    // All scripts loaded successfully
-                    setIsLoaded(true);
-                }
-            };
-            script.onerror = () => {
-                console.error(`Failed to load Firebase script: ${url}`);
-                // In case of error, we still try to proceed, but log the issue
-                loadedCount++;
-                if (loadedCount === totalScripts) {
-                    setIsLoaded(true);
-                }
-            };
-            document.head.appendChild(script);
-        };
-
-        firebaseScripts.forEach(loadScript);
-        
-        // Cleanup function (optional, as these scripts usually stay loaded)
-        return () => {
-            firebaseScripts.forEach(url => {
-                const existingScript = document.querySelector(`script[src="${url}"]`);
-                if (existingScript) {
-                    // Commenting out removal to prevent issues with other components
-                    // existingScript.remove();
-                }
-            });
-        };
-    }, []);
-
-    if (!isLoaded) {
-        return (
-            <div className="flex items-center justify-center h-screen">
-                <Loader2 className="h-8 w-8 animate-spin text-purple-600" />
-                <p className="ml-2 text-lg text-gray-600">Loading Firebase SDK...</p>
-            </div>
-        );
-    }
-    
-    // Once CDN scripts are confirmed loaded, render the actual content
-    return <LeadProfileContent {...props} />;
-}
+// Simple helper component for displaying details
+const DetailItem = ({ label, value, icon, valueClass = '' }: { label: string, value: React.ReactNode, icon?: React.ReactNode, valueClass?: string }) => (
+    <div className="flex flex-col space-y-1 p-2 bg-gray-50 rounded-lg">
+        <p className="text-xs font-medium text-gray-500">{label}</p>
+        <div className={`flex items-center gap-2 ${valueClass}`}>
+            {icon}
+            <span className="text-sm text-gray-800 break-words">{value}</span>
+        </div>
+    </div>
+);
