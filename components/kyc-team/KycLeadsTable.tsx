@@ -22,7 +22,7 @@ interface Lead {
   loan_amount: number | null;
   status: string;
   created_at: string;
-  assigned_to?: string;
+  kyc_assigned_to?: string;
 }
 
 interface KycLeadsTableProps {
@@ -142,8 +142,8 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
 
   // Function to display assigned to information
   const getAssignedInfo = (lead: Lead) => {
-    if (lead.assigned_to) {
-      return `Assigned to: ${lead.assigned_to.substring(0, 8)}...`;
+    if (lead.kyc_assigned_to) {
+      return `Assigned to: ${lead.kyc_assigned_to.substring(0, 8)}...`;
     }
     return "Unassigned";
   };
