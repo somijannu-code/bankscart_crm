@@ -86,20 +86,19 @@ const fetchLeads = async (setLoading = false) => {
     if (setLoading) setIsLoading(true);
     
     let query = supabase
-      .from("leads")
-      // Updated select to include telecaller information
-      .select(`
-        id, 
-        name, 
-        phone, 
-        loan_amount, 
-        status, 
-        created_at,
-        assigned_to,
-        telecallers:assigned_to (id, name, email)
-      `)
-      .eq("kyc_member_id", currentUserId)
-      .order("created_at", { ascending: false });
+  .from("leads")
+  .select(`
+    id, 
+    name, 
+    phone, 
+    loan_amount, 
+    status, 
+    created_at,
+    assigned_to,
+    telecallers:assigned_to (id, name, email)
+  `)
+  .eq("kyc_member_id", currentUserId) // This filters leads only for the current KYC member
+  .order("created_at", { ascending: false });
 
     // Apply status filter to the database query
     if (statusFilter !== 'all') {
