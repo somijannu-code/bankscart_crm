@@ -24,12 +24,7 @@ interface Lead {
   status: string;
   created_at: string;
   assigned_to?: string;
-  telecallers?: {
-    id: string;
-    name: string;
-    email: string;
-  };
-}
+  }
 
 interface KycLeadsTableProps {
     currentUserId: string;
@@ -95,7 +90,6 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
         status, 
         created_at,
         assigned_to,
-        telecallers:assigned_to (id, name, email)
       `)
       .eq("kyc_member_id", currentUserId)
       .order("created_at", { ascending: false });
