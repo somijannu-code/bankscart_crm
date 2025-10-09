@@ -82,7 +82,7 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
   const supabase = createClient();
 
   // 1. Data Fetching function
-  // 1. Data Fetching function
+ // 1. Data Fetching function
 const fetchLeads = async (setLoading = false) => {
   if (setLoading) setIsLoading(true);
   
@@ -92,8 +92,8 @@ const fetchLeads = async (setLoading = false) => {
       id, name, phone, loan_amount, status, created_at,
       pan_number, application_number, disbursed_amount, gender
     `)
-    // Use the correct column name that stores the KYC member ID
-    .eq("kyc_member_id", currentUserId)
+    // Fetch leads where either kyc_member_id OR kyc_assigned_to matches currentUserId
+    .or(`kyc_member_id.eq.${currentUserId},kyc_assigned_to.eq.${currentUserId}`)
     .order("created_at", { ascending: false });
 
   // Apply status filter to the database query
