@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Card } from "@/components/ui/card";
 
-// Updated Lead interface to include telecaller information and additional fields
+// Updated Lead interface to include telecaller information
 interface Lead {
   id: string;
   name: string;
@@ -29,12 +29,6 @@ interface Lead {
     name: string;
     email: string;
   };
-  // Additional fields for comprehensive lead information
-  pan_number: string | null;
-  application_number: string | null;
-  disbursed_amount: number | null;
-  gender: 'MALE' | 'FEMALE' | 'OTHER' | null;
-  kyc_member_id: string;
 }
 
 interface KycLeadsTableProps {
@@ -78,15 +72,6 @@ const formatCurrency = (value: number | null) => {
     }).format(Number(value));
 };
 
-const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return new Intl.DateTimeFormat('en-IN', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-    }).format(date);
-};
-
 export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeadsTableProps) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -95,12 +80,13 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
 
   const supabase = createClient();
 
-  // Data Fetching function with comprehensive lead information
+  // Updated Data Fetching function with telecaller information
   const fetchLeads = async (setLoading = false) => {
     if (setLoading) setIsLoading(true);
     
     let query = supabase
       .from("leads")
+      // Updated select to include telecaller information
       .select(`
         id, 
         name, 
@@ -109,11 +95,6 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
         status, 
         created_at,
         assigned_to,
-        pan_number,
-        application_number,
-        disbursed_amount,
-        gender,
-        kyc_member_id,
         telecallers:assigned_to (id, name, email)
       `)
       .eq("kyc_member_id", currentUserId)
@@ -181,9 +162,7 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
             lead.name.toLowerCase().includes(lowerCaseSearch) ||
             lead.phone.includes(lowerCaseSearch) ||
             lead.id.toLowerCase().includes(lowerCaseSearch) ||
-            (lead.telecallers?.name && lead.telecallers.name.toLowerCase().includes(lowerCaseSearch)) ||
-            (lead.pan_number && lead.pan_number.toLowerCase().includes(lowerCaseSearch)) ||
-            (lead.application_number && lead.application_number.toLowerCase().includes(lowerCaseSearch))
+            (lead.telecallers?.name && lead.telecallers.name.toLowerCase().includes(lowerCaseSearch))
     );
   }, [leads, searchTerm]);
 
@@ -195,17 +174,6 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
     return "Unassigned";
   };
 
-  // Function to get gender display text
-  const getGenderDisplay = (gender: string | null) => {
-    if (!gender) return "N/A";
-    switch (gender) {
-      case 'MALE': return 'Male';
-      case 'FEMALE': return 'Female';
-      case 'OTHER': return 'Other';
-      default: return gender;
-    }
-  };
-
   return (
     <div className="space-y-4">
       {/* Controls: Search, Filter, Refresh */}
@@ -213,7 +181,7 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
         <div className="flex items-center space-x-2 w-full sm:w-1/2">
           <Search className="h-5 w-5 text-gray-400" />
           <Input
-            placeholder="Search by Name, Phone, ID, PAN, App No, or Telecaller..."
+            placeholder="Search by Name, Phone, ID, or Telecaller..."
             value={searchTerm}
             onChange={(e) => {
               setSearchTerm(e.target.value);
@@ -250,11 +218,7 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
               <TableRow className="bg-gray-50">
                 <TableHead className="min-w-[150px]">Lead Name</TableHead>
                 <TableHead>Phone</TableHead>
-                <TableHead className="hidden sm:table-cell">App No</TableHead>
-                <TableHead className="hidden md:table-cell">PAN</TableHead>
-                <TableHead className="hidden lg:table-cell">Gender</TableHead>
-                <TableHead>Loan Req</TableHead>
-                <TableHead>Disbursed</TableHead>
+                <TableHead className="hidden sm:table-cell">Loan Amount</TableHead>
                 <TableHead>Telecaller</TableHead>
                 <TableHead className="min-w-[140px]">Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -263,14 +227,14 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
             <TableBody>
               {isLoading && filteredLeads.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="h-24 text-center">
+                  <TableCell colSpan={6} className="h-24 text-center">
                     <Loader2 className="w-6 h-6 animate-spin mx-auto text-purple-500" />
                     <p className="mt-2 text-gray-600">Loading leads...</p>
                   </TableCell>
                 </TableRow>
               ) : filteredLeads.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="h-24 text-center text-gray-500">
+                  <TableCell colSpan={6} className="h-24 text-center text-gray-500">
                     <Users className="w-6 h-6 mx-auto mb-2"/>
                     No assigned leads found matching your filters.
                   </TableCell>
@@ -281,23 +245,10 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
                     <TableCell className="font-medium text-purple-700 hover:underline">
                       <Link href={`/kyc-team/${lead.id}`}>{lead.name}</Link>
                       <p className="text-xs text-gray-500 mt-0.5">ID: {lead.id.substring(0, 8)}</p>
-                      <p className="text-xs text-gray-400">{formatDate(lead.created_at)}</p>
                     </TableCell>
                     <TableCell>{lead.phone}</TableCell>
-                    <TableCell className="hidden sm:table-cell text-xs">
-                      {lead.application_number || 'N/A'}
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell text-xs">
-                      {lead.pan_number || 'N/A'}
-                    </TableCell>
-                    <TableCell className="hidden lg:table-cell text-xs">
-                      {getGenderDisplay(lead.gender)}
-                    </TableCell>
-                    <TableCell className="font-semibold text-xs">
-                      {formatCurrency(lead.loan_amount)}
-                    </TableCell>
-                    <TableCell className="font-bold text-green-600 text-xs">
-                      {formatCurrency(lead.disbursed_amount)}
+                    <TableCell className="hidden sm:table-cell font-semibold">
+                        {formatCurrency(lead.loan_amount)}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -323,14 +274,6 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
                                 View KYC/Details
                             </Link>
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => navigator.clipboard.writeText(lead.id)}>
-                            <Hash className="h-4 w-4 mr-2" />
-                            Copy Lead ID
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => navigator.clipboard.writeText(lead.phone)}>
-                            <Users className="h-4 w-4 mr-2" />
-                            Copy Phone
-                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -343,8 +286,7 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
       </Card>
       
       <div className="text-center py-2 text-sm text-gray-600">
-        Displaying {filteredLeads.length} of {leads.length} leads
-        {statusFilter !== 'all' && ` (filtered by ${statusFilter})`}
+        Displaying {filteredLeads.length} leads.
       </div>
     </div>
   );
