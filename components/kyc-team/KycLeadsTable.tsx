@@ -89,8 +89,7 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
       .from("leads")
       // CRITICAL: Selecting all relevant columns based on the full schema
       .select(`
-        id, name, phone, loan_amount, status, created_at,
-        pan_number, application_number, disbursed_amount, gender
+        id, name, phone
       `) 
       .eq("kyc_member_id", currentUserId)
       .order("created_at", { ascending: false }); // Using available 'created_at' column
