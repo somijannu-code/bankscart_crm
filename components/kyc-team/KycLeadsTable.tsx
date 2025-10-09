@@ -82,32 +82,34 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
   const supabase = createClient();
 
   // 1. Data Fetching function
-  const fetchLeads = async (setLoading = false) => {
-    if (setLoading) setIsLoading(true);
-    
-    let query = supabase
-      .from("leads")
-      // CRITICAL: Selecting all relevant columns based on the full schema
-      .select(`
-        id, name, phone
-      `) 
-      .eq("kyc_member_id", currentUserId)
-      .order("created_at", { ascending: false }); // Using available 'created_at' column
+  // 1. Data Fetching function
+const fetchLeads = async (setLoading = false) => {
+  if (setLoading) setIsLoading(true);
+  
+  let query = supabase
+    .from("leads")
+    .select(`
+      id, name, phone, loan_amount, status, created_at,
+      pan_number, application_number, disbursed_amount, gender
+    `)
+    // Use the correct column name that stores the KYC member ID
+    .eq("kyc_member_id", currentUserId)
+    .order("created_at", { ascending: false });
 
-    // Apply status filter to the database query
-    if (statusFilter !== 'all') {
-      query = query.eq('status', statusFilter);
-    }
+  // Apply status filter to the database query
+  if (statusFilter !== 'all') {
+    query = query.eq('status', statusFilter);
+  }
 
-    const { data, error } = await query;
+  const { data, error } = await query;
 
-    if (error) {
-      console.error("Error fetching leads:", error);
-    } else {
-      setLeads(data as Lead[]);
-    }
-    if (setLoading) setIsLoading(false);
-  };
+  if (error) {
+    console.error("Error fetching leads:", error);
+  } else {
+    setLeads(data as Lead[]);
+  }
+  if (setLoading) setIsLoading(false);
+};
   
   // NOTE on other fields: residence address, permanent address, office address, nth salary, 
   // office mail id, mail id, Roi(in percentage), tenure, marital status, residence type, 
