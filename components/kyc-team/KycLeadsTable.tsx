@@ -5,7 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { 
   Search, Filter, ChevronDown, ChevronUp, MoreHorizontal, 
-  Loader2, RefreshCw, Eye, Hash, Users, Clock, CheckCircle, XCircle, DollarSign, User
+  Loader2, RefreshCw, Eye, Hash, Users, Clock, CheckCircle, XCircle, DollarSign
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Card } from "@/components/ui/card";
 
-// Updated Lead interface to include telecaller information
+// Lead interface reflecting available columns for the table view
 interface Lead {
   id: string;
   name: string;
@@ -23,17 +23,11 @@ interface Lead {
   loan_amount: number | null;
   status: string;
   created_at: string;
-  assigned_to?: string;
-  telecallers?: {
-    id: string;
-    name: string;
-    email: string;
-  };
 }
 
 interface KycLeadsTableProps {
     currentUserId: string;
-    initialStatus: string;
+    initialStatus: string; // Used to capture status filter from URL (e.g., /kyc-team/leads?status=Underwriting)
 }
 
 // Define the available statuses for consistency
@@ -76,29 +70,21 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
   const [leads, setLeads] = useState<Lead[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  // Initialize status filter from URL query param
   const [statusFilter, setStatusFilter] = useState(initialStatus || "all"); 
 
   const supabase = createClient();
 
-  // Updated Data Fetching function with telecaller information
+  // 1. Data Fetching function
   const fetchLeads = async (setLoading = false) => {
     if (setLoading) setIsLoading(true);
     
     let query = supabase
       .from("leads")
-      // Updated select to include telecaller information
-      .select(`
-        id, 
-        name, 
-        phone, 
-        loan_amount, 
-        status, 
-        created_at,
-        assigned_to,
-        telecallers:assigned_to (id, name, email)
-      `)
+      // CRITICAL: Selecting all relevant columns based on the full schema
+      .select("id, name, phone, loan_amount, status, created_at") 
       .eq("kyc_member_id", currentUserId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false }); // Using available 'created_at' column
 
     // Apply status filter to the database query
     if (statusFilter !== 'all') {
@@ -115,7 +101,7 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
     if (setLoading) setIsLoading(false);
   };
 
-  // Real-time Listener and Initial Load
+  // 2. Real-time Listener and Initial Load
   useEffect(() => {
     fetchLeads(true); 
 
@@ -151,7 +137,7 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUserId, statusFilter]); 
 
-  // Filtering Logic (Client-side search)
+  // 3. Filtering Logic (Client-side search)
   const filteredLeads = useMemo(() => {
     if (!searchTerm) return leads;
     
@@ -161,18 +147,11 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
         (lead) => 
             lead.name.toLowerCase().includes(lowerCaseSearch) ||
             lead.phone.includes(lowerCaseSearch) ||
-            lead.id.toLowerCase().includes(lowerCaseSearch) ||
-            (lead.telecallers?.name && lead.telecallers.name.toLowerCase().includes(lowerCaseSearch))
+            lead.id.toLowerCase().includes(lowerCaseSearch)
     );
   }, [leads, searchTerm]);
 
-  // Function to display telecaller name
-  const getTelecallerName = (lead: Lead) => {
-    if (lead.telecallers?.name) {
-      return lead.telecallers.name;
-    }
-    return "Unassigned";
-  };
+  // 4. Pagination is removed for simplicity, displaying all results
 
   return (
     <div className="space-y-4">
@@ -181,7 +160,7 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
         <div className="flex items-center space-x-2 w-full sm:w-1/2">
           <Search className="h-5 w-5 text-gray-400" />
           <Input
-            placeholder="Search by Name, Phone, ID, or Telecaller..."
+            placeholder="Search by Name, Phone, or ID..."
             value={searchTerm}
             onChange={(e) => {
               setSearchTerm(e.target.value);
@@ -219,7 +198,6 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
                 <TableHead className="min-w-[150px]">Lead Name</TableHead>
                 <TableHead>Phone</TableHead>
                 <TableHead className="hidden sm:table-cell">Loan Amount</TableHead>
-                <TableHead>Telecaller</TableHead>
                 <TableHead className="min-w-[140px]">Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -227,14 +205,14 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
             <TableBody>
               {isLoading && filteredLeads.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center">
+                  <TableCell colSpan={5} className="h-24 text-center">
                     <Loader2 className="w-6 h-6 animate-spin mx-auto text-purple-500" />
                     <p className="mt-2 text-gray-600">Loading leads...</p>
                   </TableCell>
                 </TableRow>
               ) : filteredLeads.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-gray-500">
+                  <TableCell colSpan={5} className="h-24 text-center text-gray-500">
                     <Users className="w-6 h-6 mx-auto mb-2"/>
                     No assigned leads found matching your filters.
                   </TableCell>
@@ -249,14 +227,6 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
                     <TableCell>{lead.phone}</TableCell>
                     <TableCell className="hidden sm:table-cell font-semibold">
                         {formatCurrency(lead.loan_amount)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <User className="h-4 w-4 text-gray-500" />
-                        <span className="text-sm font-medium">
-                          {getTelecallerName(lead)}
-                        </span>
-                      </div>
                     </TableCell>
                     <TableCell>{getStatusBadge(lead.status)}</TableCell>
                     <TableCell className="text-right">
@@ -274,6 +244,7 @@ export default function KycLeadsTable({ currentUserId, initialStatus }: KycLeads
                                 View KYC/Details
                             </Link>
                           </DropdownMenuItem>
+                          {/* Add other actions here */}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
