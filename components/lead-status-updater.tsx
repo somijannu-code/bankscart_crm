@@ -61,6 +61,10 @@ export function LeadStatusUpdater({
   // Keep tempStatus initialized to currentStatus for the modal logic when it opens
   const [tempStatus, setTempStatus] = useState(currentStatus) 
 
+  // NEW STATE: For minutes and seconds input fields
+  const [callMins, setCallMins] = useState<number | null>(null);
+  const [callSecs, setCallSecs] = useState<number | null>(null);
+
   const supabase = createClient()
   const { activeCall, startCall, endCall, updateCallDuration, formatDuration } = useCallTracking()
 
@@ -72,12 +76,54 @@ export function LeadStatusUpdater({
   useEffect(() => {
     if (isCallInitiated && status === 'nr') {
       setCallDuration(0);
+      setCallMins(0); // Also update minutes/seconds UI state
+      setCallSecs(0);
     } else if (status !== 'nr' && callDuration === 0) {
       // Clear call duration if switching from 'nr' to another status
       setCallDuration(null);
+      setCallMins(null); // Clear minutes/seconds UI state
+      setCallSecs(null);
     }
   }, [status, isCallInitiated]);
 
+  // NEW HELPER FUNCTION: Calculates total seconds from minutes and seconds
+  const calculateTotalSeconds = (minutes: number | null, seconds: number | null): number | null => {
+    const min = minutes ?? 0;
+    const sec = seconds ?? 0;
+    // Only return a number if at least one is explicitly set and non-negative
+    if (min < 0 || sec < 0) return null;
+    if (min === 0 && sec === 0 && (minutes === null && seconds === null)) return null;
+    return (min * 60) + sec;
+  }
+
+  // NEW HANDLER: Updates minutes and recalculates total seconds
+  const handleMinsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    const minutes = value === "" ? null : Number(value);
+    
+    setCallMins(minutes);
+
+    // Recalculate and set the total duration in seconds
+    const totalSeconds = calculateTotalSeconds(minutes, callSecs);
+    setCallDuration(totalSeconds);
+  }
+
+  // NEW HANDLER: Updates seconds and recalculates total seconds
+  const handleSecsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    let seconds = value === "" ? null : Number(value);
+
+    // Limit seconds to 59
+    if (seconds !== null && seconds > 59) {
+      seconds = 59;
+    }
+    
+    setCallSecs(seconds);
+
+    // Recalculate and set the total duration in seconds
+    const totalSeconds = calculateTotalSeconds(callMins, seconds);
+    setCallDuration(totalSeconds);
+  }
 
   // NEW FUNCTION: Updates only the status to 'follow_up' after modal success
   const updateLeadStatusToFollowUp = async () => {
@@ -223,8 +269,11 @@ export function LeadStatusUpdater({
       setNote("")
       setRemarks("")
       setCallNotes("")
-      // MODIFIED: Reset callDuration to null
+      // MODIFIED: Reset callDuration to null AND new minute/second state
       setCallDuration(null)
+      setCallMins(null)
+      setCallSecs(null)
+
 
       // Set status back to empty string after success for subsequent mandatory selection.
       setStatus("")
@@ -300,6 +349,7 @@ export function LeadStatusUpdater({
   const showNoteField = status === "not_eligible"
   
   // Logic for call duration validation (must be > 0 for non-'nr' statuses)
+  // Use callDuration for the validation check
   const isInvalidCallDuration = isCallInitiated && status !== 'nr' && (callDuration === null || callDuration <= 0)
   
   // Logic to determine if the update button should be disabled
@@ -412,28 +462,56 @@ export function LeadStatusUpdater({
             </div>
           )}
 
+          {/* MODIFIED: Call Duration input for Minutes and Seconds */}
           {isCallInitiated && (
             <div className="space-y-2">
               <label className="text-sm font-medium flex items-center gap-2">
                 <Clock className="h-4 w-4" />
-                Call Duration (seconds): 
-                {status !== 'nr' && <span className="text-red-500">* (Required &gt; 0)</span>}
+                Call Duration: 
+                {status !== 'nr' && <span className="text-red-500">* (Required &gt; 0 total seconds)</span>}
               </label>
-              <Input
-                type="number"
-                placeholder={status === 'nr' ? "Auto-set to 0 for NR" : "Enter call duration in seconds (> 0)"}
-                // MODIFIED: Use callDuration directly
-                value={callDuration !== null ? String(callDuration) : ""}
-                onChange={(e) => {
-                  const value = e.target.value
-                  setCallDuration(value === "" ? null : Number(value))
-                }}
-                min="0"
-                disabled={status === 'nr'} // Disable if status is 'nr' to enforce auto-set to 0
-                className={cn(isInvalidCallDuration && "border-red-500")} 
-              />
+              <div className="flex gap-2 items-center">
+                <div className="flex-1">
+                  <Input
+                    type="number"
+                    placeholder="Mins"
+                    value={callMins !== null ? String(callMins) : ""}
+                    onChange={handleMinsChange}
+                    min="0"
+                    disabled={status === 'nr'}
+                    className={cn(isInvalidCallDuration && "border-red-500")}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Minutes</p>
+                </div>
+                <span className="text-2xl font-bold">:</span>
+                <div className="flex-1">
+                  <Input
+                    type="number"
+                    placeholder="Secs"
+                    value={callSecs !== null ? String(callSecs) : ""}
+                    onChange={handleSecsChange}
+                    min="0"
+                    max="59"
+                    disabled={status === 'nr'}
+                    className={cn(isInvalidCallDuration && "border-red-500")}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Seconds (max 59)</p>
+                </div>
+              </div>
+              
+              {/* Display total duration in seconds */}
+              {callDuration !== null && callDuration > 0 && status !== 'nr' && (
+                  <div className="text-sm text-gray-600 mt-1">
+                      Total Duration: {callDuration} seconds
+                  </div>
+              )}
+              
+              {/* Validation/Timer display */}
               {isInvalidCallDuration && (
                  <p className="text-sm text-red-500">Call Duration must be greater than 0 for the selected status.</p>
+              )}
+              {status === 'nr' && (
+                 <p className="text-sm text-gray-500">Duration is auto-set to 0 for NR.</p>
               )}
               {activeCall && activeCall.leadId === leadId && (
                 <div className="text-sm text-green-600">
@@ -442,6 +520,8 @@ export function LeadStatusUpdater({
               )}
             </div>
           )}
+          {/* END MODIFIED CALL DURATION INPUT */}
+
 
           {/* General remarks/notes field - always visible */}
           <div className="space-y-2">
