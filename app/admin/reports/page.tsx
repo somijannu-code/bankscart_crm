@@ -11,7 +11,8 @@ import Link from "next/link"
 interface SearchParams {
   start_date?: string
   end_date?: string
-  telecaller?: string
+  // Changed to handle comma-separated IDs for multi-select
+  telecaller?: string 
 }
 
 export default async function ReportsPage({
@@ -21,10 +22,10 @@ export default async function ReportsPage({
 }) {
   const supabase = await createClient()
 
-  // Set default date range (last 30 days)
-  const endDate = searchParams.end_date || new Date().toISOString().split("T")[0]
-  const startDate =
-    searchParams.start_date || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+  // 1. IMPROVEMENT: Set default date range to current date only
+  const defaultDate = new Date().toISOString().split("T")[0] // YYYY-MM-DD
+  const endDate = searchParams.end_date || defaultDate
+  const startDate = searchParams.start_date || defaultDate
 
   // Get telecallers for filter
   const { data: telecallers } = await supabase
@@ -46,10 +47,14 @@ export default async function ReportsPage({
     .gte("created_at", startDate)
     .lte("created_at", `${endDate}T23:59:59`)
 
-  // Apply telecaller filter if specified
+  // 2. IMPROVEMENT: Apply multi-telecaller filter if specified
+  let telecallerIds: string[] = []
   if (searchParams.telecaller) {
-    leadsQuery = leadsQuery.eq("assigned_to", searchParams.telecaller)
-    callsQuery = callsQuery.eq("user_id", searchParams.telecaller)
+    telecallerIds = searchParams.telecaller.split(',') // Split the comma-separated string
+
+    // Use the `in` operator for Supabase multi-selection
+    leadsQuery = leadsQuery.in("assigned_to", telecallerIds)
+    callsQuery = callsQuery.in("user_id", telecallerIds)
   }
 
   const [{ data: leads }, { data: calls }, { count: totalLeads }, { count: totalCalls }] = await Promise.all([
@@ -108,6 +113,8 @@ export default async function ReportsPage({
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Reports & Analytics</h1>
           <p className="text-gray-600 mt-1">Performance insights and data export</p>
+          {/* 3. IMPROVEMENT NOTE: For auto-refresh, the data fetching and stats calculation above
+          must be moved into a client component that uses setInterval to poll for new data. */}
         </div>
         <ExportButtons startDate={startDate} endDate={endDate} telecallerId={searchParams.telecaller} />
       </div>
@@ -121,6 +128,8 @@ export default async function ReportsPage({
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {/* NOTE: The ReportsFilters component must be updated to use a multi-select 
+          UI for telecallers and output a comma-separated string for the 'telecaller' search param. */}
           <ReportsFilters telecallers={telecallers || []} defaultStartDate={startDate} defaultEndDate={endDate} />
         </CardContent>
       </Card>
