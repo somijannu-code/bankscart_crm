@@ -48,8 +48,8 @@ export function LeadStatusUpdater({
   onCallLogged,
   initialLoanAmount = null,
 }: LeadStatusUpdaterProps) {
-  // MODIFIED: Start with "" to force selection, unless it's a call-initiated log.
-  const [status, setStatus] = useState(isCallInitiated ? "contacted" : "")
+  // MODIFIED: Status always starts as "" to force selection, even when isCallInitiated.
+  const [status, setStatus] = useState("")
   const [isUpdating, setIsUpdating] = useState(false)
   const [note, setNote] = useState("") 
   const [remarks, setRemarks] = useState("")
@@ -63,12 +63,8 @@ export function LeadStatusUpdater({
   const supabase = createClient()
   const { activeCall, startCall, endCall, updateCallDuration, formatDuration } = useCallTracking()
 
-  // Ensure 'status' is set to 'contacted' only when a call is initiated
-  useEffect(() => {
-    if (isCallInitiated) {
-      setStatus("contacted")
-    }
-  }, [isCallInitiated])
+  // REMOVED: The useEffect hook that automatically set status to 'contacted' on call initiation.
+  // The state is now initialized to "".
 
   useEffect(() => {
     setLoanAmount(initialLoanAmount)
@@ -125,22 +121,23 @@ export function LeadStatusUpdater({
     const isNotEligible = status === "not_eligible"
     const isNoteEmpty = !note.trim()
 
-    // ADDED: Check if status is selected at all, unless it's a call-initiated log and status defaulted to 'contacted'
-    if (!isCallInitiated && !status) {
+    // CHECK 1 (Mandatory Status): Check if status is selected at all
+    if (!status) {
        toast.error("Validation Failed", {
-        description: "Please select a status before updating."
+        description: "Please select a status before submitting."
       })
       return
     }
 
+    // CHECK 2 (Not Eligible Reason):
     if (isNotEligible && isNoteEmpty) {
       toast.error("Validation Failed", {
         description: "Please specify the 'Reason for Not Eligible' before updating the status."
       })
       return 
     }
-    // If 'follow_up' is selected, the update is handled by the modal's success callback,
-    // so we should only continue here if it's NOT 'follow_up'.
+    
+    // CHECK 3 (Follow Up):
     if (status === "follow_up") {
       // Re-open the modal if the user tries to click the button without going through the modal
       if (!isModalOpen) {
@@ -200,10 +197,8 @@ export function LeadStatusUpdater({
       setCallNotes("")
       setCallDuration(0)
 
-      // Set status to empty string after success for subsequent mandatory selection (unless call was initiated)
-      if (!isCallInitiated) {
-        setStatus("")
-      }
+      // Set status back to empty string after success for subsequent mandatory selection.
+      setStatus("")
       
       toast.success("Lead status updated successfully!")
 
@@ -274,13 +269,13 @@ export function LeadStatusUpdater({
   const showNoteField = status === "not_eligible"
   
   // Logic to determine if the update button should be disabled
-  // ADDED: Check for status === "" to ensure a selection is made
+  // isFormInvalid now ONLY checks for Not Eligible reason and Follow Up rule
   const isFormInvalid = (status === "not_eligible" && !note.trim()) || (status === "follow_up" && !isCallInitiated)
 
   const isButtonDisabled = 
     isUpdating || 
-    status === "" || // Check: Disabled if no status is selected
-    (status === currentStatus && !isCallInitiated && status !== "follow_up") || // Still disable if status hasn't changed AND no call was initiated
+    status === "" || // MANDATORY SELECTION: Disabled if no status is selected
+    (status === currentStatus && !isCallInitiated && status !== "follow_up") || // Still disable if status hasn't changed AND no call was initiated (standard update logic)
     isFormInvalid || 
     status === "follow_up" // Disabled if 'follow_up' is selected (update happens via modal success)
 
@@ -305,8 +300,9 @@ export function LeadStatusUpdater({
               <Phone className="h-4 w-4 text-blue-600" />
               <span className="font-medium text-blue-800">Active Call Logging</span>
             </div>
+            {/* MODIFIED: Updated message to reflect mandatory selection */}
             <p className="text-sm text-blue-700">
-              The status is automatically set to 'Contacted' and the call details will be logged upon submission.
+              **Mandatory**: Please select a status below. Call details will be logged upon submission.
             </p>
           </div>
         )}
@@ -326,11 +322,10 @@ export function LeadStatusUpdater({
               }}
             >
               <SelectTrigger>
-                {/* MODIFIED: Placeholder is shown when value is "" */}
+                {/* Placeholder is shown when value is "" */}
                 <SelectValue placeholder="Select a New Status..." /> 
               </SelectTrigger>
               <SelectContent>
-                {/* REMOVED: The invalid <SelectItem value=""> component. */}
                 {statusOptions.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
@@ -463,10 +458,9 @@ export function LeadStatusUpdater({
         open={isModalOpen}
         onOpenChange={(open) => {
           setIsModalOpen(open)
-          // MODIFIED: If modal is closed AND the current status isn't 'follow_up', revert to currentStatus or ""
-          if (!open && status !== "follow_up") {
-            // Revert to "" (unselected) if not call initiated, otherwise stick to "contacted"
-            setStatus(isCallInitiated ? "contacted" : "") 
+          // If modal is closed, status reverts to "" (unselected)
+          if (!open) {
+            setStatus("") 
           }
         }}
         onScheduleSuccess={() => {
