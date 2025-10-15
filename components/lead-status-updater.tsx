@@ -53,7 +53,7 @@ export function LeadStatusUpdater({
   const [isUpdating, setIsUpdating] = useState(false)
   const [note, setNote] = useState("") 
   const [remarks, setRemarks] = useState("")
-  const [callNotes, setCallNotes] = useState("")
+  // REMOVED: const [callNotes, setCallNotes] = useState("")
   // MODIFIED: callDuration initialized to null instead of 0
   const [callDuration, setCallDuration] = useState<number | null>(null)
   const [loanAmount, setLoanAmount] = useState<number | null>(initialLoanAmount)
@@ -124,6 +124,7 @@ export function LeadStatusUpdater({
     const totalSeconds = calculateTotalSeconds(callMins, seconds);
     setCallDuration(totalSeconds);
   }
+
 
   // NEW FUNCTION: Updates only the status to 'follow_up' after modal success
   const updateLeadStatusToFollowUp = async () => {
@@ -268,12 +269,11 @@ export function LeadStatusUpdater({
       // Reset form
       setNote("")
       setRemarks("")
-      setCallNotes("")
+      // REMOVED: setCallNotes("")
       // MODIFIED: Reset callDuration to null AND new minute/second state
       setCallDuration(null)
       setCallMins(null)
       setCallSecs(null)
-
 
       // Set status back to empty string after success for subsequent mandatory selection.
       setStatus("")
@@ -317,7 +317,8 @@ export function LeadStatusUpdater({
           call_type: "outbound",
           call_status: "connected",
           duration_seconds: duration,
-          notes: callNotes || remarks || "Call initiated from lead details",
+          // MODIFIED: Use remarks as notes, falling back to a default message
+          notes: remarks || "Call initiated from lead details",
         })
         .select()
         .single()
@@ -447,7 +448,8 @@ export function LeadStatusUpdater({
             />
           </div>
 
-          {isCallInitiated && (
+          {/* REMOVED 'Call Notes' FIELD */}
+          {/* {isCallInitiated && (
             <div className="space-y-2">
               <label className="text-sm font-medium flex items-center gap-2">
                 <MessageSquare className="h-4 w-4" />
@@ -460,7 +462,7 @@ export function LeadStatusUpdater({
                 rows={3}
               />
             </div>
-          )}
+          )} */}
 
           {/* MODIFIED: Call Duration input for Minutes and Seconds */}
           {isCallInitiated && (
