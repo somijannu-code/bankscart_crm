@@ -27,8 +27,6 @@ interface LeadStatusUpdaterProps {
 }
 
 const statusOptions = [
-  // ADDED: Option to start with no selection, though this is primarily handled by the default value in SelectValue/useState
-  // The actual dropdown will start with the 'Select New Status...' item.
   { value: "new", label: "New", color: "bg-blue-100 text-blue-800" },
   { value: "contacted", label: "Contacted", color: "bg-yellow-100 text-yellow-800" },
   { value: "Interested", label: "Interested", color: "bg-green-100 text-green-800" },
@@ -50,7 +48,7 @@ export function LeadStatusUpdater({
   onCallLogged,
   initialLoanAmount = null,
 }: LeadStatusUpdaterProps) {
-  // MODIFIED: If it's a call, default to "contacted" (as it was), otherwise start with "" to force selection.
+  // MODIFIED: Start with "" to force selection, unless it's a call-initiated log.
   const [status, setStatus] = useState(isCallInitiated ? "contacted" : "")
   const [isUpdating, setIsUpdating] = useState(false)
   const [note, setNote] = useState("") 
@@ -281,7 +279,7 @@ export function LeadStatusUpdater({
 
   const isButtonDisabled = 
     isUpdating || 
-    status === "" || // New Check: Disabled if no status is selected
+    status === "" || // Check: Disabled if no status is selected
     (status === currentStatus && !isCallInitiated && status !== "follow_up") || // Still disable if status hasn't changed AND no call was initiated
     isFormInvalid || 
     status === "follow_up" // Disabled if 'follow_up' is selected (update happens via modal success)
@@ -328,12 +326,11 @@ export function LeadStatusUpdater({
               }}
             >
               <SelectTrigger>
-                {/* MODIFIED: Placeholder when status is empty */}
+                {/* MODIFIED: Placeholder is shown when value is "" */}
                 <SelectValue placeholder="Select a New Status..." /> 
               </SelectTrigger>
               <SelectContent>
-                {/* ADDED: Initial Select Item for mandatory selection */}
-                <SelectItem key="" value="" disabled>Select New Status...</SelectItem>
+                {/* REMOVED: The invalid <SelectItem value=""> component. */}
                 {statusOptions.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
@@ -468,7 +465,7 @@ export function LeadStatusUpdater({
           setIsModalOpen(open)
           // MODIFIED: If modal is closed AND the current status isn't 'follow_up', revert to currentStatus or ""
           if (!open && status !== "follow_up") {
-            // Revert to currentStatus if call was initiated, otherwise revert to "" for re-selection
+            // Revert to "" (unselected) if not call initiated, otherwise stick to "contacted"
             setStatus(isCallInitiated ? "contacted" : "") 
           }
         }}
