@@ -24,9 +24,9 @@ interface LeadStatusUpdaterProps {
   isCallInitiated?: boolean // New prop to indicate if this is for a call
   onCallLogged?: (callLogId: string) => void // New prop to notify when call is logged
   initialLoanAmount?: number | null // New prop for initial loan amount
-  // NEW REQUIRED PROPS for WhatsApp functionality
-  leadPhoneNumber: string 
-  telecallerName: string
+  // NEW REQUIRED PROPS for WhatsApp functionality (made optional/defaults handled below for safety)
+  leadPhoneNumber: string | null | undefined
+  telecallerName: string | null | undefined
 }
 
 const statusOptions = [
@@ -50,9 +50,9 @@ export function LeadStatusUpdater({
   isCallInitiated = false,
   onCallLogged,
   initialLoanAmount = null,
-  // DESTRUCTURE NEW PROPS
-  leadPhoneNumber,
-  telecallerName,
+  // DESTRUCTURE NEW PROPS with nullish coalescing to ensure they are strings
+  leadPhoneNumber = "",
+  telecallerName = "Telecaller",
 }: LeadStatusUpdaterProps) {
   // Status always starts as "" to force selection, even when isCallInitiated.
   const [status, setStatus] = useState("")
@@ -79,8 +79,19 @@ export function LeadStatusUpdater({
 
   // NEW FUNCTION: Constructs the WhatsApp URL
   const getWhatsappLink = () => {
+      // FIX: Ensure leadPhoneNumber is a string before calling replace
+      const phoneString = String(leadPhoneNumber || "");
+
+      // Check if phone number is completely empty after conversion
+      if (!phoneString.trim()) {
+          toast.error("Error", {
+              description: "Lead phone number is missing or invalid.",
+          });
+          return "#"; // Return a safe link
+      }
+
       // Remove all non-digit characters from the phone number
-      const cleanedNumber = leadPhoneNumber.replace(/[^0-9]/g, '');
+      const cleanedNumber = phoneString.replace(/[^0-9]/g, '');
       
       // Replace placeholder and URL encode the message
       const message = WHATSAPP_MESSAGE_BASE.replace("{telecaller_name}", telecallerName)
@@ -404,7 +415,14 @@ export function LeadStatusUpdater({
             target="_blank" 
             rel="noopener noreferrer" 
             title="Send WhatsApp Message for Documents"
-            className="flex items-center justify-center p-1 rounded-full bg-green-500 hover:bg-green-600 transition-colors shadow-md"
+            // Disable the link if no valid phone number is available
+            onClick={(e) => {
+                if (getWhatsappLink() === "#") e.preventDefault();
+            }}
+            className={cn(
+                "flex items-center justify-center p-1 rounded-full bg-green-500 hover:bg-green-600 transition-colors shadow-md",
+                getWhatsappLink() === "#" && "bg-gray-400 cursor-not-allowed hover:bg-gray-400"
+            )}
         >
             {/* Using MessageSquare icon and styling it white on a green background */}
             <MessageSquare className="h-4 w-4 text-white" /> 
@@ -484,22 +502,6 @@ export function LeadStatusUpdater({
               min="0"
             />
           </div>
-
-          {/* REMOVED 'Call Notes' FIELD */}
-          {/* {isCallInitiated && (
-            <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
-                <MessageSquare className="h-4 w-4" />
-                Call Notes:
-              </label>
-              <Textarea
-                placeholder="Add notes about this call..."
-                value={callNotes}
-                onChange={(e) => setCallNotes(e.target.value)}
-                rows={3}
-              />
-            </div>
-          )} */}
 
           {/* MODIFIED: Call Duration input for Minutes and Seconds */}
           {isCallInitiated && (
