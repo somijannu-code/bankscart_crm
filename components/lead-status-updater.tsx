@@ -24,7 +24,7 @@ interface LeadStatusUpdaterProps {
   isCallInitiated?: boolean // New prop to indicate if this is for a call
   onCallLogged?: (callLogId: string) => void // New prop to notify when call is logged
   initialLoanAmount?: number | null // New prop for initial loan amount
-  // NEW REQUIRED PROPS for WhatsApp functionality (made optional/defaults handled below for safety)
+  // Ensure we can receive null/undefined safely
   leadPhoneNumber: string | null | undefined
   telecallerName: string | null | undefined
 }
@@ -50,7 +50,7 @@ export function LeadStatusUpdater({
   isCallInitiated = false,
   onCallLogged,
   initialLoanAmount = null,
-  // DESTRUCTURE NEW PROPS with nullish coalescing to ensure they are strings
+  // Use non-null defaults to prevent runtime errors in the component body
   leadPhoneNumber = "",
   telecallerName = "Telecaller",
 }: LeadStatusUpdaterProps) {
@@ -76,30 +76,21 @@ export function LeadStatusUpdater({
   // CONSTANT FOR WHATSAPP MESSAGE
   const WHATSAPP_MESSAGE_BASE = "hi sir this side {telecaller_name} from ICICI bank kindly share following documents";
 
+  // New constant for a robustly cleaned phone number
+  const cleanedPhoneNumber = String(leadPhoneNumber || "").replace(/[^0-9]/g, '');
 
-  // NEW FUNCTION: Constructs the WhatsApp URL
+  // MODIFIED FUNCTION: Simplified logic, now only returns the link or "#"
   const getWhatsappLink = () => {
-      // FIX: Ensure leadPhoneNumber is a string before calling replace
-      const phoneString = String(leadPhoneNumber || "");
-
-      // Check if phone number is completely empty after conversion
-      if (!phoneString.trim()) {
-          toast.error("Error", {
-              description: "Lead phone number is missing or invalid.",
-          });
-          return "#"; // Return a safe link
+      // Return a safe link if the number is empty after cleaning
+      if (!cleanedPhoneNumber) {
+          return "#"; 
       }
-
-      // Remove all non-digit characters from the phone number
-      const cleanedNumber = phoneString.replace(/[^0-9]/g, '');
       
       // Replace placeholder and URL encode the message
       const message = WHATSAPP_MESSAGE_BASE.replace("{telecaller_name}", telecallerName)
       const encodedMessage = encodeURIComponent(message)
       
-      // WhatsApp URL format: https://wa.me/countrycode+number?text=message
-      // Assuming leadPhoneNumber already includes the country code for a direct link.
-      return `https://wa.me/${cleanedNumber}?text=${encodedMessage}`
+      return `https://wa.me/${cleanedPhoneNumber}?text=${encodedMessage}`
   }
 
 
@@ -400,6 +391,9 @@ export function LeadStatusUpdater({
     isFormInvalid || 
     status === "follow_up" // Disabled if 'follow_up' is selected (update happens via modal success)
 
+  // Check if a valid WhatsApp link can be generated
+  const whatsappLink = getWhatsappLink();
+  const isWhatsappEnabled = whatsappLink !== "#";
 
   return (
     <Card>
@@ -409,24 +403,27 @@ export function LeadStatusUpdater({
           {isCallInitiated ? "Log Call & Update Status" : "Lead Status"}
         </CardTitle>
 
-        {/* NEW: WHATSAPP ICON */}
-        <a 
-            href={getWhatsappLink()} 
-            target="_blank" 
-            rel="noopener noreferrer" 
-            title="Send WhatsApp Message for Documents"
-            // Disable the link if no valid phone number is available
-            onClick={(e) => {
-                if (getWhatsappLink() === "#") e.preventDefault();
-            }}
-            className={cn(
-                "flex items-center justify-center p-1 rounded-full bg-green-500 hover:bg-green-600 transition-colors shadow-md",
-                getWhatsappLink() === "#" && "bg-gray-400 cursor-not-allowed hover:bg-gray-400"
-            )}
-        >
-            {/* Using MessageSquare icon and styling it white on a green background */}
-            <MessageSquare className="h-4 w-4 text-white" /> 
-        </a>
+        {/* NEW: WHATSAPP ICON - Conditionally rendered and disabled */}
+        {isWhatsappEnabled ? (
+            <a 
+                href={whatsappLink} 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                title={`Send WhatsApp Message to ${cleanedPhoneNumber}`}
+                className="flex items-center justify-center p-1 rounded-full bg-green-500 hover:bg-green-600 transition-colors shadow-md"
+            >
+                {/* Using MessageSquare icon and styling it white on a green background */}
+                <MessageSquare className="h-4 w-4 text-white" /> 
+            </a>
+        ) : (
+             <div 
+                title="WhatsApp disabled: Phone number missing or invalid"
+                onClick={() => toast.error("Error", { description: "Lead phone number is missing or invalid to send WhatsApp message." })}
+                className="flex items-center justify-center p-1 rounded-full bg-gray-400 cursor-not-allowed shadow-md"
+            >
+                <MessageSquare className="h-4 w-4 text-white" /> 
+            </div>
+        )}
 
       </CardHeader>
       <CardContent className="space-y-4 max-h-[80vh] overflow-y-auto">
