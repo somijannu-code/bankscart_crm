@@ -337,6 +337,8 @@ export function TelecallerLeadsTable({
         <Table>
           <TableHeader>
             <TableRow>
+              {/* === FIX APPLIED: Contact column moved before Name column === */}
+              {visibleColumns.contact && <TableHead>Contact</TableHead>}
               {visibleColumns.name && (
                 <TableHead 
                   className="cursor-pointer" 
@@ -345,7 +347,7 @@ export function TelecallerLeadsTable({
                   Name {sortField === 'name' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
                 </TableHead>
               )}
-              {visibleColumns.contact && <TableHead>Contact</TableHead>}
+              {/* ========================================================== */}
               {visibleColumns.company && (
                 <TableHead 
                   className="cursor-pointer" 
@@ -388,14 +390,7 @@ export function TelecallerLeadsTable({
           <TableBody>
             {filteredLeads.map((lead) => (
               <TableRow key={lead.id} className="cursor-pointer hover:bg-gray-50">
-                {visibleColumns.name && (
-                  <TableCell className="font-medium">
-                    <Link href={`/telecaller/leads/${lead.id}`} className="flex items-center gap-2">
-                      <User className="h-4 w-4" />
-                      {getSafeValue(lead.name, 'Unknown')}
-                    </Link>
-                  </TableCell>
-                )}
+                {/* === FIX APPLIED: Contact cell moved before Name cell === */}
                 {visibleColumns.contact && (
                   <TableCell>
                     <QuickActions
@@ -406,6 +401,15 @@ export function TelecallerLeadsTable({
                     />
                   </TableCell>
                 )}
+                {visibleColumns.name && (
+                  <TableCell className="font-medium">
+                    <Link href={`/telecaller/leads/${lead.id}`} className="flex items-center gap-2">
+                      <User className="h-4 w-4" />
+                      {getSafeValue(lead.name, 'Unknown')}
+                    </Link>
+                  </TableCell>
+                )}
+                {/* ========================================================== */}
                 {visibleColumns.company && (
                   <TableCell>
                     <div className="flex items-center gap-2">
