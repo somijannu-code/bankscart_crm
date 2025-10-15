@@ -77,6 +77,7 @@ export function LeadStatusUpdater({
   const WHATSAPP_MESSAGE_BASE = "hi sir this side {telecaller_name} from ICICI bank kindly share following documents";
 
   // New constant for a robustly cleaned phone number
+  // The phone number must be available in the props to be cleaned here.
   const cleanedPhoneNumber = String(leadPhoneNumber || "").replace(/[^0-9]/g, '');
 
   // MODIFIED FUNCTION: Simplified logic, now only returns the link or "#"
