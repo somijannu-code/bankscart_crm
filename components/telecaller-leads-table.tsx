@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client"
 import { 
   User, Building, Calendar, Clock, Eye, Phone, Mail, 
   Search, Filter, ChevronDown, ChevronUp, Download,
-  MessageSquare // <--- ADDED ICON IMPORT
+  MessageSquare
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -70,30 +70,47 @@ export function TelecallerLeadsTable({
     created: true,
     loanAmount: true,
   })
+  const [isCallInitiated, setIsCallInitiated] = useState(false) 
+  
+  // --- ADDED STATE FOR TELECALLER NAME ---
+  const [telecallerName, setTelecallerName] = useState("ICICI Telecaller")
+  // ---------------------------------------
+
   const supabase = createClient()
+
+  // --- ADDED useEffect TO FETCH CURRENT USER NAME ---
+  useEffect(() => {
+    const fetchUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        // Attempt to get the name from user_metadata (common Supabase field)
+        const name = user.user_metadata.name 
+          // Fallback to email prefix if name isn't set
+          || user.email?.split('@')[0]
+          // Final fallback
+          || "ICICI Telecaller"
+        setTelecallerName(name)
+      }
+    }
+    fetchUser()
+  }, [supabase])
+  // --------------------------------------------------
 
   // Add safe value getters
   const getSafeValue = (value: any, defaultValue: string = 'N/A') => {
     return value ?? defaultValue
   }
 
-  // Define the telecaller name placeholder
-  // NOTE: Replace "{TELECALLER_NAME}" with the actual telecaller's name dynamically.
-  const TELECALLER_NAME = "{TELECALLER_NAME}" 
-
   // Function to generate the WhatsApp link
   const getWhatsAppLink = (phoneNumber: string) => {
-    // Remove non-digit characters and ensure it's a valid number format
     const cleanedPhone = phoneNumber.replace(/\D/g, '')
 
-    // Pre-filled message with the placeholder for the telecaller's name
-    const message = `Hi sir, this side ${TELECALLER_NAME} from ICICI bank. Kindly share following documents.`
+    // --- UPDATED MESSAGE TO USE DYNAMIC STATE ---
+    const message = `Hi sir, this side ${telecallerName} from ICICI bank. Kindly share following documents.`
+    // --------------------------------------------
     
-    // Encode the message for the URL
     const encodedMessage = encodeURIComponent(message)
     
-    // Construct the WhatsApp URL
-    // It's common practice to use wa.me or api.whatsapp.com
     return `https://wa.me/${cleanedPhone}?text=${encodedMessage}`
   }
 
@@ -135,17 +152,14 @@ export function TelecallerLeadsTable({
     }
   }
 
-  const [isCallInitiated, setIsCallInitiated] = useState(false) // New state to track if call is initiated
-
   const handleCallInitiated = (lead: Lead) => {
     setSelectedLead(lead)
     setIsStatusDialogOpen(true)
-    setIsCallInitiated(true) // Set to true when call is initiated
+    setIsCallInitiated(true)
   }
 
-  // New function to handle when call is logged
   const handleCallLogged = (callLogId: string) => {
-    setIsCallInitiated(false) // Reset the call initiated state
+    setIsCallInitiated(false)
   }
 
   const handleStatusUpdate = async (newStatus: string, note?: string, callbackDate?: string) => {
@@ -157,7 +171,6 @@ export function TelecallerLeadsTable({
         last_contacted: new Date().toISOString()
       }
 
-      // Add note if provided for Not Eligible status
       if (newStatus === "not_eligible" && note) {
         const { error: noteError } = await supabase
           .from("notes")
@@ -170,7 +183,6 @@ export function TelecallerLeadsTable({
         if (noteError) throw noteError
       }
 
-      // Add callback date if provided for Call Back status
       if (newStatus === "follow_up" && callbackDate) {
         const { error: followUpError } = await supabase
           .from("follow_ups")
@@ -182,7 +194,6 @@ export function TelecallerLeadsTable({
 
         if (followUpError) throw followUpError
         
-        // Also update the lead's follow_up_date
         updateData.follow_up_date = callbackDate
       }
 
@@ -198,26 +209,6 @@ export function TelecallerLeadsTable({
       
     } catch (error) {
       console.error("Error updating lead status:", error)
-    }
-  }
-
-  const handleStatusChange = async (leadId: string, newStatus: string) => {
-    try {
-      const { error } = await supabase
-        .from("leads")
-        .update({ 
-          status: newStatus,
-          last_contacted: new Date().toISOString()
-        })
-        .eq("id", leadId)
-
-      if (error) throw error
-
-      console.log(`Status changed for lead ${leadId} to ${newStatus}`)
-      window.location.reload()
-      
-    } catch (error) {
-      console.error("Error changing lead status:", error)
     }
   }
 
@@ -425,7 +416,6 @@ export function TelecallerLeadsTable({
                       <User className="h-4 w-4" />
                       {getSafeValue(lead.name, 'Unknown')}
                       
-                      {/* === ADDED WHATSAPP ICON === */}
                       {lead.phone && (
                         <a 
                           href={getWhatsAppLink(lead.phone)}
@@ -438,7 +428,6 @@ export function TelecallerLeadsTable({
                           <MessageSquare className="h-4 w-4" />
                         </a>
                       )}
-                      {/* ============================= */}
                     </Link>
                   </TableCell>
                 )}
