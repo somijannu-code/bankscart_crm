@@ -106,7 +106,7 @@ export function TelecallerLeadsTable({
     const cleanedPhone = phoneNumber.replace(/\D/g, '')
 
     // --- UPDATED MESSAGE TO USE DYNAMIC STATE ---
-    const message = `Hi sir, this side ${telecallerName} from ICICI bank. Kindly share following documents.`
+    const message = `Hi sir, this side ${telecallerName} from ICICI bank. Kindly share following documents. 1. Aadhar Card, 2. Pan Card, 3. 3 Months Payslip`
     // --------------------------------------------
     
     const encodedMessage = encodeURIComponent(message)
