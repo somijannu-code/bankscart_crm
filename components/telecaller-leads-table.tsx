@@ -106,9 +106,11 @@ export function TelecallerLeadsTable({
     const cleanedPhone = phoneNumber.replace(/\D/g, '')
 
     // --- UPDATED MESSAGE TO USE DYNAMIC STATE ---
-    const message = `Dear Patron 
-Thank you for showing interest in the ICICI Bank Personal Loan! 
-We’re excited to offer you one of the best deals with attractive ROI (9.99 %) and for a quick approval .
+    const message = `Dear *Patron* 
+
+Thank you for showing interest with the *ICICI Bank Personal Loan!* 
+We’re excited to offer you one of the best deals with attractive *ROI (9.99 %) and Zero processing fee* and for a quick *approval*
+
 Please share below documents. 
  Adhaar,
  PAN,
