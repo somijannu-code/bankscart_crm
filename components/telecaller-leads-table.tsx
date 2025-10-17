@@ -106,7 +106,13 @@ export function TelecallerLeadsTable({
     const cleanedPhone = phoneNumber.replace(/\D/g, '')
 
     // --- UPDATED MESSAGE TO USE DYNAMIC STATE ---
-    const message = `Hi sir, this side ${telecallerName} from ICICI bank. Kindly share following documents. 1. Aadhar Card, 2. Pan Card, 3. 3 Months Payslip`
+    const message = `Dear Patron 
+Thank you for showing interest in the ICICI Bank Personal Loan! 
+We’re excited to offer you one of the best deals with attractive ROI (9.99 %) and for a quick approval .
+Please share below documents. 
+ Adhaar,
+ PAN,
+ 3 Salary Slips & months and Bank statement`
     // --------------------------------------------
     
     const encodedMessage = encodeURIComponent(message)
