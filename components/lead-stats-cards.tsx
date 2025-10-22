@@ -37,7 +37,7 @@ const statConfigs = [
     bgColor: 'bg-purple-50'
   },
   {
-    key: 'Interested' as const,
+    key: 'interested' as const,
     title: 'High Priority',
     icon: Star,
     color: 'text-red-600',
