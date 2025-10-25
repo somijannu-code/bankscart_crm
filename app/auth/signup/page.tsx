@@ -114,8 +114,6 @@ export default function SignUpPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="telecaller">Telecaller</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
-                        <SelectItem value="kyc_team">kyc_team</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
