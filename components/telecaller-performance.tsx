@@ -98,8 +98,15 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
         const performanceData: PerformanceData[] = []
 
         for (const telecaller of telecallers) {
-          // Get leads assigned to this telecaller
-          const { data: leads } = await supabase
+          
+          // --- FIX 1: Query for ALL-TIME Leads for Total Leads (NO date filter) ---
+          const { data: allTimeLeads } = await supabase
+            .from("leads")
+            .select("id") // Select minimal data as we only need the count
+            .eq("assigned_to", telecaller.id)
+            
+          // --- FIX 2: Query for PERIOD-SPECIFIC Leads for status breakdowns (WITH date filter) ---
+          const { data: periodLeads } = await supabase
             .from("leads")
             .select("status, created_at")
             .eq("assigned_to", telecaller.id)
@@ -114,7 +121,8 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
             .gte("created_at", startDate)
             .lte("created_at", `${endDate}T23:59:59`)
 
-          const totalLeads = leads?.length || 0
+          // --- FIX 3: Use allTimeLeads for Total Leads count ---
+          const totalLeads = allTimeLeads?.length || 0
           const totalCalls = calls?.length || 0
           
           // Calculate total and average call duration
@@ -133,15 +141,15 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
           // Connected calls are those with duration > 0
           const connectedCalls = callStatusBreakdown.connected
           
-          // Update new leads to include all initial statuses
-          const newLeads = leads?.filter((lead: Lead) => 
+          // --- FIX 4: Use periodLeads for date-filtered new leads ---
+          const newLeads = periodLeads?.filter((lead: Lead) => 
             lead.status === "new" || 
             lead.status === "contacted" ||
             lead.status === "Interested"
           ).length || 0
           
-          // Update converted leads to include all successful conversion statuses
-          const convertedLeads = leads?.filter((lead: Lead) => 
+          // --- FIX 5: Use periodLeads for date-filtered converted leads ---
+          const convertedLeads = periodLeads?.filter((lead: Lead) => 
             lead.status === "closed_won" ||
             lead.status === "Disbursed" ||
             lead.status === "Login" ||
