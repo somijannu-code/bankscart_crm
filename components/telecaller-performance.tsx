@@ -34,8 +34,8 @@ interface PerformanceData {
   connectedCalls: number
   connectRate: number
   newLeads: number
-  convertedLeads: number
-  conversionRate: number
+  convertedLeads: number // This field now represents 'Interested Leads' count
+  conversionRate: number // This rate now represents 'Interested Leads' rate
   isCheckedIn: boolean
   totalCallDuration: number // New field for total call duration
   avgCallDuration: number // New field for average call duration
@@ -99,13 +99,13 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
 
         for (const telecaller of telecallers) {
           
-          // --- FIX 1: Query for ALL-TIME Leads for Total Leads (NO date filter) ---
+          // --- FIX 1 (From previous request): Query for ALL-TIME Leads for Total Leads (NO date filter) ---
           const { data: allTimeLeads } = await supabase
             .from("leads")
             .select("id") // Select minimal data as we only need the count
             .eq("assigned_to", telecaller.id)
             
-          // --- FIX 2: Query for PERIOD-SPECIFIC Leads for status breakdowns (WITH date filter) ---
+          // --- FIX 2 (From previous request): Query for PERIOD-SPECIFIC Leads for status breakdowns (WITH date filter) ---
           const { data: periodLeads } = await supabase
             .from("leads")
             .select("status, created_at")
@@ -121,7 +121,7 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
             .gte("created_at", startDate)
             .lte("created_at", `${endDate}T23:59:59`)
 
-          // --- FIX 3: Use allTimeLeads for Total Leads count ---
+          // --- FIX 3 (From previous request): Use allTimeLeads for Total Leads count ---
           const totalLeads = allTimeLeads?.length || 0
           const totalCalls = calls?.length || 0
           
@@ -141,20 +141,16 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
           // Connected calls are those with duration > 0
           const connectedCalls = callStatusBreakdown.connected
           
-          // --- FIX 4: Use periodLeads for date-filtered new leads ---
+          // --- CHANGE 1: Refined new leads to NOT include 'Interested', as it is now in the convertedLeads bucket ---
           const newLeads = periodLeads?.filter((lead: Lead) => 
             lead.status === "new" || 
-            lead.status === "contacted" ||
-            lead.status === "Interested"
+            lead.status === "contacted"
+            // 'Interested' removed from here
           ).length || 0
           
-          // --- FIX 5: Use periodLeads for date-filtered converted leads ---
+          // --- CHANGE 2: Update 'convertedLeads' to count ONLY 'Interested' status leads in the period ---
           const convertedLeads = periodLeads?.filter((lead: Lead) => 
-            lead.status === "closed_won" ||
-            lead.status === "Disbursed" ||
-            lead.status === "Login" ||
-            lead.status === "Documents_Sent" ||
-            lead.status === "qualified"
+            lead.status === "Interested"
           ).length || 0
 
           performanceData.push({
@@ -250,7 +246,8 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
             </th>
             <th className="text-left p-4 font-semibold">Connected Calls</th>
             <th className="text-left p-4 font-semibold">Connect Rate</th>
-            <th className="text-left p-4 font-semibold">Conversions</th>
+            {/* --- CHANGE 3: Updated column header from 'Conversions' to 'Interested Leads' --- */}
+            <th className="text-left p-4 font-semibold">Interested Leads</th>
             <th className="text-left p-4 font-semibold">Conversion Rate</th>
             <th className="text-left p-4 font-semibold">Call Status Breakdown</th>
             <th className="text-left p-4 font-semibold">Performance</th>
@@ -303,6 +300,7 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
                 </div>
               </td>
               <td className="p-4 text-center">
+                {/* Data remains telecaller.convertedLeads, but now holds 'Interested' count */}
                 <div className="font-semibold text-purple-600">{telecaller.convertedLeads}</div>
               </td>
               <td className="p-4">
