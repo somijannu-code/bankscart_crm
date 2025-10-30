@@ -1680,7 +1680,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               onValueChange={handlePageSizeChange}
             >
               <SelectTrigger className="w-[80px] h-9">
-                <SelectValue placeholder="20" />
+                <SelectValue placeholder="200" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="10">10</SelectItem>
