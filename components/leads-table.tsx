@@ -1540,7 +1540,15 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                           <div className="flex items-center gap-1">
                             <Clock className="h-3 w-3 text-muted-foreground" />
                             <span className="text-sm">
-                              {new Date(lead.last_contacted).toLocaleDateString()}
+                              {/* UPDATED: Use toLocaleString to include time */}
+                              {new Date(lead.last_contacted).toLocaleString(undefined, {
+                                year: 'numeric',
+                                month: 'numeric',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                hour12: true, // Use 12-hour clock (AM/PM)
+                              })}
                             </span>
                           </div>
                         ) : (
