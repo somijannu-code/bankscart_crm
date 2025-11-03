@@ -292,7 +292,7 @@ export function LeadStatusUpdater({
       }
 
       // Only update if status is NOT the current status OR if a call was initiated
-      // We skip the update if status is 'nr' but we only want to log the call.
+      // We skip the leads update if status is 'nr' but we only want to log the call.
       if (status !== currentStatus || isCallInitiated) {
           const { error } = await supabase
             .from("leads")
