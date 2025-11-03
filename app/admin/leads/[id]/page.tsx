@@ -1,3 +1,4 @@
+// pages/admin/leads/[id]/page (36).tsx
 "use client"
 
 import { createClient } from "@/lib/supabase/client"
@@ -257,12 +258,12 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
       // Fetch notes
       const { data: notes, error: notesError } = await supabase
         .from("notes")
-        .select("*")
+        .select("*, users!notes_user_id_fkey(full_name)")
         .eq("lead_id", leadId)
         .order("created_at", { ascending: false })
 
       if (notesError) console.error("Error fetching notes:", notesError)
-
+      
       // Fetch follow-ups
       const { data: followUps, error: followUpsError } = await supabase
         .from("follow_ups")
@@ -275,7 +276,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
       // Fetch call history
       const { data: callHistory, error: callHistoryError } = await supabase
         .from("call_logs")
-        .select("*")
+        .select("*, users!call_logs_user_id_fkey(full_name)")
         .eq("lead_id", leadId)
         .order("created_at", { ascending: false })
 
@@ -286,9 +287,9 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
         ...(notes || []).map((note: any) => ({
           type: "note",
           id: note.id,
-          title: note.note_type === "status_change" ? "Status changed" : "Note added",
+          title: note.note_type === "status_change" ? "Status changed" : "Note added", // Logic to identify status change
           description: note.content || "No description",
-          user: note.user?.full_name || "Unknown",
+          user: note.users?.full_name || "Unknown",
           date: note.created_at,
           icon: <MessageSquare className="h-4 w-4" />,
         })),
@@ -306,7 +307,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
           id: call.id,
           title: "Call made",
           description: `Duration: ${call.duration_seconds || "N/A"} seconds, Outcome: ${call.outcome || "N/A"}`,
-          user: call.user?.full_name || "Unknown",
+          user: call.users?.full_name || "Unknown",
           date: call.created_at,
           icon: <Phone className="h-4 w-4" />,
         })),
@@ -346,6 +347,9 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
         source: (formData.get("source") as string) || null,
         notes: (formData.get("notes") as string) || null,
       }
+      
+      const newStatus = formData.get("status") as string
+      const currentStatus = lead?.status
 
       const supabase = createClient()
       const { error } = await supabase.from("leads").update(updates).eq("id", params.id)
@@ -354,15 +358,36 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
         console.error("Error updating lead:", error)
         alert("Failed to update lead. Please try again.")
       } else {
+        // --- ADDED: Log status change if updated via the general form ---
+        if (newStatus !== currentStatus && user) {
+            const statusChangeNoteContent = `Status changed from ${currentStatus} to ${newStatus} (via Lead Information form save).`
+            const { error: noteError } = await supabase.from("notes").insert({
+                lead_id: params.id,
+                user_id: user.id,
+                content: statusChangeNoteContent,
+                note_type: "status_change", // Critical for timeline recognition
+            })
+            if (noteError) console.error("Error logging status change note from form:", noteError)
+        }
+        // --- END ADDED ---
+        
         // Refresh the lead data after update
         const { data: updatedLead } = await supabase
           .from("leads")
-          .select("*")
+          .select("*, assigned_user:users!leads_assigned_to_fkey(id, full_name), assigner:users!leads_assigned_by_fkey(id, full_name)")
           .eq("id", params.id)
           .single()
         
         if (updatedLead) {
-          setLead(updatedLead as Lead)
+            // Manually structure the fetched data to match the Lead interface
+            const leadWithUserData = {
+                ...updatedLead,
+                assigned_user: updatedLead.assigned_user || null,
+                assigner: updatedLead.assigner || null,
+            }
+            setLead(leadWithUserData as Lead)
+            // Re-fetch timeline to include the new status change note
+            await fetchTimelineData(params.id, supabase)
         }
         
         alert("Lead updated successfully!")
@@ -735,7 +760,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
                   <CardTitle>Update Status</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <LeadStatusUpdater leadId={lead.id} currentStatus={lead.status} />
+                  <LeadStatusUpdater leadId={lead.id} currentStatus={lead.status} leadPhoneNumber={lead.phone} telecallerName={user?.full_name || "Unknown"} onStatusUpdate={() => fetchTimelineData(params.id, createClient())} />
                 </CardContent>
               </Card>
 
@@ -767,6 +792,10 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
                     <span className="text-sm">
                       {lead.last_contacted ? new Date(lead.last_contacted).toLocaleDateString() : "Never"}
                     </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Total Status Changes:</span>
+                    <span className="text-sm">{timelineData.filter((item) => item.title === "Status changed").length}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-sm text-gray-600">Total Notes:</span>
