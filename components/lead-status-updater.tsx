@@ -178,9 +178,9 @@ export function LeadStatusUpdater({
         .eq("id", leadId)
         
       if (error) throw error
-
+      
       // ------------------------------------------
-      // NEW LOGIC: Log the status change to 'follow_up'
+      // CORRECTED/ADDED LOGIC: Log the status change to 'follow_up'
       const { data: { user } } = await supabase.auth.getUser()
 
       if (user) {
@@ -197,7 +197,7 @@ export function LeadStatusUpdater({
         if (noteError) console.error("Error logging follow_up status change note:", noteError)
       }
       // ------------------------------------------
-      
+
       // Update local state and notify parent
       setStatus("follow_up")
       onStatusUpdate?.("follow_up", note) 
@@ -304,7 +304,7 @@ export function LeadStatusUpdater({
           onStatusUpdate?.(status, note) 
           
           // ------------------------------------------
-          // NEW LOGIC: Log the status change as a special note
+          // CORRECTED/ADDED LOGIC: Log the status change as a special note
           const { data: { user } } = await supabase.auth.getUser()
 
           // Only log a status change note if the status actually changed
