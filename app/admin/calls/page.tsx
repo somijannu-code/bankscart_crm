@@ -1,167 +1,312 @@
-// app/admin/leads-summary/page.tsx
-import { createClient } from "@/lib/supabase/server"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+"use client";
+
+import { useMemo } from "react"
+import { 
+  User, PieChart, BarChart3, Users, CheckCircle2, XCircle
+} from "lucide-react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Users, BarChart3, TrendingUp, AlertCircle, XCircle, CheckCircle2 } from "lucide-react"
+import { Separator } from "@/components/ui/separator"
+import { LeadsTable, Lead } from "./leads-table"; // Assuming you export Lead interface from leads-table.tsx
+// NOTE: I'm importing the 'Lead' interface from the file you provided for consistency.
 
-// --- Helper Functions and Mappings ---
-
-// Status to UI map for styling (You can expand this with your actual lead statuses)
-const statusMap: Record<string, { label: string; className: string; icon: any }> = {
-  'New': { label: 'New', className: 'bg-blue-100 text-blue-700', icon: AlertCircle },
-  'Contacted': { label: 'Contacted', className: 'bg-yellow-100 text-yellow-700', icon: TrendingUp },
-  'Follow-up': { label: 'Follow-up', className: 'bg-orange-100 text-orange-700', icon: BarChart3 },
-  'Qualified': { label: 'Qualified', className: 'bg-green-100 text-green-700', icon: CheckCircle2 },
-  'Converted': { label: 'Converted', className: 'bg-teal-100 text-teal-700', icon: CheckCircle2 },
-  'Unqualified': { label: 'Unqualified', className: 'bg-red-100 text-red-700', icon: XCircle },
-  'Unassigned': { label: 'Unassigned', className: 'bg-gray-100 text-gray-500', icon: AlertCircle },
+// Define the required Lead and Telecaller interfaces for type safety
+interface Lead {
+  id: string
+  name: string
+  email: string
+  phone: string
+  company: string
+  status: string
+  priority: string
+  created_at: string
+  last_contacted: string | null
+  loan_amount: number | null
+  loan_type: string | null
+  source: string | null
+  assigned_to: string | null
+  assigned_user: {
+    id: string
+    full_name: string
+  } | null
+  city: string | null
+  follow_up_date: string | null
+  lead_score?: number
+  tags?: string[]
 }
 
-const getStatusStyle = (status: string) => statusMap[status] || statusMap['Unassigned'];
+interface Telecaller {
+  id: string
+  full_name: string
+}
 
-// --- Main Component ---
+interface TelecallerPerformanceDashboardProps {
+  leads: Lead[]
+  telecallers: Telecaller[]
+}
 
-export default async function LeadsSummaryPage() {
-  const supabase = await createClient()
+// Define all possible lead statuses for the table columns
+const ALL_LEAD_STATUSES: string[] = [
+  "new", 
+  "contacted", 
+  "Interested", 
+  "Documents_Sent", 
+  "Login",
+  "follow_up", // Added 'follow_up' based on the status score in LeadsTable
+  "nr",
+  "self_employed",
+  "Disbursed",
+  "Not_Interested",
+  "not_eligible",
+  // Ensure all statuses used in the application are listed here
+];
 
-  // 1. Fetch ALL leads with their status and assigned telecaller_id
-  const { data: leads, error: leadsError } = await supabase
-    .from("leads")
-    .select("telecaller_id, status") // **CORRECTED: Using telecaller_id**
-    .neq("telecaller_id", null) // Only count leads that are assigned to a telecaller
-
-  if (leadsError || !leads) {
-    console.error("Error fetching leads:", leadsError)
-    return <p className="p-6 text-red-500">Error loading lead data: {leadsError?.message}</p>
-  }
-  
-  // 2. Extract all unique Telecaller IDs from the leads
-  const uniqueTelecallerIds = [...new Set(leads.map(lead => (lead as any).telecaller_id).filter(Boolean))]
-
-  // 3. Fetch Telecaller Names (Users Data)
-  let usersData: Record<string, { name: string }> = {}
-  if (uniqueTelecallerIds.length > 0) {
-    // Fetching user details (assuming 'users' table is the correct reference)
-    const { data: users } = await supabase.from("users").select("id, email, raw_user_meta_data").in("id", uniqueTelecallerIds);
-    
-    if (users) {
-      usersData = users.reduce((acc: Record<string, any>, user: any) => {
-        // Use name from meta data if available, otherwise use email
-        const telecallerName = user.raw_user_meta_data?.name || user.email || `User ID: ${user.id}`;
-        acc[user.id] = { name: telecallerName };
-        return acc
-      }, {} as Record<string, any>)
+/**
+ * Utility function to get a consistent display name for a status
+ * @param status 
+ * @returns 
+ */
+const getStatusDisplayName = (status: string): string => {
+    switch(status) {
+        case "Documents_Sent": return "Docs Sent"
+        case "Not_Interested": return "Not Interested"
+        case "not_eligible": return "Not Eligible"
+        case "self_employed": return "Self Employed"
+        case "follow_up": return "Follow Up"
+        case "nr": return "NR"
+        default: return status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ')
     }
+}
+
+/**
+ * Utility function to get a color for a status badge (reused from LeadsTable logic)
+ * @param status 
+ * @returns 
+ */
+const getStatusColor = (status: string): string => {
+  const colors: Record<string, string> = {
+    "new": "bg-blue-500 hover:bg-blue-600",
+    "contacted": "bg-yellow-500 hover:bg-yellow-600",
+    "Interested": "bg-green-500 hover:bg-green-600",
+    "Documents_Sent": "bg-purple-500 hover:bg-purple-600",
+    "Login": "bg-orange-500 hover:bg-orange-600",
+    "Disbursed": "bg-green-700 hover:bg-green-800",
+    "Not_Interested": "bg-red-500 hover:bg-red-600",
+    "follow_up": "bg-indigo-500 hover:bg-indigo-600",
+    "not_eligible": "bg-red-600 hover:bg-red-700",
+    "nr": "bg-gray-500 hover:bg-gray-600",
+    "self_employed": "bg-amber-500 hover:bg-amber-600"
   }
+  return colors[status] || "bg-gray-500 hover:bg-gray-600"
+}
 
-  // 4. Aggregate the leads data by Telecaller and Status
-  const summary: Record<string, { name: string, total: number, counts: Record<string, number> }> = {}
-  const allStatuses = new Set<string>()
 
-  for (const lead of leads) {
-    // CORRECTED: Using telecaller_id
-    const telecallerId = (lead as any).telecaller_id as string 
-    const status = lead.status || 'Unassigned' 
-    
-    // Add status to the set to generate table headers later
-    allStatuses.add(status)
+export function TelecallerPerformanceDashboard({ leads = [], telecallers = [] }: TelecallerPerformanceDashboardProps) {
 
-    if (!summary[telecallerId]) {
-      // Initialize entry for the telecaller
-      const user = usersData[telecallerId] || { name: `User ID: ${telecallerId}` }
-      summary[telecallerId] = {
-        name: user.name,
-        total: 0,
-        counts: {}
+  // Group leads by telecaller and then by status
+  const telecallerLeadSummary = useMemo(() => {
+    const summary = new Map<string, {
+      telecallerName: string, 
+      totalLeads: number,
+      statusCounts: Record<string, number>
+    }>()
+
+    // Initialize with all telecallers
+    telecallers.forEach(tc => {
+        summary.set(tc.id, {
+            telecallerName: tc.full_name,
+            totalLeads: 0,
+            statusCounts: ALL_LEAD_STATUSES.reduce((acc, status) => ({...acc, [status]: 0}), {} as Record<string, number>)
+        })
+    })
+
+    // Process leads
+    leads.forEach(lead => {
+      const assignedToId = lead.assigned_to || 'unassigned'
+      const status = lead.status || 'new' // Default to 'new' if status is missing
+      
+      // Ensure the telecaller entry exists (handles assigned_to: null/unassigned and the predefined list)
+      if (!summary.has(assignedToId)) {
+        const name = assignedToId === 'unassigned' ? 'Unassigned' : (lead.assigned_user?.full_name || 'Unknown Telecaller')
+        summary.set(assignedToId, {
+            telecallerName: name,
+            totalLeads: 0,
+            statusCounts: ALL_LEAD_STATUSES.reduce((acc, status) => ({...acc, [status]: 0}), {} as Record<string, number>)
+        })
       }
-    }
 
-    // Increment totals and status counts
-    summary[telecallerId].total += 1
-    summary[telecallerId].counts[status] = (summary[telecallerId].counts[status] || 0) + 1
-  }
+      const tcData = summary.get(assignedToId)!
+      tcData.totalLeads += 1
+      tcData.statusCounts[status] = (tcData.statusCounts[status] || 0) + 1
+    })
 
-  const sortedStatuses = Array.from(allStatuses).sort((a, b) => {
-    // Custom sort to put New/Unqualified/Unassigned first, then alphabetical
-    const order = ['New', 'Contacted', 'Follow-up', 'Qualified', 'Converted', 'Unqualified', 'Unassigned'];
-    return order.indexOf(a) - order.indexOf(b);
-  });
+    // Convert Map to an array and sort 'Unassigned' to the end
+    const summaryArray = Array.from(summary.entries()).map(([id, data]) => ({ id, ...data }));
+    
+    summaryArray.sort((a, b) => {
+        if (a.id === 'unassigned') return 1;
+        if (b.id === 'unassigned') return -1;
+        return a.telecallerName.localeCompare(b.telecallerName);
+    });
+
+    return summaryArray
+  }, [leads, telecallers])
   
-  const telecallerSummary = Object.values(summary);
+  // Calculate overall status distribution for the summary card
+  const overallStatusDistribution = useMemo(() => {
+    return leads.reduce((acc, lead) => {
+        const status = lead.status || 'new'
+        acc[status] = (acc[status] || 0) + 1
+        return acc
+    }, {} as Record<string, number>)
+  }, [leads])
+
+  const totalLeads = leads.length;
 
   return (
-    <div className="p-6 space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Telecaller Leads Summary</h1>
-          <p className="text-gray-600 mt-1">Total leads assigned to each telecaller, grouped by status.</p>
-        </div>
-      </div>
+    <div className="space-y-8 p-6">
+      <h1 className="text-3xl font-bold flex items-center gap-3">
+        <BarChart3 className="h-7 w-7 text-blue-600" />
+        Telecaller Lead Performance Dashboard
+      </h1>
+      <CardDescription>
+        Overview of lead distribution and status breakdown across all telecallers.
+      </CardDescription>
+      
+      <Separator />
 
-      {/* Aggregated Overall Stat */}
+      {/* Summary Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card className="bg-blue-50 border-blue-200">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-blue-800">Total Leads in System</CardTitle>
+            <Users className="h-4 w-4 text-blue-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-900">{totalLeads}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {telecallers.length} telecallers managed
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-green-50 border-green-200">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-green-800">Total Disbursed</CardTitle>
+            <CheckCircle2 className="h-4 w-4 text-green-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-900">{overallStatusDistribution.Disbursed || 0}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Conversion Rate: {totalLeads > 0 ? ((overallStatusDistribution.Disbursed || 0) / totalLeads * 100).toFixed(1) : '0'}%
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-red-50 border-red-200">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-red-800">Total Not Interested / Eligible</CardTitle>
+            <XCircle className="h-4 w-4 text-red-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-900">
+                {(overallStatusDistribution.Not_Interested || 0) + (overallStatusDistribution.not_eligible || 0)}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Key loss indicators
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+      
+      {/* Status Distribution Table */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Total Assigned Leads</CardTitle>
-          <Users className="h-4 w-4 text-gray-500" />
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            Telecaller Lead Distribution
+          </CardTitle>
+          <CardDescription>
+            Count of leads assigned to each telecaller, categorized by their current status.
+          </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">
-            {leads.length}
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="min-w-[150px] sticky left-0 bg-white z-10">
+                    Telecaller
+                  </TableHead>
+                  <TableHead className="text-right">Total Leads</TableHead>
+                  {ALL_LEAD_STATUSES.map(status => (
+                    <TableHead key={status} className="text-center min-w-[100px] whitespace-nowrap">
+                      <Badge 
+                        className={`text-white font-medium text-xs ${getStatusColor(status)}`}
+                      >
+                        {getStatusDisplayName(status)}
+                      </Badge>
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {telecallerLeadSummary.map((tc, index) => (
+                  <TableRow key={tc.id}>
+                    <TableCell className={`font-semibold min-w-[150px] sticky left-0 z-10 ${tc.id === 'unassigned' ? 'text-red-600 bg-red-50' : 'bg-white'}`}>
+                        <div className="flex items-center gap-2">
+                            <User className="h-4 w-4" />
+                            {tc.telecallerName}
+                        </div>
+                    </TableCell>
+                    <TableCell className="font-bold text-right text-lg">
+                      {tc.totalLeads}
+                    </TableCell>
+                    {ALL_LEAD_STATUSES.map(status => (
+                      <TableCell key={status} className="text-center">
+                        <span className="font-mono text-sm">
+                            {tc.statusCounts[status] || 0}
+                        </span>
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
-          <p className="text-xs text-gray-500">
-            Across {telecallerSummary.length} active telecallers
-          </p>
         </CardContent>
       </Card>
 
-      {/* Leads Breakdown Table */}
-      <div className="shadow-lg rounded-lg border overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-gray-50">
-              <TableHead className="w-[200px] text-lg font-bold text-gray-800">Telecaller</TableHead>
-              <TableHead className="text-center font-bold text-gray-800">Total Leads</TableHead>
-              {sortedStatuses.map(status => {
-                const { label } = getStatusStyle(status);
-                return (
-                  <TableHead key={status} className="text-center">
-                    <span className="font-semibold">{label}</span>
-                  </TableHead>
-                )
-              })}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {telecallerSummary.map((tc, index) => (
-              <TableRow key={index} className="hover:bg-blue-50/50">
-                <TableCell className="font-medium text-gray-900">{tc.name}</TableCell>
-                <TableCell className="text-center font-bold text-lg text-blue-600">{tc.total}</TableCell>
-                {sortedStatuses.map(status => {
-                  const count = tc.counts[status] || 0;
-                  const { className, icon: Icon } = getStatusStyle(status);
-                  
-                  return (
-                    <TableCell key={status} className="text-center">
-                      <div className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${className}`}>
-                        <Icon className="h-3 w-3 mr-1" />
-                        {count}
-                      </div>
-                    </TableCell>
-                  )
-                })}
-              </TableRow>
+      {/* Overall Status Pie Chart Placeholder (as an idea for visualization) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <PieChart className="h-5 w-5" />
+            Overall Lead Status Distribution
+          </CardTitle>
+          <CardDescription>
+            A graphical view of all leads across different statuses. (Visualization component pending)
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-4">
+            {Object.entries(overallStatusDistribution)
+                .sort(([, countA], [, countB]) => countB - countA)
+                .map(([status, count]) => (
+                <div key={status} className="flex items-center gap-1">
+                    <Badge className={`text-white font-medium ${getStatusColor(status)}`}>
+                        {getStatusDisplayName(status)}
+                    </Badge>
+                    <span className="font-bold text-lg">({count})</span>
+                </div>
             ))}
-
-            {telecallerSummary.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={sortedStatuses.length + 2} className="h-24 text-center text-gray-500">
-                  No leads are currently assigned to any telecaller.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
+      
     </div>
   )
 }
+// You would render this component in your admin page, passing it the leads and telecallers props:
+// <TelecallerPerformanceDashboard leads={allLeads} telecallers={allTelecallers} />
