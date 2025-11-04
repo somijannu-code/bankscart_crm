@@ -178,7 +178,7 @@ export function LeadFilters({ telecallers }: LeadFiltersProps) {
       </div>
 
       {/* Date Range Filters */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-5 pt-2 border-t">
+      <div className="grid grid-cols-2 md:grid-cols-7 gap-7 pt-2 border-t">
         <Input
           type="date"
           placeholder="Created From"
