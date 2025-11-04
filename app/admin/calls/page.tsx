@@ -1,7 +1,7 @@
 // This file runs entirely on the server to fetch data efficiently.
 
 import { createClient } from "@/lib/supabase/server";
-// Import UI components used in your other files (assuming shadcn/ui components)
+// Assuming these are available from your component library
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge"; 
@@ -9,7 +9,7 @@ import { Users, BarChart3 } from "lucide-react";
 
 
 // CRITICAL FIX: Ensures this page runs dynamically at request time, 
-// preventing production build errors related to dynamic server usage.
+// preventing production build errors related to dynamic server usage (like cookies()).
 export const dynamic = 'force-dynamic';
 
 
@@ -26,6 +26,11 @@ const LEAD_STATUSES = [
   "Junk",
 ];
 
+interface Lead {
+  assigned_to: string;
+  status: string;
+}
+
 interface TelecallerSummary {
   telecallerId: string;
   telecallerName: string;
@@ -35,14 +40,14 @@ interface TelecallerSummary {
 
 
 /**
- * FINAL STABLE FUNCTION: Fetches all leads and processes the counts locally 
- * in the server component. This bypasses RLS restrictions on aggregate queries.
+ * STABLE FUNCTION: Fetches all leads and processes the counts locally 
+ * in the server component. This avoids RLS restrictions on aggregate queries.
  */
 async function getTelecallerLeadSummary(): Promise<TelecallerSummary[]> {
   try {
     const supabase = await createClient();
 
-    // 1. Fetch all users (telecallers)
+    // 1. Fetch all users (telecallers) to get names and IDs
     const { data: users, error: userError } = await supabase
       .from("users")
       .select("id, full_name");
@@ -52,14 +57,15 @@ async function getTelecallerLeadSummary(): Promise<TelecallerSummary[]> {
       return []; 
     }
     
-    // 2. Fetch ALL leads assigned to ANY user
+    // 2. Fetch ALL leads with minimal columns (similar to working pages)
     const { data: leads, error: leadsError } = await supabase
       .from("leads")
       .select("assigned_to, status") // Only need these two columns for counting
-      .not('assigned_to', 'is', null); // Only leads assigned to someone
+      .not('assigned_to', 'is', null) // Only leads assigned to someone
+      .returns<Lead[]>()
 
     if (leadsError) {
-        console.error("CRITICAL LEAD FETCH ERROR (RLS likely):", leadsError);
+        console.error("CRITICAL LEAD FETCH ERROR (RLS likely blocking simple SELECT, or credential issue):", leadsError);
         return [];
     }
 
@@ -81,16 +87,21 @@ async function getTelecallerLeadSummary(): Promise<TelecallerSummary[]> {
       const telecallerId = lead.assigned_to;
       const status = lead.status;
 
+      // Check if the assigned ID is a recognized user and the status is valid
       if (telecallerId && summaryMap.has(telecallerId) && status) {
         const summary = summaryMap.get(telecallerId)!;
+        
+        // Increment the count for the specific status
         summary.statusCounts[status] = (summary.statusCounts[status] || 0) + 1;
+        
+        // Increment the total count
         summary.totalLeads += 1;
       }
     });
 
-    // Final array, sorted by total leads
+    // Final array, filter for users with leads, and sort by total leads (descending)
     return Array.from(summaryMap.values())
-      .filter(tc => tc.totalLeads > 0) // Only show telecallers with at least one lead
+      .filter(tc => tc.totalLeads > 0) 
       .sort((a, b) => b.totalLeads - a.totalLeads);
 
   } catch (e) {
@@ -117,7 +128,7 @@ export default async function TelecallerLeadSummaryPage() {
       </div>
 
       <p className="text-gray-500">
-        This table displays the **total available leads** for each telecaller, broken down by their current **status**, showing only the numbers (counts) as requested.
+        This table displays the **total available leads** for each telecaller, broken down by their current **status**, showing only the numbers (counts).
       </p>
       
       {/* Summary Table Card */}
@@ -127,7 +138,7 @@ export default async function TelecallerLeadSummaryPage() {
             <Users className="h-5 w-5" />
             Lead Distribution by Telecaller
             <Badge variant="secondary" className="ml-2">
-              Showing {summaryData.length} Telecallers
+              Showing {summaryData.length} Telecallers with Leads
             </Badge>
           </CardTitle>
         </CardHeader>
