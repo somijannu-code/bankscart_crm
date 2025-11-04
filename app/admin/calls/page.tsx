@@ -1,17 +1,21 @@
-// This file runs entirely on the server to fetch data efficiently.
+// This file runs entirely on the server to fetch data efficiently using Next.js Server Components.
 
 import { createClient } from "@/lib/supabase/server";
-// Import UI components used in your other files
+// Import UI components used in your other files (assuming shadcn/ui components)
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge"; 
 import { Users, BarChart3 } from "lucide-react";
 
 
+// Force dynamic rendering to prevent build errors related to data fetching 
+// if cookies() or other dynamic functions are used elsewhere in your app.
+export const dynamic = 'force-dynamic';
+
+
 // --- Data Structures ---
 
 // Define a common set of lead statuses for consistent column headers.
-// These should match the values in your Supabase 'status' column.
 const LEAD_STATUSES = [
   "New",
   "Contacted",
@@ -31,12 +35,13 @@ interface TelecallerSummary {
 
 
 /**
- * Fetches and processes lead counts grouped by telecaller and status from Supabase.
+ * FINAL REVISED: Fetches lead counts by status. 
+ * Fetches users first for mapping and filtering, then performs the aggregate count.
  */
 async function getTelecallerLeadSummary(): Promise<TelecallerSummary[]> {
   const supabase = await createClient();
 
-  // 1. Fetch all users (telecallers) to get their full names
+  // 1. Fetch all users (telecallers) to get their full names and IDs
   const { data: users, error: userError } = await supabase
     .from("users")
     .select("id, full_name");
@@ -46,29 +51,33 @@ async function getTelecallerLeadSummary(): Promise<TelecallerSummary[]> {
     return []; 
   }
 
-  const userMap = new Map(users.map(u => [u.id, u.full_name]));
+  const telecallerIds = users.map(u => u.id);
 
-  // 2. Fetch the aggregate counts from 'leads' table in one go.
+  // 2. Fetch the aggregate counts using an 'in' filter and the count aggregate.
+  // This is the most reliable way to perform this operation via PostgREST/Supabase.
   const { data: leadCountsRaw, error: countError } = await supabase
     .from("leads")
-    // Use PostgREST's aggregate feature: select the columns to group by + the count.
+    // Use the 'in' filter to only count leads assigned to known telecallers
+    .in('assigned_to', telecallerIds) 
+    // Select the columns to group by + the count aggregate.
+    // 'count' is a special keyword for the aggregate function.
     .select("assigned_to, status, count") 
-    .not("assigned_to", "is", null) // Only count leads that are actually assigned
     .returns<Array<{ assigned_to: string, status: string, count: number }>>()
     
   if (countError) {
     console.error("Error fetching lead counts:", countError);
+    // Log the actual error to help with RLS debugging if needed
     return [];
   }
 
-  // 3. Process raw data into the final structured format for the UI
+  // 3. Process raw data into the final structured format
   const summaryMap = new Map<string, TelecallerSummary>();
 
-  // Initialize the map with all users
+  // Initialize the map with all users (even those with 0 leads)
   users.forEach(user => {
     summaryMap.set(user.id, {
       telecallerId: user.id,
-      telecallerName: user.full_name,
+      telecallerName: user.full_name || "Unknown Telecaller",
       statusCounts: {},
       totalLeads: 0,
     });
@@ -78,20 +87,19 @@ async function getTelecallerLeadSummary(): Promise<TelecallerSummary[]> {
   leadCountsRaw.forEach(item => {
     const telecallerId = item.assigned_to;
     const count = item.count;
-    const status = item.status || "Unknown Status"; // Handle potential null status leads
+    const status = item.status; 
 
-    if (telecallerId && userMap.has(telecallerId)) {
+    if (telecallerId && summaryMap.has(telecallerId) && status) {
       const summary = summaryMap.get(telecallerId)!;
       // Add the count to the specific status
-      summary.statusCounts[status] = (summary.statusCounts[status] || 0) + count;
+      summary.statusCounts[status] = count;
       // Accumulate to the total leads
       summary.totalLeads += count;
     }
   });
 
-  // Convert map to array, filter out users who have no leads, and sort by total leads (descending)
+  // Convert map to array and sort by total leads (descending)
   const summaryArray = Array.from(summaryMap.values())
-    .filter(tc => tc.totalLeads > 0)
     .sort((a, b) => b.totalLeads - a.totalLeads);
 
   return summaryArray;
@@ -114,7 +122,7 @@ export default async function TelecallerLeadSummaryPage() {
       </div>
 
       <p className="text-gray-500">
-        This view displays the **total available leads** for each telecaller, broken down by their current **status**.
+        This table displays the **total available leads** for each telecaller, broken down by their current **status**, showing only the numbers (counts) as requested.
       </p>
       
       {/* Summary Table Card */}
@@ -124,7 +132,7 @@ export default async function TelecallerLeadSummaryPage() {
             <Users className="h-5 w-5" />
             Lead Distribution by Telecaller
             <Badge variant="secondary" className="ml-2">
-              Showing {summaryData.length} Active Telecallers
+              Showing {summaryData.length} Telecallers
             </Badge>
           </CardTitle>
         </CardHeader>
