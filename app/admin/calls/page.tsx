@@ -9,7 +9,7 @@ import { Users, BarChart3 } from "lucide-react";
 
 
 // Force dynamic rendering to prevent build errors related to data fetching 
-// if cookies() or other dynamic functions are used elsewhere in your app.
+// and ensure the component runs fully on the server at request time.
 export const dynamic = 'force-dynamic';
 
 
@@ -35,74 +35,75 @@ interface TelecallerSummary {
 
 
 /**
- * FINAL REVISED: Fetches lead counts by status. 
- * Fetches users first for mapping and filtering, then performs the aggregate count.
+ * FINAL REVISED & SAFE: Fetches lead counts by status with robust error handling.
  */
 async function getTelecallerLeadSummary(): Promise<TelecallerSummary[]> {
-  const supabase = await createClient();
+  try {
+    const supabase = await createClient();
 
-  // 1. Fetch all users (telecallers) to get their full names and IDs
-  const { data: users, error: userError } = await supabase
-    .from("users")
-    .select("id, full_name");
-  
-  if (userError) {
-    console.error("Error fetching users:", userError);
-    return []; 
-  }
-
-  const telecallerIds = users.map(u => u.id);
-
-  // 2. Fetch the aggregate counts using an 'in' filter and the count aggregate.
-  // This is the most reliable way to perform this operation via PostgREST/Supabase.
-  const { data: leadCountsRaw, error: countError } = await supabase
-    .from("leads")
-    // Use the 'in' filter to only count leads assigned to known telecallers
-    .in('assigned_to', telecallerIds) 
-    // Select the columns to group by + the count aggregate.
-    // 'count' is a special keyword for the aggregate function.
-    .select("assigned_to, status, count") 
-    .returns<Array<{ assigned_to: string, status: string, count: number }>>()
+    // 1. Fetch all users (telecallers) to get their full names and IDs
+    const { data: users, error: userError } = await supabase
+      .from("users")
+      .select("id, full_name");
     
-  if (countError) {
-    console.error("Error fetching lead counts:", countError);
-    // Log the actual error to help with RLS debugging if needed
+    if (userError) {
+      console.error("CRITICAL DATA FETCH ERROR (Users):", userError);
+      return []; 
+    }
+
+    const telecallerIds = users.map(u => u.id);
+
+    // 2. Fetch the aggregate counts using 'in' filter and the count aggregate.
+    const { data: leadCountsRaw, error: countError } = await supabase
+      .from("leads")
+      .in('assigned_to', telecallerIds) 
+      .select("assigned_to, status, count") 
+      .returns<Array<{ assigned_to: string, status: string, count: number }>>()
+      
+    if (countError) {
+      console.error("CRITICAL DATA FETCH ERROR (Lead Counts):", countError);
+      // This is often a RLS permission error on the 'leads' table for COUNT aggregate.
+      return [];
+    }
+
+    // 3. Process raw data into the final structured format
+    const summaryMap = new Map<string, TelecallerSummary>();
+
+    // Initialize the map with all users (even those with 0 leads)
+    users.forEach(user => {
+      summaryMap.set(user.id, {
+        telecallerId: user.id,
+        telecallerName: user.full_name || "Unknown Telecaller",
+        statusCounts: {},
+        totalLeads: 0,
+      });
+    });
+
+    // Populate counts from the query result
+    leadCountsRaw.forEach(item => {
+      const telecallerId = item.assigned_to;
+      const count = item.count;
+      const status = item.status; 
+
+      if (telecallerId && summaryMap.has(telecallerId) && status) {
+        const summary = summaryMap.get(telecallerId)!;
+        summary.statusCounts[status] = count;
+        summary.totalLeads += count;
+      }
+    });
+
+    // Convert map to array and sort by total leads (descending)
+    const summaryArray = Array.from(summaryMap.values())
+      .sort((a, b) => b.totalLeads - a.totalLeads);
+
+    return summaryArray;
+    
+  } catch (e) {
+    // Catch any unexpected runtime errors (like environment variable access failure)
+    console.error("CRITICAL UNHANDLED ERROR IN getTelecallerLeadSummary:", e);
+    // Return an empty array to prevent the page from crashing the server render
     return [];
   }
-
-  // 3. Process raw data into the final structured format
-  const summaryMap = new Map<string, TelecallerSummary>();
-
-  // Initialize the map with all users (even those with 0 leads)
-  users.forEach(user => {
-    summaryMap.set(user.id, {
-      telecallerId: user.id,
-      telecallerName: user.full_name || "Unknown Telecaller",
-      statusCounts: {},
-      totalLeads: 0,
-    });
-  });
-
-  // Populate counts from the query result
-  leadCountsRaw.forEach(item => {
-    const telecallerId = item.assigned_to;
-    const count = item.count;
-    const status = item.status; 
-
-    if (telecallerId && summaryMap.has(telecallerId) && status) {
-      const summary = summaryMap.get(telecallerId)!;
-      // Add the count to the specific status
-      summary.statusCounts[status] = count;
-      // Accumulate to the total leads
-      summary.totalLeads += count;
-    }
-  });
-
-  // Convert map to array and sort by total leads (descending)
-  const summaryArray = Array.from(summaryMap.values())
-    .sort((a, b) => b.totalLeads - a.totalLeads);
-
-  return summaryArray;
 }
 
 
@@ -122,7 +123,7 @@ export default async function TelecallerLeadSummaryPage() {
       </div>
 
       <p className="text-gray-500">
-        This table displays the **total available leads** for each telecaller, broken down by their current **status**, showing only the numbers (counts) as requested.
+        This table displays the **total available leads** for each telecaller, broken down by their current **status**, showing only the numbers (counts).
       </p>
       
       {/* Summary Table Card */}
@@ -132,7 +133,7 @@ export default async function TelecallerLeadSummaryPage() {
             <Users className="h-5 w-5" />
             Lead Distribution by Telecaller
             <Badge variant="secondary" className="ml-2">
-              Showing {summaryData.length} Telecallers
+              Showing {summaryData.length} Telecallers with Leads
             </Badge>
           </CardTitle>
         </CardHeader>
@@ -181,7 +182,7 @@ export default async function TelecallerLeadSummaryPage() {
                 {summaryData.length === 0 && (
                     <TableRow>
                         <TableCell colSpan={allStatuses.length + 2} className="h-24 text-center text-gray-500">
-                            No assigned leads found for any telecaller.
+                            No assigned leads found or a connection error occurred.
                         </TableCell>
                     </TableRow>
                 )}
