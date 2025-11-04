@@ -24,25 +24,25 @@ const getStatusStyle = (status: string) => statusMap[status] || statusMap['Unass
 export default async function LeadsSummaryPage() {
   const supabase = await createClient()
 
-  // 1. Fetch ALL leads with their status and assigned user_id
+  // 1. Fetch ALL leads with their status and assigned telecaller_id
   const { data: leads, error: leadsError } = await supabase
     .from("leads")
-    .select("user_id, status")
-    .neq("user_id", null) // Only count leads that are assigned to a telecaller
+    .select("telecaller_id, status") // **CORRECTED: Using telecaller_id**
+    .neq("telecaller_id", null) // Only count leads that are assigned to a telecaller
 
   if (leadsError || !leads) {
     console.error("Error fetching leads:", leadsError)
     return <p className="p-6 text-red-500">Error loading lead data: {leadsError?.message}</p>
   }
   
-  // 2. Extract all unique User IDs from the leads
-  const uniqueUserIds = [...new Set(leads.map(lead => lead.user_id).filter(Boolean))]
+  // 2. Extract all unique Telecaller IDs from the leads
+  const uniqueTelecallerIds = [...new Set(leads.map(lead => (lead as any).telecaller_id).filter(Boolean))]
 
   // 3. Fetch Telecaller Names (Users Data)
   let usersData: Record<string, { name: string }> = {}
-  if (uniqueUserIds.length > 0) {
-    // Assuming 'users' table has a 'name' field, or fallback to email/metadata
-    const { data: users } = await supabase.from("users").select("id, email, raw_user_meta_data").in("id", uniqueUserIds);
+  if (uniqueTelecallerIds.length > 0) {
+    // Fetching user details (assuming 'users' table is the correct reference)
+    const { data: users } = await supabase.from("users").select("id, email, raw_user_meta_data").in("id", uniqueTelecallerIds);
     
     if (users) {
       usersData = users.reduce((acc: Record<string, any>, user: any) => {
@@ -59,16 +59,17 @@ export default async function LeadsSummaryPage() {
   const allStatuses = new Set<string>()
 
   for (const lead of leads) {
-    const userId = lead.user_id as string
-    const status = lead.status || 'Unassigned' // Handle null or empty status
+    // CORRECTED: Using telecaller_id
+    const telecallerId = (lead as any).telecaller_id as string 
+    const status = lead.status || 'Unassigned' 
     
     // Add status to the set to generate table headers later
     allStatuses.add(status)
 
-    if (!summary[userId]) {
+    if (!summary[telecallerId]) {
       // Initialize entry for the telecaller
-      const user = usersData[userId] || { name: `User ID: ${userId}` }
-      summary[userId] = {
+      const user = usersData[telecallerId] || { name: `User ID: ${telecallerId}` }
+      summary[telecallerId] = {
         name: user.name,
         total: 0,
         counts: {}
@@ -76,8 +77,8 @@ export default async function LeadsSummaryPage() {
     }
 
     // Increment totals and status counts
-    summary[userId].total += 1
-    summary[userId].counts[status] = (summary[userId].counts[status] || 0) + 1
+    summary[telecallerId].total += 1
+    summary[telecallerId].counts[status] = (summary[telecallerId].counts[status] || 0) + 1
   }
 
   const sortedStatuses = Array.from(allStatuses).sort((a, b) => {
