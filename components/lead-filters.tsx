@@ -23,6 +23,14 @@ export function LeadFilters({ telecallers }: LeadFiltersProps) {
   const [assignedTo, setAssignedTo] = useState(searchParams.get("assigned_to") || "all")
   const [telecallerStatus, setTelecallerStatus] = useState<Record<string, boolean>>({})
 
+  // --- NEW FILTER STATES ---
+  const [dateFrom, setDateFrom] = useState(searchParams.get("date_from") || "")
+  const [dateTo, setDateTo] = useState(searchParams.get("date_to") || "")
+  const [lastCallFrom, setLastCallFrom] = useState(searchParams.get("last_call_from") || "")
+  const [lastCallTo, setLastCallTo] = useState(searchParams.get("last_call_to") || "")
+  const [source, setSource] = useState(searchParams.get("source") || "all")
+  // -------------------------
+
   // Fetch telecaller status
   useEffect(() => {
     const fetchTelecallerStatus = async () => {
@@ -56,6 +64,14 @@ export function LeadFilters({ telecallers }: LeadFiltersProps) {
     if (priority !== "all") params.set("priority", priority)
     if (assignedTo !== "all") params.set("assigned_to", assignedTo)
 
+    // --- NEW FILTER PARAMETER APPLICATION ---
+    if (dateFrom) params.set("date_from", dateFrom)
+    if (dateTo) params.set("date_to", dateTo)
+    if (lastCallFrom) params.set("last_call_from", lastCallFrom)
+    if (lastCallTo) params.set("last_call_to", lastCallTo)
+    if (source !== "all") params.set("source", source)
+    // ----------------------------------------
+
     router.push(`/admin/leads?${params.toString()}`)
   }
 
@@ -64,13 +80,24 @@ export function LeadFilters({ telecallers }: LeadFiltersProps) {
     setStatus("all")
     setPriority("all")
     setAssignedTo("all")
+
+    // --- NEW FILTER CLEARING ---
+    setDateFrom("")
+    setDateTo("")
+    setLastCallFrom("")
+    setLastCallTo("")
+    setSource("all")
+    // ---------------------------
+    
     router.push("/admin/leads")
   }
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="relative">
+      {/* Primary Select Filters (can use a larger grid layout for more filters) */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4"> 
+        
+        <div className="relative col-span-2 lg:col-span-1">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
           <Input
             placeholder="Search leads..."
@@ -98,7 +125,6 @@ export function LeadFilters({ telecallers }: LeadFiltersProps) {
             <SelectItem value="not_eligible">not eligible</SelectItem>
             <SelectItem value="nr">nr</SelectItem>
             <SelectItem value="self_employed">selfemployed</SelectItem>
-
           </SelectContent>
         </Select>
 
@@ -134,6 +160,56 @@ export function LeadFilters({ telecallers }: LeadFiltersProps) {
             ))}
           </SelectContent>
         </Select>
+
+        {/* --- NEW SOURCE FILTER --- */}
+        <Select value={source} onValueChange={setSource}>
+          <SelectTrigger>
+            <SelectValue placeholder="Filter by source" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Sources</SelectItem>
+            <SelectItem value="website">Website</SelectItem>
+            <SelectItem value="referral">Referral</SelectItem>
+            <SelectItem value="campaign">Campaign</SelectItem>
+            <SelectItem value="cold_call">Cold Call</SelectItem>
+            {/* Add more source options as needed */}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Date Range Filters */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-2 border-t">
+        <Input
+          type="date"
+          placeholder="Created From"
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+          title="Lead Creation Date From"
+        />
+
+        <Input
+          type="date"
+          placeholder="Created To"
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+          title="Lead Creation Date To"
+        />
+
+        <Input
+          type="date"
+          placeholder="Last Call From"
+          value={lastCallFrom}
+          onChange={(e) => setLastCallFrom(e.target.value)}
+          title="Last Call Date From"
+        />
+
+        <Input
+          type="date"
+          placeholder="Last Call To"
+          value={lastCallTo}
+          onChange={(e) => setLastCallTo(e.target.value)}
+          title="Last Call Date To"
+        />
       </div>
 
       <div className="flex gap-2">
