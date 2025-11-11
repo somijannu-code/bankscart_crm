@@ -18,11 +18,11 @@ export const dynamic = 'force-dynamic';
 // Define a common set of lead statuses for consistent column headers.
 const LEAD_STATUSES = [
   "new",
-  "Contacted",
+  "contacted",
   "Interested",
-  "Follow Up",
-  "Closed/Converted",
-  "Not Interested",
+  "Interested",
+  "nr",
+  "Not_Interested",
   "Junk",
 ];
 
