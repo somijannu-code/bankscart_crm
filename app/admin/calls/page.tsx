@@ -58,10 +58,10 @@ async function getTelecallerLeadSummary(): Promise<TelecallerSummary[]> {
     }
     
     // 2. Fetch ALL leads with minimal columns (similar to working pages)
-    const { data: leads, error: leadsError } = await supabase
-      .from("leads")
-      .select("assigned_to, status") // Only need these two columns for counting
-      .not('assigned_to', 'is', null) // Only leads assigned to someone
+    const { count, error } = await supabase
+       .from('leads')
+       .select('id', { count: 'exact', head: false })
+       .not('assigned_to', 'is', null);
       .returns<Lead[]>()
 
     if (leadsError) {
