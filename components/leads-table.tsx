@@ -1128,10 +1128,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                   Update Status
                 </Button>
 
-                {/* UPDATED: Multi-Select Dropdown for Assignees */}
+                {/* FIXED: Multi-Select Dropdown for Assignees - Removed asChild and inner Button */}
                 <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" className="w-[200px] justify-between border-dashed">
+                  <DropdownMenuTrigger className={`${triggerButtonClass} w-[200px] justify-between border-dashed`}>
                       {bulkAssignTo.length === 0 ? (
                         <span className="text-muted-foreground">Select Assignees</span>
                       ) : bulkAssignTo.length === 1 ? (
@@ -1142,7 +1141,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                         <span>{bulkAssignTo.length} Assignees Selected</span>
                       )}
                       <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
-                    </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent className="w-[200px]" align="start">
                     <DropdownMenuLabel>Select Telecallers</DropdownMenuLabel>
