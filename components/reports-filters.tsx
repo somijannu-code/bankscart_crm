@@ -8,7 +8,7 @@ import {
   DropdownMenuCheckboxItem, 
   DropdownMenuContent, 
   DropdownMenuLabel, 
-  DropdownMenuItem, // <--- ADDED IMPORT
+  DropdownMenuItem, 
   DropdownMenuSeparator, 
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu"
@@ -121,8 +121,11 @@ export function ReportsFilters({ telecallers, defaultStartDate, defaultEndDate }
         <div>
           <Label>Telecallers</Label>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="w-full justify-between font-normal">
+            {/* Removed asChild and added w-full to the Trigger wrapper. */}
+            <DropdownMenuTrigger className="w-full">
+              {/* Added pointer-events-none to the inner Button so the surrounding 
+                  Trigger element can handle the click. */}
+              <Button variant="outline" className="w-full justify-between font-normal pointer-events-none">
                 {selectedTelecallers.length === 0 ? (
                   <span className="text-muted-foreground">All Telecallers</span>
                 ) : selectedTelecallers.length === 1 ? (
