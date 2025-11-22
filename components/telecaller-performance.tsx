@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { useSearchParams } from "next/navigation" // <--- ADDED IMPORT
+import { useSearchParams } from "next/navigation" 
 import { Badge } from "@/components/ui/badge"
 import { TrendingUp, TrendingDown, Minus, Phone, Clock, CheckCircle, Timer, Users } from "lucide-react"
 
@@ -48,16 +48,6 @@ interface Telecaller {
   id: string
   full_name: string
 }
-
-// --- UTILITY FUNCTIONS ---
-
-// Inferred list of all telecallers for grouping purposes.
-// NOTE: In a real app, this list should be passed as a prop or fetched once. 
-// For this fix, we'll assume a way to get the full list if the report is not filtering 'all'.
-const MOCK_TELECALLERS: Telecaller[] = [ 
-  // Placeholder data, replace with actual prop/fetch logic if needed
-  { id: 'all', full_name: 'All Telecallers' } 
-];
 
 // --- MAIN COMPONENT ---
 
