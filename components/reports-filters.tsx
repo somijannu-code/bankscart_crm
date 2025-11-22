@@ -3,8 +3,15 @@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, X } from "lucide-react"
+import { 
+  DropdownMenu, 
+  DropdownMenuCheckboxItem, 
+  DropdownMenuContent, 
+  DropdownMenuLabel, 
+  DropdownMenuSeparator, 
+  DropdownMenuTrigger 
+} from "@/components/ui/dropdown-menu"
+import { Search, X, ChevronDown } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
@@ -22,7 +29,14 @@ export function ReportsFilters({ telecallers, defaultStartDate, defaultEndDate }
 
   const [startDate, setStartDate] = useState(defaultStartDate)
   const [endDate, setEndDate] = useState(defaultEndDate)
-  const [telecaller, setTelecaller] = useState(searchParams.get("telecaller") || "all")
+  
+  // Initialize selected telecallers from URL params (comma separated)
+  const [selectedTelecallers, setSelectedTelecallers] = useState<string[]>(() => {
+    const param = searchParams.get("telecaller")
+    if (!param || param === "all") return []
+    return param.split(",")
+  })
+
   const [telecallerStatus, setTelecallerStatus] = useState<Record<string, boolean>>({})
 
   // Fetch telecaller status
@@ -55,7 +69,11 @@ export function ReportsFilters({ telecallers, defaultStartDate, defaultEndDate }
     const params = new URLSearchParams()
     if (startDate) params.set("start_date", startDate)
     if (endDate) params.set("end_date", endDate)
-    if (telecaller !== "all") params.set("telecaller", telecaller)
+    
+    // Join selected IDs with commas, or don't set param if empty (implies 'all')
+    if (selectedTelecallers.length > 0) {
+      params.set("telecaller", selectedTelecallers.join(","))
+    }
 
     router.push(`/admin/reports?${params.toString()}`)
   }
@@ -66,7 +84,7 @@ export function ReportsFilters({ telecallers, defaultStartDate, defaultEndDate }
 
     setStartDate(thirtyDaysAgo)
     setEndDate(today)
-    setTelecaller("all")
+    setSelectedTelecallers([]) // Clear selection
     router.push("/admin/reports")
   }
 
@@ -76,6 +94,14 @@ export function ReportsFilters({ telecallers, defaultStartDate, defaultEndDate }
 
     setStartDate(pastDate)
     setEndDate(today)
+  }
+
+  const toggleTelecaller = (id: string) => {
+    setSelectedTelecallers(prev => 
+      prev.includes(id) 
+        ? prev.filter(prevId => prevId !== id)
+        : [...prev, id]
+    )
   }
 
   return (
@@ -92,25 +118,58 @@ export function ReportsFilters({ telecallers, defaultStartDate, defaultEndDate }
         </div>
 
         <div>
-          <Label htmlFor="telecaller">Telecaller</Label>
-          <Select value={telecaller} onValueChange={setTelecaller}>
-            <SelectTrigger>
-              <SelectValue placeholder="All Telecallers" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Telecallers</SelectItem>
-              {telecallers.map((tc) => (
-                <SelectItem key={tc.id} value={tc.id}>
-                  <div className="flex items-center gap-2">
-                    {/* Status indicator for telecaller */}
-                    <div className={`w-2 h-2 rounded-full ${telecallerStatus[tc.id] ? 'bg-green-500' : 'bg-red-500'}`} 
-                         title={telecallerStatus[tc.id] ? 'Checked in' : 'Not checked in'} />
-                    {tc.full_name}
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Label>Telecallers</Label>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="w-full justify-between font-normal">
+                {selectedTelecallers.length === 0 ? (
+                  <span className="text-muted-foreground">All Telecallers</span>
+                ) : selectedTelecallers.length === 1 ? (
+                  <span className="truncate">
+                    {telecallers.find(t => t.id === selectedTelecallers[0])?.full_name}
+                  </span>
+                ) : (
+                  <span>{selectedTelecallers.length} Selected</span>
+                )}
+                <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-[250px]" align="start">
+              <DropdownMenuLabel>Select Telecallers</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {/* Option to clear selection (Select All) */}
+              {selectedTelecallers.length > 0 && (
+                <>
+                  <DropdownMenuCheckboxItem
+                    checked={selectedTelecallers.length === 0}
+                    onCheckedChange={() => setSelectedTelecallers([])}
+                  >
+                    All Telecallers
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              
+              <div className="max-h-[300px] overflow-y-auto">
+                {telecallers.map((tc) => (
+                  <DropdownMenuCheckboxItem
+                    key={tc.id}
+                    checked={selectedTelecallers.includes(tc.id)}
+                    onCheckedChange={() => toggleTelecaller(tc.id)}
+                  >
+                    <div className="flex items-center gap-2">
+                      {/* Status indicator for telecaller */}
+                      <div 
+                        className={`w-2 h-2 rounded-full ${telecallerStatus[tc.id] ? 'bg-green-500' : 'bg-red-500'}`} 
+                        title={telecallerStatus[tc.id] ? 'Checked in' : 'Not checked in'} 
+                      />
+                      {tc.full_name}
+                    </div>
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <div className="flex items-end gap-2">
