@@ -11,7 +11,7 @@ import {
   FileText, PhoneCall, Send, Tag, Plus, Trash2,
   BarChart3, Users, DollarSign, Target, Zap,
   Layout, Table as TableIcon, Settings, Save,
-  AlertTriangle, CheckCircle2, XCircle, Sparkles
+  AlertTriangle, CheckCircle2, XCircle, Sparkles, Upload
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -42,7 +42,7 @@ import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination"
 
-// --- Helper Functions ---
+// --- Helper Functions & Constants ---
 
 // Fisher-Yates Shuffle Algorithm to randomize telecaller order
 const shuffleArray = <T,>(array: T[]): T[] => {
@@ -52,6 +52,53 @@ const shuffleArray = <T,>(array: T[]): T[] => {
     [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
   }
   return newArray;
+};
+
+// --- Kanban Constants ---
+interface KanbanColumn {
+  id: string
+  title: string
+  color: string
+}
+
+const KANBAN_COLUMNS: KanbanColumn[] = [
+  { id: 'new', title: 'New Leads', color: 'bg-blue-500' },
+  { id: 'contacted', title: 'Contacted', color: 'bg-yellow-500' },
+  { id: 'Interested', title: 'Interested', color: 'bg-orange-500' },
+  { id: 'Documents_Sent', title: 'Docs Sent', color: 'bg-purple-500' },
+  { id: 'Login', title: 'Login', color: 'bg-indigo-500' },
+  { id: 'follow_up', title: 'Follow Up', color: 'bg-pink-500' },
+  { id: 'Disbursed', title: 'Disbursed', color: 'bg-green-600' },
+  { id: 'nr', title: 'Not Reachable', color: 'bg-gray-400' },
+  { id: 'Not_Interested', title: 'Closed / Lost', color: 'bg-red-500' },
+]
+
+// Simple CSV Parser Helper
+const parseCSV = (text: string) => {
+  const lines = text.split('\n').filter(l => l.trim());
+  // Basic CSV split - warning: does not handle commas inside quotes perfectly
+  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
+  
+  return lines.slice(1).map(line => {
+    const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+    const entry: any = {};
+    headers.forEach((h, i) => {
+      // Map common CSV headers to DB fields
+      if (h.includes('name')) entry.name = values[i];
+      else if (h.includes('email')) entry.email = values[i];
+      else if (h.includes('phone') || h.includes('contact')) entry.phone = values[i];
+      else if (h.includes('amount')) entry.loan_amount = parseFloat(values[i]) || 0;
+      else if (h.includes('type')) entry.loan_type = values[i];
+      else if (h.includes('company')) entry.company = values[i];
+      else if (h.includes('source')) entry.source = values[i];
+      else if (h.includes('city')) entry.city = values[i];
+    });
+    // Defaults
+    entry.status = entry.status || 'new';
+    entry.priority = entry.priority || 'medium';
+    entry.created_at = new Date().toISOString();
+    return entry;
+  });
 };
 
 interface Lead {
@@ -78,14 +125,6 @@ interface Lead {
   tags?: string[]
 }
 
-interface Activity {
-  id: string
-  type: 'call' | 'email' | 'note' | 'status_change'
-  description: string
-  created_at: string
-  created_by: string
-}
-
 interface SavedFilter {
   id: string
   name: string
@@ -104,6 +143,9 @@ const triggerGhostClass = "inline-flex items-center justify-center whitespace-no
 export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   // Correctly initialized to null
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
+  
+  // View State (Table vs Board)
+  const [viewMode, setViewMode] = useState<'table' | 'board'>('table')
   
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
@@ -139,7 +181,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   
   // Bulk Assign State
   const [bulkAssignTo, setBulkAssignTo] = useState<string[]>([])
-  
   const [bulkStatus, setBulkStatus] = useState<string>("")
   
   // Saved Filters
@@ -170,6 +211,10 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     reassignNR: false, 
     reassignInterested: false 
   })
+
+  // Import State
+  const [isImportOpen, setIsImportOpen] = useState(false)
+  const [importing, setImporting] = useState(false)
   
   // Messages
   const [successMessage, setSuccessMessage] = useState<string>("")
@@ -418,7 +463,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       headers.join(','),
       ...filteredLeads.map(lead => 
         headers.map(h => {
-          const val = (lead as any)[h] // Use 'as any' since the keys aren't directly on the Lead interface
+          const val = (lead as any)[h]
           return typeof val === 'string' ? `"${val}"` : val
         }).join(',')
       )
@@ -594,7 +639,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   }
 
-  // --- UPDATED FUNCTION: handleAutoAssignLeads (SHUFFLED ROUND ROBIN) ---
   const handleAutoAssignLeads = async () => {
     if (!autoAssignRules.enabled || telecallers.length === 0) return
 
@@ -658,13 +702,8 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         return
       }
       
-      // --- Assignment Logic ---
-
-      // IMPORTANT: Shuffle the active telecallers for this batch!
-      // This ensures randomization of who gets the "first" lead each time.
       const shuffledTelecallers = shuffleArray(activeTelecallers);
 
-      // For workload, calculate counts initially
       const leadCounts = activeTelecallers.map(tc => ({
           id: tc.id,
           count: enrichedLeads.filter(l => l.assigned_to === tc.id).length
@@ -673,25 +712,17 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       let roundRobinIndex = 0; 
 
       uniqueLeadsToProcess.forEach((lead) => {
-        
         let newTelecallerId: string | null = null;
         const isReassign = !!lead.assigned_to; 
         
         if (autoAssignRules.method === 'round-robin') {
-            
-            // Use the SHUFFLED list
             let candidate = shuffledTelecallers[roundRobinIndex % shuffledTelecallers.length];
-            
-            // If re-assigning, try to avoid the same person
             if (isReassign && candidate.id === lead.assigned_to && shuffledTelecallers.length > 1) {
-                // Skip to next person in the shuffled list
                 roundRobinIndex++;
                 candidate = shuffledTelecallers[roundRobinIndex % shuffledTelecallers.length];
             }
-            
             newTelecallerId = candidate.id;
             roundRobinIndex++; 
-            
         } else if (autoAssignRules.method === 'workload') {
             const minTelecaller = leadCounts.reduce((min, tc) => 
                 tc.count < min.count ? tc : min
@@ -856,6 +887,53 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   }
 
+  // --- Kanban Drag & Drop Logic ---
+  const handleDragStart = (e: React.DragEvent, leadId: string) => {
+    e.dataTransfer.setData("leadId", leadId);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault(); // Necessary to allow dropping
+  };
+
+  const handleDrop = async (e: React.DragEvent, newStatus: string) => {
+    e.preventDefault();
+    const leadId = e.dataTransfer.getData("leadId");
+    // Optimistic or real-time update
+    await handleStatusChange(leadId, newStatus);
+  };
+
+  // --- CSV Import Handler ---
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const text = evt.target?.result as string;
+        const parsedLeads = parseCSV(text);
+        
+        if (parsedLeads.length === 0) throw new Error("No valid leads found in CSV");
+
+        const { error } = await supabase.from('leads').insert(parsedLeads);
+        if (error) throw error;
+
+        alert(`Successfully imported ${parsedLeads.length} leads!`);
+        setIsImportOpen(false);
+        window.location.reload();
+      } catch (err: any) {
+        alert("Import failed: " + err.message);
+        console.error(err);
+      } finally {
+        setImporting(false);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const toggleLeadSelection = (leadId: string) => {
     setSelectedLeads(prev => 
       prev.includes(leadId) 
@@ -998,17 +1076,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="new">New</SelectItem>
-                <SelectItem value="contacted">Contacted</SelectItem>
-                <SelectItem value="Interested">Interested</SelectItem>
-                <SelectItem value="Documents_Sent">Documents Sent</SelectItem>
-                <SelectItem value="Login">Login</SelectItem>
-                <SelectItem value="nr">nr</SelectItem>
-                <SelectItem value="self_employed">self_employed</SelectItem>
-                <SelectItem value="Disbursed">Disbursed</SelectItem>
-                <SelectItem value="follow_up">follow_up</SelectItem>
-                <SelectItem value="Not_Interested">Not Interested</SelectItem>
-                <SelectItem value="not_eligible">Not Eligible</SelectItem>
+                {KANBAN_COLUMNS.map(col => (
+                    <SelectItem key={col.id} value={col.id}>{col.title}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <Select value={priorityFilter} onValueChange={setPriorityFilter}>
@@ -1038,6 +1108,30 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         </div>
 
         <div className="flex flex-wrap gap-2 w-full lg:w-auto">
+            {/* View Switcher */}
+            <div className="flex bg-muted rounded-md p-1 mr-2 items-center">
+                <Button 
+                variant={viewMode === 'table' ? 'secondary' : 'ghost'} 
+                size="sm" 
+                className="h-7 px-3"
+                onClick={() => setViewMode('table')}
+                >
+                <TableIcon className="h-4 w-4 mr-1" /> List
+                </Button>
+                <Button 
+                variant={viewMode === 'board' ? 'secondary' : 'ghost'} 
+                size="sm" 
+                className="h-7 px-3"
+                onClick={() => setViewMode('board')}
+                >
+                <Layout className="h-4 w-4 mr-1" /> Board
+                </Button>
+            </div>
+
+            <Button variant="outline" size="sm" onClick={() => setIsImportOpen(true)}>
+                <Upload className="h-4 w-4 mr-2" /> Import
+            </Button>
+
           {/* Fixed Dropdown Trigger */}
           <DropdownMenu>
             <DropdownMenuTrigger className={triggerButtonClass}>
@@ -1187,7 +1281,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       </div>
 
       {/* Bulk Actions Bar */}
-      {selectedLeads.length > 0 && (
+      {selectedLeads.length > 0 && viewMode === 'table' && (
         <Card className="border-blue-200 bg-blue-50">
           <CardContent className="p-4">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -1307,354 +1401,424 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         </Card>
       )}
 
-      {/* Leads Table */}
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12">
-                  <input
-                    type="checkbox"
-                    checked={selectedLeads.length === paginatedLeads.length && paginatedLeads.length > 0}
-                    onChange={selectAllLeads}
-                    className="rounded border-gray-300"
-                  />
-                </TableHead>
-                {visibleColumns.name && (
-                  <TableHead className="cursor-pointer" onClick={() => handleSort('name')}>
-                    <div className="flex items-center gap-1">
-                      Name
-                      {sortField === 'name' && (sortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
-                    </div>
-                  </TableHead>
-                )}
-                {visibleColumns.contact && <TableHead>Contact</TableHead>}
-                {visibleColumns.company && (
-                  <TableHead className="cursor-pointer" onClick={() => handleSort('company')}>
-                    <div className="flex items-center gap-1">
-                      Company
-                      {sortField === 'company' && (sortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
-                    </div>
-                  </TableHead>
-                )}
-                {visibleColumns.status && <TableHead>Status</TableHead>}
-                {visibleColumns.priority && <TableHead>Priority</TableHead>}
-                {visibleColumns.score && (
-                  <TableHead className="cursor-pointer" onClick={() => handleSort('lead_score')}>
-                    <div className="flex items-center gap-1">
-                      Score
-                      {sortField === 'lead_score' && (sortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
-                    </div>
-                  </TableHead>
-                )}
-                {visibleColumns.created && (
-                  <TableHead className="cursor-pointer" onClick={() => handleSort('created_at')}>
-                    <div className="flex items-center gap-1">
-                      Created
-                      {sortField === 'created_at' && (sortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
-                    </div>
-                  </TableHead>
-                )}
-                {visibleColumns.lastContacted && (
-                  <TableHead className="cursor-pointer" onClick={() => handleSort('last_contacted')}>
-                    <div className="flex items-center gap-1">
-                      Last Call
-                      {sortField === 'last_contacted' && (sortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
-                    </div>
-                  </TableHead>
-                )}
-                {visibleColumns.loanAmount && (
-                  <TableHead className="cursor-pointer" onClick={() => handleSort('loan_amount')}>
-                    <div className="flex items-center gap-1">
-                      Loan Amount
-                      {sortField === 'loan_amount' && (sortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
-                    </div>
-                  </TableHead>
-                )}
-                {visibleColumns.loanType && <TableHead>Loan Type</TableHead>}
-                {visibleColumns.source && <TableHead>Source</TableHead>}
-                {visibleColumns.assignedTo && <TableHead>Assigned To</TableHead>}
-                {visibleColumns.tags && <TableHead>Tags</TableHead>}
-                {visibleColumns.actions && <TableHead className="w-20">Actions</TableHead>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paginatedLeads.length === 0 ? (
+      {/* Main Content Area: Table vs Kanban */}
+      {viewMode === 'table' ? (
+        <Card>
+            <CardContent className="p-0">
+            <Table>
+                <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={Object.values(visibleColumns).filter(Boolean).length + 1} className="text-center py-8">
-                    <div className="text-gray-500">No leads found</div>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                paginatedLeads.map((lead) => (
-                  <TableRow key={lead.id} className="group">
-                    <TableCell>
-                      <input
+                    <TableHead className="w-12">
+                    <input
                         type="checkbox"
-                        checked={selectedLeads.includes(lead.id)}
-                        onChange={() => toggleLeadSelection(lead.id)}
+                        checked={selectedLeads.length === paginatedLeads.length && paginatedLeads.length > 0}
+                        onChange={selectAllLeads}
                         className="rounded border-gray-300"
-                      />
-                    </TableCell>
+                    />
+                    </TableHead>
                     {visibleColumns.name && (
-                      <TableCell>
-                        <Link href={`/admin/leads/${lead.id}`} className="hover:text-blue-600 hover:underline cursor-pointer block">
-                          <div className="font-medium">{getSafeValue(lead.name)}</div>
-                          <div className="text-xs text-muted-foreground">ID: {lead.id.slice(-8)}</div>
-                        </Link>
-                      </TableCell>
-                    )}
-                    {visibleColumns.contact && (
-                      <TableCell>
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1">
-                            <Phone className="h-3 w-3" />
-                            <span className="text-sm">{getSafeValue(lead.phone)}</span>
-                          </div>
-                          {lead.email && (
-                            <div className="flex items-center gap-1">
-                              <Mail className="h-3 w-3" />
-                              <span className="text-sm truncate">{lead.email}</span>
-                            </div>
-                          )}
+                    <TableHead className="cursor-pointer" onClick={() => handleSort('name')}>
+                        <div className="flex items-center gap-1">
+                        Name
+                        {sortField === 'name' && (sortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
                         </div>
-                      </TableCell>
+                    </TableHead>
                     )}
+                    {visibleColumns.contact && <TableHead>Contact</TableHead>}
                     {visibleColumns.company && (
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Building className="h-4 w-4 text-muted-foreground" />
-                          <span>{getSafeValue(lead.company)}</span>
+                    <TableHead className="cursor-pointer" onClick={() => handleSort('company')}>
+                        <div className="flex items-center gap-1">
+                        Company
+                        {sortField === 'company' && (sortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
                         </div>
-                      </TableCell>
+                    </TableHead>
                     )}
-                    {visibleColumns.status && (
-                      <TableCell>
-                        <Select value={lead.status} onValueChange={(value) => handleStatusChange(lead.id, value)}>
-                          <SelectTrigger className="w-32 h-8 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="new">New</SelectItem>
-                            <SelectItem value="contacted">Contacted</SelectItem>
-                            <SelectItem value="Interested">Interested</SelectItem>
-                            <SelectItem value="Documents_Sent">Documents Sent</SelectItem>
-                            <SelectItem value="Login">Login</SelectItem>
-                            <SelectItem value="nr">nr</SelectItem>
-                            <SelectItem value="self_employed">self_employed</SelectItem>
-                            <SelectItem value="Disbursed">Disbursed</SelectItem>
-                            <SelectItem value="follow_up">follow_up</SelectItem>
-                            <SelectItem value="Not_Interested">Not Interested</SelectItem>
-                            <SelectItem value="not_eligible">Not Eligible</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                    )}
-                    {visibleColumns.priority && (
-                      <TableCell>
-                        <Badge variant={getPriorityVariant(lead.priority) as any}>{lead.priority}</Badge>
-                      </TableCell>
-                    )}
+                    {visibleColumns.status && <TableHead>Status</TableHead>}
+                    {visibleColumns.priority && <TableHead>Priority</TableHead>}
                     {visibleColumns.score && (
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <div className="w-16">
-                            <div className="flex items-center justify-between text-xs mb-1">
-                              <span>{lead.lead_score || 0}</span>
-                              <span className="text-muted-foreground">/100</span>
-                            </div>
-                            <Progress value={lead.lead_score || 0} className="h-2" />
-                          </div>
-                          {lead.lead_score && (
-                            <Badge variant="outline" className={getScoreBadge(lead.lead_score).color}>
-                              {getScoreBadge(lead.lead_score).label}
-                            </Badge>
-                          )}
+                    <TableHead className="cursor-pointer" onClick={() => handleSort('lead_score')}>
+                        <div className="flex items-center gap-1">
+                        Score
+                        {sortField === 'lead_score' && (sortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
                         </div>
-                      </TableCell>
+                    </TableHead>
                     )}
                     {visibleColumns.created && (
-                      <TableCell>
+                    <TableHead className="cursor-pointer" onClick={() => handleSort('created_at')}>
                         <div className="flex items-center gap-1">
-                          <Calendar className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-sm">{new Date(lead.created_at).toLocaleDateString()}</span>
+                        Created
+                        {sortField === 'created_at' && (sortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
                         </div>
-                      </TableCell>
+                    </TableHead>
                     )}
                     {visibleColumns.lastContacted && (
-                      <TableCell>
-                        {(() => {
-                          const lastContactTimestamp = lastCallTimestamps[lead.id] || lead.last_contacted;
-                          if (lastContactTimestamp) {
-                            return (
-                              <div className="flex items-center gap-1">
-                                <Clock className="h-3 w-3 text-muted-foreground" />
-                                <span className="text-sm">
-                                  {new Date(lastContactTimestamp).toLocaleString(undefined, {
-                                    year: 'numeric', month: 'numeric', day: 'numeric',
-                                    hour: '2-digit', minute: '2-digit', hour12: true
-                                  })}
-                                </span>
-                              </div>
-                            );
-                          }
-                          return <span className="text-sm text-muted-foreground">Never</span>;
-                        })()}
-                      </TableCell>
+                    <TableHead className="cursor-pointer" onClick={() => handleSort('last_contacted')}>
+                        <div className="flex items-center gap-1">
+                        Last Call
+                        {sortField === 'last_contacted' && (sortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
+                        </div>
+                    </TableHead>
                     )}
                     {visibleColumns.loanAmount && (
-                      <TableCell>
-                        <div className="font-medium">{formatCurrency(lead.loan_amount)}</div>
-                      </TableCell>
-                    )}
-                    {visibleColumns.loanType && (
-                      <TableCell>
-                        <Badge variant="outline">{getSafeValue(lead.loan_type, 'N/A')}</Badge>
-                      </TableCell>
-                    )}
-                    {visibleColumns.source && (
-                      <TableCell>
-                        <Badge variant="outline">{getSafeValue(lead.source, 'N/A')}</Badge>
-                      </TableCell>
-                    )}
-                    {visibleColumns.assignedTo && (
-                      <TableCell>
-                        <Select value={lead.assigned_to || "unassigned"} onValueChange={(value) => handleAssignLead(lead.id, value)}>
-                          <SelectTrigger className="w-36 h-8 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="unassigned">Unassigned</SelectItem>
-                            {telecallers.map((tc) => (
-                              <SelectItem key={tc.id} value={tc.id}>{tc.full_name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                    )}
-                    {visibleColumns.tags && (
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {(lead.tags || []).slice(0, 2).map((tag) => (
-                            <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
-                          ))}
-                          {(lead.tags || []).length > 2 && (
-                            <Badge variant="outline" className="text-xs">
-                              +{(lead.tags || []).length - 2}
-                            </Badge>
-                          )}
+                    <TableHead className="cursor-pointer" onClick={() => handleSort('loan_amount')}>
+                        <div className="flex items-center gap-1">
+                        Loan Amount
+                        {sortField === 'loan_amount' && (sortDirection === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
                         </div>
-                      </TableCell>
+                    </TableHead>
                     )}
-                    {visibleColumns.actions && (
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <QuickActions 
-                            lead={lead} 
-                            onCallInitiated={() => handleCallInitiated(lead)}
-                            onStatusChange={(status) => handleStatusChange(lead.id, status)}
-                          />
-                          
-                          {/* Fixed Dropdown Trigger */}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger className={triggerGhostClass}>
-                              <MoreHorizontal className="h-4 w-4" />
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem asChild>
-                                <Link href={`/admin/leads/${lead.id}`}>
-                                  <Eye className="h-4 w-4 mr-2" />
-                                  View Details
-                                </Link>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => setSelectedLeadForTags(lead)}>
-                                <Tag className="h-4 w-4 mr-2" />
-                                Manage Tags
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => setShowEmailDialog(true)}>
-                                <Mail className="h-4 w-4 mr-2" />
-                                Send Email
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => setShowSMSDialog(true)}>
-                                <MessageSquare className="h-4 w-4 mr-2" />
-                                Send SMS
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem className="text-red-600">
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Delete Lead
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </TableCell>
-                    )}
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-        {/* --- ADDED: Pagination and Page Size Control --- */}
-        <div className="flex items-center justify-between px-4 py-3 border-t">
-            <div className="text-sm text-muted-foreground">
-                Showing {((currentPage - 1) * pageSize) + 1} - {Math.min(currentPage * pageSize, filteredLeads.length)} of {filteredLeads.length} results.
-            </div>
-            <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2 text-sm">
-                    <Label htmlFor="page-size" className="whitespace-nowrap">Leads per page:</Label>
-                    <Input
-                        id="page-size"
-                        type="number"
-                        min="1"
-                        value={pageSize === 0 ? "" : pageSize}
-                        onChange={handlePageSizeChange}
-                        className="w-20 h-8 text-center"
-                    />
-                </div>
-                <Pagination>
-                    <PaginationContent>
-                        <PaginationItem>
-                            <PaginationPrevious 
-                                href="#" 
-                                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} 
-                                className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                            />
-                        </PaginationItem>
-                        {/* Render up to 5 page numbers around the current page */}
-                        {Array.from({ length: totalPages }, (_, i) => i + 1).slice(
-                            Math.max(0, currentPage - 3),
-                            Math.min(totalPages, currentPage + 2)
-                        ).map(page => (
-                            <PaginationItem key={page}>
-                                <PaginationLink 
-                                    href="#" 
-                                    isActive={page === currentPage}
-                                    onClick={() => setCurrentPage(page)}
-                                >
-                                    {page}
-                                </PaginationLink>
-                            </PaginationItem>
-                        ))}
-                        {totalPages > 5 && currentPage < totalPages - 2 && (
-                            <PaginationItem>
-                                <span className="px-2 text-muted-foreground">...</span>
-                            </PaginationItem>
+                    {visibleColumns.loanType && <TableHead>Loan Type</TableHead>}
+                    {visibleColumns.source && <TableHead>Source</TableHead>}
+                    {visibleColumns.assignedTo && <TableHead>Assigned To</TableHead>}
+                    {visibleColumns.tags && <TableHead>Tags</TableHead>}
+                    {visibleColumns.actions && <TableHead className="w-20">Actions</TableHead>}
+                </TableRow>
+                </TableHeader>
+                <TableBody>
+                {paginatedLeads.length === 0 ? (
+                    <TableRow>
+                    <TableCell colSpan={Object.values(visibleColumns).filter(Boolean).length + 1} className="text-center py-8">
+                        <div className="text-gray-500">No leads found</div>
+                    </TableCell>
+                    </TableRow>
+                ) : (
+                    paginatedLeads.map((lead) => (
+                    <TableRow key={lead.id} className="group">
+                        <TableCell>
+                        <input
+                            type="checkbox"
+                            checked={selectedLeads.includes(lead.id)}
+                            onChange={() => toggleLeadSelection(lead.id)}
+                            className="rounded border-gray-300"
+                        />
+                        </TableCell>
+                        {visibleColumns.name && (
+                        <TableCell>
+                            <Link href={`/admin/leads/${lead.id}`} className="hover:text-blue-600 hover:underline cursor-pointer block">
+                            <div className="font-medium">{getSafeValue(lead.name)}</div>
+                            <div className="text-xs text-muted-foreground">ID: {lead.id.slice(-8)}</div>
+                            </Link>
+                        </TableCell>
                         )}
-                        <PaginationItem>
-                            <PaginationNext 
-                                href="#" 
-                                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} 
-                                className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                        {visibleColumns.contact && (
+                        <TableCell>
+                            <div className="space-y-1">
+                            <div className="flex items-center gap-1">
+                                <Phone className="h-3 w-3" />
+                                <span className="text-sm">{getSafeValue(lead.phone)}</span>
+                            </div>
+                            {lead.email && (
+                                <div className="flex items-center gap-1">
+                                <Mail className="h-3 w-3" />
+                                <span className="text-sm truncate">{lead.email}</span>
+                                </div>
+                            )}
+                            </div>
+                        </TableCell>
+                        )}
+                        {visibleColumns.company && (
+                        <TableCell>
+                            <div className="flex items-center gap-2">
+                            <Building className="h-4 w-4 text-muted-foreground" />
+                            <span>{getSafeValue(lead.company)}</span>
+                            </div>
+                        </TableCell>
+                        )}
+                        {visibleColumns.status && (
+                        <TableCell>
+                            <Select value={lead.status} onValueChange={(value) => handleStatusChange(lead.id, value)}>
+                            <SelectTrigger className="w-32 h-8 text-xs">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {KANBAN_COLUMNS.map(col => (
+                                    <SelectItem key={col.id} value={col.id}>{col.title}</SelectItem>
+                                ))}
+                                <SelectItem value="not_eligible">Not Eligible</SelectItem>
+                            </SelectContent>
+                            </Select>
+                        </TableCell>
+                        )}
+                        {visibleColumns.priority && (
+                        <TableCell>
+                            <Badge variant={getPriorityVariant(lead.priority) as any}>{lead.priority}</Badge>
+                        </TableCell>
+                        )}
+                        {visibleColumns.score && (
+                        <TableCell>
+                            <div className="flex items-center gap-2">
+                            <div className="w-16">
+                                <div className="flex items-center justify-between text-xs mb-1">
+                                <span>{lead.lead_score || 0}</span>
+                                <span className="text-muted-foreground">/100</span>
+                                </div>
+                                <Progress value={lead.lead_score || 0} className="h-2" />
+                            </div>
+                            {lead.lead_score && (
+                                <Badge variant="outline" className={getScoreBadge(lead.lead_score).color}>
+                                {getScoreBadge(lead.lead_score).label}
+                                </Badge>
+                            )}
+                            </div>
+                        </TableCell>
+                        )}
+                        {visibleColumns.created && (
+                        <TableCell>
+                            <div className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-sm">{new Date(lead.created_at).toLocaleDateString()}</span>
+                            </div>
+                        </TableCell>
+                        )}
+                        {visibleColumns.lastContacted && (
+                        <TableCell>
+                            {(() => {
+                            const lastContactTimestamp = lastCallTimestamps[lead.id] || lead.last_contacted;
+                            if (lastContactTimestamp) {
+                                return (
+                                <div className="flex items-center gap-1">
+                                    <Clock className="h-3 w-3 text-muted-foreground" />
+                                    <span className="text-sm">
+                                    {new Date(lastContactTimestamp).toLocaleString(undefined, {
+                                        year: 'numeric', month: 'numeric', day: 'numeric',
+                                        hour: '2-digit', minute: '2-digit', hour12: true
+                                    })}
+                                    </span>
+                                </div>
+                                );
+                            }
+                            return <span className="text-sm text-muted-foreground">Never</span>;
+                            })()}
+                        </TableCell>
+                        )}
+                        {visibleColumns.loanAmount && (
+                        <TableCell>
+                            <div className="font-medium">{formatCurrency(lead.loan_amount)}</div>
+                        </TableCell>
+                        )}
+                        {visibleColumns.loanType && (
+                        <TableCell>
+                            <Badge variant="outline">{getSafeValue(lead.loan_type, 'N/A')}</Badge>
+                        </TableCell>
+                        )}
+                        {visibleColumns.source && (
+                        <TableCell>
+                            <Badge variant="outline">{getSafeValue(lead.source, 'N/A')}</Badge>
+                        </TableCell>
+                        )}
+                        {visibleColumns.assignedTo && (
+                        <TableCell>
+                            <Select value={lead.assigned_to || "unassigned"} onValueChange={(value) => handleAssignLead(lead.id, value)}>
+                            <SelectTrigger className="w-36 h-8 text-xs">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="unassigned">Unassigned</SelectItem>
+                                {telecallers.map((tc) => (
+                                <SelectItem key={tc.id} value={tc.id}>{tc.full_name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                            </Select>
+                        </TableCell>
+                        )}
+                        {visibleColumns.tags && (
+                        <TableCell>
+                            <div className="flex flex-wrap gap-1">
+                            {(lead.tags || []).slice(0, 2).map((tag) => (
+                                <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                            ))}
+                            {(lead.tags || []).length > 2 && (
+                                <Badge variant="outline" className="text-xs">
+                                +{(lead.tags || []).length - 2}
+                                </Badge>
+                            )}
+                            </div>
+                        </TableCell>
+                        )}
+                        {visibleColumns.actions && (
+                        <TableCell>
+                            <div className="flex items-center gap-2">
+                            <QuickActions 
+                                lead={lead} 
+                                onCallInitiated={() => handleCallInitiated(lead)}
+                                onStatusChange={(status) => handleStatusChange(lead.id, status)}
                             />
-                        </PaginationItem>
-                    </PaginationContent>
-                </Pagination>
+                            
+                            {/* Fixed Dropdown Trigger */}
+                            <DropdownMenu>
+                                <DropdownMenuTrigger className={triggerGhostClass}>
+                                <MoreHorizontal className="h-4 w-4" />
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                <DropdownMenuItem asChild>
+                                    <Link href={`/admin/leads/${lead.id}`}>
+                                    <Eye className="h-4 w-4 mr-2" />
+                                    View Details
+                                    </Link>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setSelectedLeadForTags(lead)}>
+                                    <Tag className="h-4 w-4 mr-2" />
+                                    Manage Tags
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setShowEmailDialog(true)}>
+                                    <Mail className="h-4 w-4 mr-2" />
+                                    Send Email
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setShowSMSDialog(true)}>
+                                    <MessageSquare className="h-4 w-4 mr-2" />
+                                    Send SMS
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem className="text-red-600">
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete Lead
+                                </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                            </div>
+                        </TableCell>
+                        )}
+                    </TableRow>
+                    ))
+                )}
+                </TableBody>
+            </Table>
+            </CardContent>
+            {/* Pagination */}
+            <div className="flex items-center justify-between px-4 py-3 border-t">
+                <div className="text-sm text-muted-foreground">
+                    Showing {((currentPage - 1) * pageSize) + 1} - {Math.min(currentPage * pageSize, filteredLeads.length)} of {filteredLeads.length} results.
+                </div>
+                <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 text-sm">
+                        <Label htmlFor="page-size" className="whitespace-nowrap">Leads per page:</Label>
+                        <Input
+                            id="page-size"
+                            type="number"
+                            min="1"
+                            value={pageSize === 0 ? "" : pageSize}
+                            onChange={handlePageSizeChange}
+                            className="w-20 h-8 text-center"
+                        />
+                    </div>
+                    <Pagination>
+                        <PaginationContent>
+                            <PaginationItem>
+                                <PaginationPrevious 
+                                    href="#" 
+                                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} 
+                                    className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                                />
+                            </PaginationItem>
+                            {Array.from({ length: totalPages }, (_, i) => i + 1).slice(
+                                Math.max(0, currentPage - 3),
+                                Math.min(totalPages, currentPage + 2)
+                            ).map(page => (
+                                <PaginationItem key={page}>
+                                    <PaginationLink 
+                                        href="#" 
+                                        isActive={page === currentPage}
+                                        onClick={() => setCurrentPage(page)}
+                                    >
+                                        {page}
+                                    </PaginationLink>
+                                </PaginationItem>
+                            ))}
+                            {totalPages > 5 && currentPage < totalPages - 2 && (
+                                <PaginationItem>
+                                    <span className="px-2 text-muted-foreground">...</span>
+                                </PaginationItem>
+                            )}
+                            <PaginationItem>
+                                <PaginationNext 
+                                    href="#" 
+                                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} 
+                                    className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                                />
+                            </PaginationItem>
+                        </PaginationContent>
+                    </Pagination>
+                </div>
             </div>
+        </Card>
+      ) : (
+        /* --- KANBAN BOARD VIEW --- */
+        <div className="h-[calc(100vh-220px)] overflow-x-auto pb-4">
+          <div className="flex gap-4 h-full min-w-[1200px]">
+            {KANBAN_COLUMNS.map(col => {
+              // Note: We use filteredLeads here so the Kanban respects the search/filter inputs!
+              const colLeads = filteredLeads.filter(l => l.status === col.id);
+              const totalAmount = colLeads.reduce((sum, l) => sum + (l.loan_amount || 0), 0);
+              
+              return (
+                <div 
+                  key={col.id} 
+                  className="w-80 flex-shrink-0 flex flex-col bg-slate-50 dark:bg-slate-900 rounded-lg border h-full"
+                  onDragOver={handleDragOver}
+                  onDrop={(e) => handleDrop(e, col.id)}
+                >
+                  {/* Column Header */}
+                  <div className={`p-3 border-b border-l-4 ${col.color.replace('bg-', 'border-')} flex justify-between items-start`}>
+                    <div>
+                      <h3 className="font-semibold text-sm flex items-center gap-2">
+                        {col.title}
+                        <Badge variant="secondary" className="text-[10px] h-5">{colLeads.length}</Badge>
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {totalAmount > 0 ? formatCurrency(totalAmount) : '-'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Draggable Cards Area */}
+                  <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                    {colLeads.map(lead => (
+                      <Card 
+                        key={lead.id} 
+                        draggable 
+                        onDragStart={(e) => handleDragStart(e, lead.id)}
+                        className="cursor-move hover:shadow-md transition-shadow"
+                      >
+                        <CardContent className="p-3 space-y-2">
+                          <div className="flex justify-between items-start">
+                            <Link href={`/admin/leads/${lead.id}`} className="font-medium text-sm hover:underline hover:text-blue-600 truncate">
+                              {lead.name}
+                            </Link>
+                            {lead.priority === 'high' && <div className="h-2 w-2 rounded-full bg-red-500" title="High Priority" />}
+                          </div>
+                          
+                          <div className="flex justify-between items-center text-xs text-muted-foreground">
+                             <span className="truncate max-w-[120px]">{lead.company || 'Individual'}</span>
+                             {lead.lead_score && (
+                                <span className={getScoreBadge(lead.lead_score).color.replace('bg-', 'text-').replace('text-white', '')}>
+                                  {lead.lead_score} score
+                                </span>
+                             )}
+                          </div>
+
+                          <div className="flex items-center gap-2 pt-2 border-t mt-1">
+                             <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => handleCallInitiated(lead)}>
+                                <Phone className="h-3 w-3" />
+                             </Button>
+                             <div className="text-xs ml-auto">
+                               {lead.assigned_user?.full_name?.split(' ')[0] || <span className="text-gray-400 italic">Unassigned</span>}
+                             </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                    {colLeads.length === 0 && (
+                      <div className="h-24 border-2 border-dashed rounded-md flex items-center justify-center text-xs text-muted-foreground opacity-50">
+                        Drop here
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
-        {/* --- END ADDED BLOCK --- */}
-      </Card>
+      )}
 
       {/* Dialogs */}
       <LeadStatusDialog
@@ -1723,6 +1887,26 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowSMSDialog(false)}>Cancel</Button>
             <Button onClick={handleBulkSMS} disabled={!smsBody}>Send SMS</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* CSV Import Dialog */}
+      <Dialog open={isImportOpen} onOpenChange={setIsImportOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import Leads via CSV</DialogTitle>
+            <DialogDescription>
+              Upload a CSV file. First row must contain headers: Name, Phone, Email, Amount, etc.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid w-full max-w-sm items-center gap-1.5">
+            <Label htmlFor="csv_upload">Select File</Label>
+            <Input id="csv_upload" type="file" accept=".csv" onChange={handleFileUpload} disabled={importing} />
+          </div>
+          {importing && <p className="text-sm text-muted-foreground">Processing...</p>}
+          <DialogFooter>
+             <Button variant="outline" onClick={() => setIsImportOpen(false)}>Cancel</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
