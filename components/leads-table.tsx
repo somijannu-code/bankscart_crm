@@ -46,7 +46,6 @@ import { cn } from "@/lib/utils"
 
 // --- Helper Functions & Constants ---
 
-// Fisher-Yates Shuffle Algorithm to randomize telecaller order
 const shuffleArray = <T,>(array: T[]): T[] => {
   const newArray = [...array];
   for (let i = newArray.length - 1; i > 0; i--) {
@@ -56,7 +55,6 @@ const shuffleArray = <T,>(array: T[]): T[] => {
   return newArray;
 };
 
-// --- Kanban Constants ---
 interface KanbanColumn {
   id: string
   title: string
@@ -75,7 +73,6 @@ const KANBAN_COLUMNS: KanbanColumn[] = [
   { id: 'Not_Interested', title: 'Closed / Lost', color: 'bg-red-500' },
 ]
 
-// Simple CSV Parser Helper
 const parseCSV = (text: string) => {
   const lines = text.split('\n').filter(l => l.trim());
   const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
@@ -149,7 +146,6 @@ const InlineEditableCell = ({ value, onSave, type = "text", className, suffix }:
     const [currentValue, setCurrentValue] = useState(value?.toString() || "");
     const inputRef = useRef<HTMLInputElement>(null);
 
-    // Reset current value if prop changes (e.g. from refresh)
     useEffect(() => {
         setCurrentValue(value?.toString() || "");
     }, [value]);
@@ -209,73 +205,67 @@ const InlineEditableCell = ({ value, onSave, type = "text", className, suffix }:
     );
 };
 
-
-// Helper class for button styling
 const triggerButtonClass = "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-3";
 const triggerGhostClass = "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-9 px-3";
 
 export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
-  
-  // View State (Table vs Board)
   const [viewMode, setViewMode] = useState<'table' | 'board'>('table')
-  
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
+  
+  // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [priorityFilter, setPriorityFilter] = useState<string>("all")
   const [assignedToFilter, setAssignedToFilter] = useState<string>("all")
   const [sourceFilter, setSourceFilter] = useState<string>("all")
   const [scoreFilter, setScoreFilter] = useState<string>("all")
   const [tagFilter, setTagFilter] = useState<string>("all")
+  
+  // Sorting
   const [sortField, setSortField] = useState<string>("created_at")
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
+  
+  // Columns Visibility - Added all missing columns here
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
     name: true,
     contact: true,
+    company: true, // Added
     status: true,
     priority: true,
     score: true,
     created: true,
     lastContacted: true,
     loanAmount: true,
+    loanType: false, // Added (default hidden)
+    source: false,   // Added (default hidden)
+    tags: true,      // Added
     assignedTo: true,
     actions: true
   })
+
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(40)
   const [selectedLeads, setSelectedLeads] = useState<string[]>([])
-  
-  // Date Filter State
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
   const [lastCallFrom, setLastCallFrom] = useState("")
   const [lastCallTo, setLastCallTo] = useState("")
-  
-  // Bulk Assign State
   const [bulkAssignTo, setBulkAssignTo] = useState<string[]>([])
   const [bulkStatus, setBulkStatus] = useState<string>("")
-  
-  // Saved Filters
   const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([])
   const [filterName, setFilterName] = useState("")
   const [showSaveFilterDialog, setShowSaveFilterDialog] = useState(false)
-  
-  // Tags Management
   const [availableTags, setAvailableTags] = useState<string[]>([
     "VIP", "Hot Lead", "Referral", "Event", "Follow Up", "High Value"
   ])
   const [newTag, setNewTag] = useState("")
   const [selectedLeadForTags, setSelectedLeadForTags] = useState<Lead | null>(null)
-  
-  // Email/SMS
   const [showEmailDialog, setShowEmailDialog] = useState(false)
   const [showSMSDialog, setShowSMSDialog] = useState(false)
   const [emailSubject, setEmailSubject] = useState("")
   const [emailBody, setEmailBody] = useState("")
   const [smsBody, setSmsBody] = useState("")
-  
-  // Auto-assignment
   const [showAutoAssignDialog, setShowAutoAssignDialog] = useState(false)
   const [autoAssignRules, setAutoAssignRules] = useState({
     enabled: false,
@@ -284,31 +274,19 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     reassignNR: false, 
     reassignInterested: false 
   })
-
-  // Import State
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [importing, setImporting] = useState(false)
-  
-  // Messages
   const [successMessage, setSuccessMessage] = useState<string>("")
   const [errorMessage, setErrorMessage] = useState<string>("")
-  
-  // Duplicate Detection
   const [duplicates, setDuplicates] = useState<any[]>([])
   const [showDuplicatesDialog, setShowDuplicatesDialog] = useState(false)
-  
   const supabase = createClient()
-  
-  // Last Call Times
   const [lastCallTimestamps, setLastCallTimestamps] = useState<Record<string, string | null>>({})
-
-  // Telecaller Status State (Attendance-based)
   const [telecallerStatus, setTelecallerStatus] = useState<Record<string, boolean>>({})
 
   // Fetch Data
   useEffect(() => {
     const fetchData = async () => {
-      // 1. Fetch Attendance Status (Is Online?)
       try {
         const today = new Date().toISOString().split('T')[0]
         const { data: attendanceRecords } = await supabase
@@ -327,7 +305,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         console.error("Error fetching telecaller status:", err)
       }
 
-      // 2. Fetch Call Logs
       const leadIds = leads.map(l => l.id);
       if (leadIds.length === 0) return;
 
@@ -354,11 +331,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         console.error("An error occurred during call log fetch:", error);
       }
     };
-
     fetchData();
   }, [leads, supabase]);
 
-  // Calculate Lead Score
   const calculateLeadScore = (lead: Lead): number => {
     let score = 0
     if (lead.loan_amount) {
@@ -389,7 +364,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     return Math.min(score, 100)
   }
 
-  // Enrich leads
   const enrichedLeads = useMemo(() => {
     return leads.map(lead => ({
       ...lead,
@@ -398,7 +372,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }))
   }, [leads])
 
-  // Dashboard Stats
   const dashboardStats = useMemo(() => {
     const total = enrichedLeads.length
     const today = new Date()
@@ -435,7 +408,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     return Array.from(tags)
   }, [enrichedLeads])
 
-  // Filter and sort
   const filteredLeads = enrichedLeads.filter(lead => {
     const matchesSearch = searchTerm === "" || 
       lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -486,7 +458,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     return 0
   })
 
-  // Pagination
   const totalPages = Math.ceil(filteredLeads.length / (pageSize > 0 ? pageSize : 1))
   const paginatedLeads = filteredLeads.slice(
     (currentPage - 1) * pageSize,
@@ -506,7 +477,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   }
 
-  // --- Inline Edit Handler ---
   const handleInlineUpdate = async (leadId: string, field: string, value: string | number) => {
     try {
         const { error } = await supabase
@@ -515,21 +485,12 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
             .eq("id", leadId);
 
         if (error) throw error;
-        
-        // Optimistic update via reload (matches existing patterns in file)
-        // For a true "Excel" feel, you might want to use a local state reducer, 
-        // but reload ensures consistency with server triggers/webhooks.
-        // We use window.location.reload() in other places, but for inline edits
-        // it's nicer to just let the component local state update first.
-        // The table will naturally refresh if 'leads' prop changes or on next hard refresh.
-        // To be safe and see changes reflected in sorting/filtering immediately:
         window.location.reload(); 
     } catch (error) {
         console.error("Error updating lead inline:", error);
         setErrorMessage("Failed to update field");
     }
   };
-
 
   const detectDuplicates = () => {
     const phoneMap = new Map<string, Lead[]>()
@@ -575,7 +536,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     a.click()
   }
 
-  // Filter Management
   const saveCurrentFilter = () => {
     const filter = {
       id: Date.now().toString(),
@@ -745,7 +705,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       let updates: any[] = []
       const now = new Date()
 
-      // 1. Filter for Active Telecallers (Using Attendance Data)
       const activeTelecallers = telecallers.filter(tc => {
         return telecallerStatus[tc.id] === true
       })
@@ -755,13 +714,10 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         return
       }
 
-      // 2. Identify Unassigned Leads
       const unassignedLeads = enrichedLeads.filter(l => !l.assigned_to)
 
-      // 3. Identify Stale Leads for Re-assignment
       let leadsToReassign: Lead[] = []
       
-      // Rule: Reassign "Not Reached" > 48hrs
       if (autoAssignRules.reassignNR) {
         const staleNR = enrichedLeads.filter(l => {
           if (l.status !== 'nr' || !l.assigned_to) return false 
@@ -773,7 +729,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         leadsToReassign = [...leadsToReassign, ...staleNR]
       }
 
-      // Rule: Reassign "Interested" > 72hrs
       if (autoAssignRules.reassignInterested) {
         const staleInterested = enrichedLeads.filter(l => {
           if (l.status !== 'Interested' || !l.assigned_to) return false
@@ -785,7 +740,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         leadsToReassign = [...leadsToReassign, ...staleInterested]
       }
 
-      // Combine all leads to process
       const allLeadsToProcess = [...unassignedLeads, ...leadsToReassign]
       const processedLeadIds = new Set<string>();
       const uniqueLeadsToProcess = allLeadsToProcess.filter(lead => {
@@ -984,24 +938,21 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   }
 
-  // --- Kanban Drag & Drop Logic ---
   const handleDragStart = (e: React.DragEvent, leadId: string) => {
     e.dataTransfer.setData("leadId", leadId);
     e.dataTransfer.effectAllowed = "move";
   };
 
   const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault(); // Necessary to allow dropping
+    e.preventDefault();
   };
 
   const handleDrop = async (e: React.DragEvent, newStatus: string) => {
     e.preventDefault();
     const leadId = e.dataTransfer.getData("leadId");
-    // Optimistic or real-time update
     await handleStatusChange(leadId, newStatus);
   };
 
-  // --- CSV Import Handler ---
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1328,7 +1279,8 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     setVisibleColumns(prev => ({ ...prev, [key]: checked }))
                   }
                 >
-                  {key.charAt(0).toUpperCase() + key.slice(1)}
+                   {/* Improved label formatting (e.g. "loanAmount" -> "Loan Amount") */}
+                  {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
                 </DropdownMenuCheckboxItem>
               ))}
             </DropdownMenuContent>
