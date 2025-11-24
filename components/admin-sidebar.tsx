@@ -19,6 +19,7 @@ const navigation = [
   { name: "Team Chat", href: "/admin/chat", icon: MessageCircle },
   { name: "Settings", href: "/admin/settings", icon: Settings },
   { name: "Disbursed Data", href: "/admin/disbursement-report", icon: IndianRupee },
+  { name: "Available Leads", href: "/admin/calls", icon: FileSpreadsheet },
 
 ]
 
