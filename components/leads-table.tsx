@@ -42,6 +42,18 @@ import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination"
 
+// --- Helper Functions ---
+
+// Fisher-Yates Shuffle Algorithm to randomize telecaller order
+const shuffleArray = <T,>(array: T[]): T[] => {
+  const newArray = [...array];
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+  return newArray;
+};
+
 interface Lead {
   id: string
   name: string
@@ -85,11 +97,12 @@ interface LeadsTableProps {
   telecallers: Array<{ id: string; full_name: string }>
 }
 
-// Helper class for button styling to replace the Button component inside triggers to fix opening issues
+// Helper class for button styling to replace the Button component inside triggers
 const triggerButtonClass = "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-3";
 const triggerGhostClass = "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-9 px-3";
 
 export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
+  // Correctly initialized to null
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
@@ -124,11 +137,10 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [lastCallFrom, setLastCallFrom] = useState("")
   const [lastCallTo, setLastCallTo] = useState("")
   
-  // Bulk Assign State - Array for multi-select
+  // Bulk Assign State
   const [bulkAssignTo, setBulkAssignTo] = useState<string[]>([])
   
   const [bulkStatus, setBulkStatus] = useState<string>("")
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   
   // Saved Filters
   const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([])
@@ -159,7 +171,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     reassignInterested: false 
   })
   
-  // Success/Error Messages
+  // Messages
   const [successMessage, setSuccessMessage] = useState<string>("")
   const [errorMessage, setErrorMessage] = useState<string>("")
   
@@ -175,7 +187,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   // Telecaller Status State (Attendance-based)
   const [telecallerStatus, setTelecallerStatus] = useState<Record<string, boolean>>({})
 
-  // Fetch Last Call Times & Attendance Status
+  // Fetch Data
   useEffect(() => {
     const fetchData = async () => {
       // 1. Fetch Attendance Status (Is Online?)
@@ -208,10 +220,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
           .in("lead_id", leadIds)
           .order("created_at", { ascending: false });
 
-        if (error) {
-          console.error("Error fetching call logs for last contact:", error);
-          return;
-        }
+        if (error) return;
         
         const latestCalls: Record<string, string | null> = {};
         const seenLeadIds = new Set<string>();
@@ -222,9 +231,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
             seenLeadIds.add(log.lead_id);
           }
         }
-
         setLastCallTimestamps(latestCalls);
-
       } catch (error) {
         console.error("An error occurred during call log fetch:", error);
       }
@@ -233,7 +240,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     fetchData();
   }, [leads, supabase]);
 
-  // Calculate Lead Score (0-100)
+  // Calculate Lead Score
   const calculateLeadScore = (lead: Lead): number => {
     let score = 0
     if (lead.loan_amount) {
@@ -374,7 +381,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       setPageSize(0)
       return
     }
-    
     const newSize = parseInt(value)
     if (!isNaN(newSize) && newSize > 0) {
       setPageSize(newSize)
@@ -385,7 +391,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const detectDuplicates = () => {
     const phoneMap = new Map<string, Lead[]>()
     const emailMap = new Map<string, Lead[]>()
-    
     enrichedLeads.forEach(lead => {
       if (lead.phone) {
         if (!phoneMap.has(lead.phone)) phoneMap.set(lead.phone, [])
@@ -396,7 +401,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         emailMap.get(lead.email)!.push(lead)
       }
     })
-    
     const dups: any[] = []
     phoneMap.forEach((leads, phone) => {
       if (leads.length > 1) dups.push({ type: 'phone', value: phone, leads })
@@ -404,7 +408,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     emailMap.forEach((leads, email) => {
       if (leads.length > 1) dups.push({ type: 'email', value: email, leads })
     })
-    
     setDuplicates(dups)
     setShowDuplicatesDialog(true)
   }
@@ -591,7 +594,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   }
 
-  // START UPDATED FUNCTION: handleAutoAssignLeads
+  // --- UPDATED FUNCTION: handleAutoAssignLeads (SHUFFLED ROUND ROBIN) ---
   const handleAutoAssignLeads = async () => {
     if (!autoAssignRules.enabled || telecallers.length === 0) return
 
@@ -603,7 +606,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
       // 1. Filter for Active Telecallers (Using Attendance Data)
       const activeTelecallers = telecallers.filter(tc => {
-        // We check strictly for 'true' from the attendance map
         return telecallerStatus[tc.id] === true
       })
 
@@ -615,13 +617,13 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       // 2. Identify Unassigned Leads
       const unassignedLeads = enrichedLeads.filter(l => !l.assigned_to)
 
-      // 3. Identify Stale Leads for Re-assignment (Must have an assigned_to to be re-assigned)
+      // 3. Identify Stale Leads for Re-assignment
       let leadsToReassign: Lead[] = []
       
       // Rule: Reassign "Not Reached" > 48hrs
       if (autoAssignRules.reassignNR) {
         const staleNR = enrichedLeads.filter(l => {
-          if (l.status !== 'nr' || !l.assigned_to) return false // Must be NR and assigned
+          if (l.status !== 'nr' || !l.assigned_to) return false 
           const lastContact = lastCallTimestamps[l.id] || l.last_contacted
           if (!lastContact) return false 
           const diffHours = (now.getTime() - new Date(lastContact).getTime()) / (1000 * 60 * 60)
@@ -633,7 +635,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       // Rule: Reassign "Interested" > 72hrs
       if (autoAssignRules.reassignInterested) {
         const staleInterested = enrichedLeads.filter(l => {
-          if (l.status !== 'Interested' || !l.assigned_to) return false // Must be Interested and assigned
+          if (l.status !== 'Interested' || !l.assigned_to) return false
           const lastContact = lastCallTimestamps[l.id] || l.last_contacted
           if (!lastContact) return false
           const diffHours = (now.getTime() - new Date(lastContact).getTime()) / (1000 * 60 * 60)
@@ -642,7 +644,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         leadsToReassign = [...leadsToReassign, ...staleInterested]
       }
 
-      // Combine all leads that need to be assigned/reassigned
+      // Combine all leads to process
       const allLeadsToProcess = [...unassignedLeads, ...leadsToReassign]
       const processedLeadIds = new Set<string>();
       const uniqueLeadsToProcess = allLeadsToProcess.filter(lead => {
@@ -656,44 +658,46 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         return
       }
       
-      // --- Assignment Logic: Handles BOTH New Assignments and Re-assignments ---
+      // --- Assignment Logic ---
 
-      // Calculate initial workload only for active telecallers if using the workload method
+      // IMPORTANT: Shuffle the active telecallers for this batch!
+      // This ensures randomization of who gets the "first" lead each time.
+      const shuffledTelecallers = shuffleArray(activeTelecallers);
+
+      // For workload, calculate counts initially
       const leadCounts = activeTelecallers.map(tc => ({
           id: tc.id,
           count: enrichedLeads.filter(l => l.assigned_to === tc.id).length
       }));
-      let roundRobinIndex = 0; // Index for Round Robin assignment
+      
+      let roundRobinIndex = 0; 
 
-      uniqueLeadsToProcess.forEach((lead, index) => {
+      uniqueLeadsToProcess.forEach((lead) => {
         
         let newTelecallerId: string | null = null;
-        const isReassign = !!lead.assigned_to; // True if lead was already assigned (Stale Lead)
+        const isReassign = !!lead.assigned_to; 
         
-        // 4. Determine Target Telecaller
         if (autoAssignRules.method === 'round-robin') {
             
-            let rotationPool = activeTelecallers;
+            // Use the SHUFFLED list
+            let candidate = shuffledTelecallers[roundRobinIndex % shuffledTelecallers.length];
             
-            if (isReassign) {
-                // For re-assignment, exclude the current telecaller from the pool
-                const filteredPool = activeTelecallers.filter(t => t.id !== lead.assigned_to);
-                // Use the filtered pool if it's not empty, otherwise use all active
-                rotationPool = filteredPool.length > 0 ? filteredPool : activeTelecallers;
+            // If re-assigning, try to avoid the same person
+            if (isReassign && candidate.id === lead.assigned_to && shuffledTelecallers.length > 1) {
+                // Skip to next person in the shuffled list
+                roundRobinIndex++;
+                candidate = shuffledTelecallers[roundRobinIndex % shuffledTelecallers.length];
             }
             
-            // Assign based on the current index in the pool
-            newTelecallerId = rotationPool[roundRobinIndex % rotationPool.length].id;
-            roundRobinIndex++; // Increment index for the next lead
+            newTelecallerId = candidate.id;
+            roundRobinIndex++; 
             
         } else if (autoAssignRules.method === 'workload') {
-            
-            // Find the active telecaller with the minimum current lead count
             const minTelecaller = leadCounts.reduce((min, tc) => 
                 tc.count < min.count ? tc : min
             );
             newTelecallerId = minTelecaller.id;
-            minTelecaller.count++; // Increment count for subsequent leads in this batch
+            minTelecaller.count++; 
         }
 
         if (newTelecallerId) {
@@ -703,10 +707,8 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                 assigned_at: new Date().toISOString()
             };
 
-            // 5. Status Change: If it was a Re-assignment, force status to 'new'
             if (isReassign) {
                 updatePayload.status = 'new';
-                // Reset last_contacted to start the 48/72hr timer for the new agent
                 updatePayload.last_contacted = new Date().toISOString(); 
             }
 
@@ -731,7 +733,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       alert("Error occurred during assignment. Check console.")
     }
   }
-  // END UPDATED FUNCTION: handleAutoAssignLeads
 
   const handleAddTag = async (leadId: string, tag: string) => {
     try {
@@ -1245,7 +1246,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     <DropdownMenuSeparator />
                     {telecallers.map((tc) => {
                       const isSelected = bulkAssignTo.includes(tc.id)
-                      const isOnline = telecallerStatus[tc.id]
+                      const isOnline = telecallerStatus[tc.id] === true
                       return (
                         <DropdownMenuCheckboxItem
                           key={tc.id}
@@ -1597,61 +1598,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         </CardContent>
       </Card>
 
-      {/* Pagination */}
-      {totalPages > 0 && (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="text-sm text-muted-foreground">Leads per page:</div>
-            {/* UPDATED: Input for Leads Per Page */}
-            <Input
-              type="number"
-              min="1"
-              max="500"
-              className="w-[80px] h-9"
-              value={pageSize}
-              onChange={handlePageSizeChange}
-            />
-            <div className="text-sm text-muted-foreground">
-              Showing {((currentPage - 1) * pageSize) + 1} to {Math.min(currentPage * pageSize, filteredLeads.length)} of {filteredLeads.length} leads
-            </div>
-          </div>
-          <Pagination>
-            <PaginationContent>
-              <PaginationItem>
-                <PaginationPrevious 
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                  className={currentPage === 1 ? "pointer-events-none opacity-50" : ""}
-                />
-              </PaginationItem>
-              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-                let pageNum
-                if (totalPages <= 5) pageNum = i + 1
-                else if (currentPage <= 3) pageNum = i + 1
-                else if (currentPage >= totalPages - 2) pageNum = totalPages - 4 + i
-                else pageNum = currentPage - 2 + i
-                
-                if (pageNum >= 1 && pageNum <= totalPages) {
-                  return (
-                    <PaginationItem key={pageNum}>
-                      <PaginationLink isActive={currentPage === pageNum} onClick={() => setCurrentPage(pageNum)}>
-                        {pageNum}
-                      </PaginationLink>
-                    </PaginationItem>
-                  )
-                }
-                return null;
-              })}
-              <PaginationItem>
-                <PaginationNext 
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                  className={currentPage === totalPages ? "pointer-events-none opacity-50" : ""}
-                />
-              </PaginationItem>
-            </PaginationContent>
-          </Pagination>
-        </div>
-      )}
-
       {/* Dialogs */}
       <LeadStatusDialog
         open={isStatusDialogOpen}
@@ -1743,7 +1689,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     <Select value={autoAssignRules.method} onValueChange={(value) => setAutoAssignRules(prev => ({ ...prev, method: value }))}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="round-robin">Round Robin</SelectItem>
+                        <SelectItem value="round-robin">Shuffled Round Robin (Fair)</SelectItem>
                         <SelectItem value="workload">Workload Balance</SelectItem>
                       </SelectContent>
                     </Select>
