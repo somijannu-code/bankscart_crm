@@ -418,7 +418,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       headers.join(','),
       ...filteredLeads.map(lead => 
         headers.map(h => {
-          const val = lead[h as keyof Lead]
+          const val = (lead as any)[h] // Use 'as any' since the keys aren't directly on the Lead interface
           return typeof val === 'string' ? `"${val}"` : val
         }).join(',')
       )
@@ -1596,6 +1596,64 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
             </TableBody>
           </Table>
         </CardContent>
+        {/* --- ADDED: Pagination and Page Size Control --- */}
+        <div className="flex items-center justify-between px-4 py-3 border-t">
+            <div className="text-sm text-muted-foreground">
+                Showing {((currentPage - 1) * pageSize) + 1} - {Math.min(currentPage * pageSize, filteredLeads.length)} of {filteredLeads.length} results.
+            </div>
+            <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 text-sm">
+                    <Label htmlFor="page-size" className="whitespace-nowrap">Leads per page:</Label>
+                    <Input
+                        id="page-size"
+                        type="number"
+                        min="1"
+                        value={pageSize === 0 ? "" : pageSize}
+                        onChange={handlePageSizeChange}
+                        className="w-20 h-8 text-center"
+                    />
+                </div>
+                <Pagination>
+                    <PaginationContent>
+                        <PaginationItem>
+                            <PaginationPrevious 
+                                href="#" 
+                                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} 
+                                className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                            />
+                        </PaginationItem>
+                        {/* Render up to 5 page numbers around the current page */}
+                        {Array.from({ length: totalPages }, (_, i) => i + 1).slice(
+                            Math.max(0, currentPage - 3),
+                            Math.min(totalPages, currentPage + 2)
+                        ).map(page => (
+                            <PaginationItem key={page}>
+                                <PaginationLink 
+                                    href="#" 
+                                    isActive={page === currentPage}
+                                    onClick={() => setCurrentPage(page)}
+                                >
+                                    {page}
+                                </PaginationLink>
+                            </PaginationItem>
+                        ))}
+                        {totalPages > 5 && currentPage < totalPages - 2 && (
+                            <PaginationItem>
+                                <span className="px-2 text-muted-foreground">...</span>
+                            </PaginationItem>
+                        )}
+                        <PaginationItem>
+                            <PaginationNext 
+                                href="#" 
+                                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} 
+                                className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                            />
+                        </PaginationItem>
+                    </PaginationContent>
+                </Pagination>
+            </div>
+        </div>
+        {/* --- END ADDED BLOCK --- */}
       </Card>
 
       {/* Dialogs */}
