@@ -36,8 +36,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu"
-// Removed the hook causing issues
-// import { useTelecallerStatus } from "@/hooks/use-telecaller-status" 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
@@ -92,7 +90,6 @@ const triggerButtonClass = "inline-flex items-center justify-center whitespace-n
 const triggerGhostClass = "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-9 px-3";
 
 export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
-  // FIXED: Initialize with null to prevent reference error
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
@@ -175,7 +172,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   // Last Call Times
   const [lastCallTimestamps, setLastCallTimestamps] = useState<Record<string, string | null>>({})
 
-  // NEW: Telecaller Status State (Attendance-based)
+  // Telecaller Status State (Attendance-based)
   const [telecallerStatus, setTelecallerStatus] = useState<Record<string, boolean>>({})
 
   // Fetch Last Call Times & Attendance Status
@@ -1229,7 +1226,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                   Update Status
                 </Button>
 
-                {/* FIXED: Multi-Select Dropdown for Assignees - Removed asChild and inner Button */}
+                {/* UPDATED: Manual Bulk Assignment with Status Dots */}
                 <DropdownMenu>
                   <DropdownMenuTrigger className={`${triggerButtonClass} w-[200px] justify-between border-dashed`}>
                       {bulkAssignTo.length === 0 ? (
@@ -1248,6 +1245,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     <DropdownMenuSeparator />
                     {telecallers.map((tc) => {
                       const isSelected = bulkAssignTo.includes(tc.id)
+                      const isOnline = telecallerStatus[tc.id]
                       return (
                         <DropdownMenuCheckboxItem
                           key={tc.id}
@@ -1259,7 +1257,14 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                             })
                           }}
                         >
-                          {tc.full_name}
+                           {/* Green/Red Status Dot */}
+                          <div className="flex items-center gap-2 w-full">
+                            <div 
+                              className={`h-2 w-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`} 
+                              title={isOnline ? 'Online' : 'Offline'} 
+                            />
+                            <span>{tc.full_name}</span>
+                          </div>
                         </DropdownMenuCheckboxItem>
                       )
                     })}
