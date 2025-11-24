@@ -36,7 +36,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu"
-import { useTelecallerStatus } from "@/hooks/use-telecaller-status"
+// Removed the hook causing issues
+// import { useTelecallerStatus } from "@/hooks/use-telecaller-status" 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
@@ -91,7 +92,7 @@ const triggerButtonClass = "inline-flex items-center justify-center whitespace-n
 const triggerGhostClass = "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-9 px-3";
 
 export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
-  // FIXED: Changed useState(selectedLead) to useState(null)
+  // FIXED: Initialize with null to prevent reference error
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
@@ -157,8 +158,8 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     enabled: false,
     method: 'round-robin', 
     criteria: '',
-    reassignNR: false, // New rule: Reassign NR > 48h
-    reassignInterested: false // New rule: Reassign Interested > 72h
+    reassignNR: false, 
+    reassignInterested: false 
   })
   
   // Success/Error Messages
@@ -174,20 +175,32 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   // Last Call Times
   const [lastCallTimestamps, setLastCallTimestamps] = useState<Record<string, string | null>>({})
 
-  // Stabilize telecaller IDs array
-  const allTelecallerIds = useMemo(() => {
-    const ids = [
-      ...leads.map(lead => lead.assigned_user?.id).filter(Boolean) as string[],
-      ...telecallers.map(t => t.id)
-    ]
-    return ids.filter((id, index, self) => self.indexOf(id) === index)
-  }, [leads, telecallers])
+  // NEW: Telecaller Status State (Attendance-based)
+  const [telecallerStatus, setTelecallerStatus] = useState<Record<string, boolean>>({})
 
-  const { telecallerStatus, loading: statusLoading } = useTelecallerStatus(allTelecallerIds)
-  
-  // Fetch Last Call Times
+  // Fetch Last Call Times & Attendance Status
   useEffect(() => {
-    const fetchLastCallTimes = async () => {
+    const fetchData = async () => {
+      // 1. Fetch Attendance Status (Is Online?)
+      try {
+        const today = new Date().toISOString().split('T')[0]
+        const { data: attendanceRecords } = await supabase
+          .from("attendance")
+          .select("user_id, check_in")
+          .eq("date", today)
+        
+        if (attendanceRecords) {
+          const statusMap: Record<string, boolean> = {}
+          attendanceRecords.forEach(record => {
+            statusMap[record.user_id] = !!record.check_in
+          })
+          setTelecallerStatus(statusMap)
+        }
+      } catch (err) {
+        console.error("Error fetching telecaller status:", err)
+      }
+
+      // 2. Fetch Call Logs for Last Contacted
       const leadIds = leads.map(l => l.id);
       if (leadIds.length === 0) return;
 
@@ -220,9 +233,8 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       }
     };
 
-    fetchLastCallTimes();
+    fetchData();
   }, [leads, supabase]);
-
 
   // Calculate Lead Score (0-100)
   const calculateLeadScore = (lead: Lead): number => {
@@ -582,6 +594,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   }
 
+  // START UPDATED FUNCTION: handleAutoAssignLeads
   const handleAutoAssignLeads = async () => {
     if (!autoAssignRules.enabled || telecallers.length === 0) return
 
@@ -591,11 +604,10 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       let updates: any[] = []
       const now = new Date()
 
-      // 1. Filter for Active Telecallers Only
+      // 1. Filter for Active Telecallers (Using Attendance Data)
       const activeTelecallers = telecallers.filter(tc => {
-        const status = telecallerStatus[tc.id]
-        // Filter only those whose status is explicitly 'online' or 'available'
-        return status === 'online' || status === 'available'
+        // We check strictly for 'true' from the attendance map
+        return telecallerStatus[tc.id] === true
       })
 
       if (activeTelecallers.length === 0) {
@@ -722,6 +734,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       alert("Error occurred during assignment. Check console.")
     }
   }
+  // END UPDATED FUNCTION: handleAutoAssignLeads
 
   const handleAddTag = async (leadId: string, tag: string) => {
     try {
