@@ -34,10 +34,36 @@ export const metadata: Metadata = {
     telephone: false,
   },
   icons: {
-    icon: "/icons/icon-192x192.png",
-    apple: "/icons/icon-192x192.png",
+    icon: [
+      {
+        url: "/favicon.ico",
+        sizes: "any",
+      },
+      {
+        url: "/icons/icon-32x32.png",
+        sizes: "32x32",
+        type: "image/png",
+      },
+      {
+        url: "/icons/icon-16x16.png",
+        sizes: "16x16",
+        type: "image/png",
+      },
+    ],
+    apple: [
+      {
+        url: "/icons/icon-192x192.png",
+        sizes: "192x192",
+        type: "image/png",
+      },
+      {
+        url: "/icons/icon-180x180.png",
+        sizes: "180x180",
+        type: "image/png",
+      },
+    ],
   },
-    generator: 'v0.app'
+  // generator: 'v0.app' // Removed - not required
 }
 
 export const viewport: Viewport = {
@@ -67,9 +93,11 @@ export default function RootLayout({
         <meta name="msapplication-TileColor" content="#000000" />
         <meta name="msapplication-tap-highlight" content="no" />
 
+        {/* Favicon links - Next.js will also auto-generate these from metadata, but keeping for compatibility */}
         <link rel="apple-touch-icon" href="/icons/icon-192x192.png" />
         <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32x32.png" />
         <link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-16x16.png" />
+        <link rel="icon" type="image/x-icon" href="/favicon.ico" />
         <link rel="mask-icon" href="/icons/safari-pinned-tab.svg" color="#000000" />
         <link rel="shortcut icon" href="/favicon.ico" />
       </head>
