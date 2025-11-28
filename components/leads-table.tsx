@@ -230,16 +230,17 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
     name: true,
     contact: true,
-    company: true, // Added
+    company: false, // Added
     status: true,
-    priority: true,
+    priority: false,
     score: true,
     created: true,
     lastContacted: true,
     loanAmount: true,
     loanType: false, // Added (default hidden)
     source: false,   // Added (default hidden)
-    tags: true,      // Added
+    tags: false,
+    notes: false,// Added
     assignedTo: true,
     actions: true
   })
