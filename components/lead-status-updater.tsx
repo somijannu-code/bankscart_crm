@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Phone, Clock, MessageSquare, IndianRupee } from "lucide-react" 
+import { Phone, Clock, MessageSquare, IndianRupee, AlertCircle } from "lucide-react" 
 import { useCallTracking } from "@/context/call-tracking-context"
 import { toast } from "sonner"
 import { ScheduleFollowUpModal } from "./schedule-follow-up-modal" 
@@ -70,6 +70,9 @@ export function LeadStatusUpdater({
   const [callMins, setCallMins] = useState<number | null>(null);
   const [callSecs, setCallSecs] = useState<number | null>(null);
 
+  // NEW STATE: To track which Not Eligible reason is selected
+  const [notEligibleReason, setNotEligibleReason] = useState<string>("")
+
   const supabase = createClient()
   const { activeCall, startCall, endCall, updateCallDuration, formatDuration } = useCallTracking()
 
@@ -77,83 +80,80 @@ export function LeadStatusUpdater({
   const WHATSAPP_MESSAGE_BASE = "hi sir this side {telecaller_name} from ICICI bank kindly share following documents";
 
   // New constant for a robustly cleaned phone number
-  // The phone number must be available in the props to be cleaned here.
   const cleanedPhoneNumber = String(leadPhoneNumber || "").replace(/[^0-9]/g, '');
 
-  // MODIFIED FUNCTION: Simplified logic, now only returns the link or "#"
   const getWhatsappLink = () => {
-      // Return a safe link if the number is empty after cleaning
-      if (!cleanedPhoneNumber) {
-          return "#"; 
-      }
-      
-      // Replace placeholder and URL encode the message
+      if (!cleanedPhoneNumber) return "#"; 
       const message = WHATSAPP_MESSAGE_BASE.replace("{telecaller_name}", telecallerName)
       const encodedMessage = encodeURIComponent(message)
-      
       return `https://wa.me/${cleanedPhoneNumber}?text=${encodedMessage}`
   }
-
 
   useEffect(() => {
     setLoanAmount(initialLoanAmount)
   }, [initialLoanAmount])
   
+  // Reset Not Eligible specific states when status changes away from not_eligible
+  useEffect(() => {
+    if (status !== 'not_eligible') {
+      setNotEligibleReason("")
+      // If we switch away from not_eligible, we might want to clear the note
+      // unless the user typed something they want to keep. 
+      // For now, let's clear it to avoid sending "Low CIBIL Score" as a note for "Interested" status accidentally.
+      if (status !== "" && !isUpdating) {
+         setNote("")
+      }
+    }
+  }, [status, isUpdating]);
+
   // NEW useEffect: Set call duration to 0 automatically when 'nr' is selected and a call was initiated
   useEffect(() => {
     if (isCallInitiated && status === 'nr') {
       setCallDuration(0);
-      setCallMins(0); // Also update minutes/seconds UI state
+      setCallMins(0); 
       setCallSecs(0);
     } else if (status !== 'nr' && callDuration === 0) {
-      // Clear call duration if switching from 'nr' to another status
       setCallDuration(null);
-      setCallMins(null); // Clear minutes/seconds UI state
+      setCallMins(null); 
       setCallSecs(null);
     }
   }, [status, isCallInitiated]);
 
-  // NEW HELPER FUNCTION: Calculates total seconds from minutes and seconds
   const calculateTotalSeconds = (minutes: number | null, seconds: number | null): number | null => {
     const min = minutes ?? 0;
     const sec = seconds ?? 0;
-    // Only return a number if at least one is explicitly set and non-negative
     if (min < 0 || sec < 0) return null;
     if (min === 0 && sec === 0 && (minutes === null && seconds === null)) return null;
     return (min * 60) + sec;
   }
 
-  // NEW HANDLER: Updates minutes and recalculates total seconds
   const handleMinsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     const minutes = value === "" ? null : Number(value);
-    
     setCallMins(minutes);
-
-    // Recalculate and set the total duration in seconds
     const totalSeconds = calculateTotalSeconds(minutes, callSecs);
     setCallDuration(totalSeconds);
   }
 
-  // NEW HANDLER: Updates seconds and recalculates total seconds
   const handleSecsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     let seconds = value === "" ? null : Number(value);
-
-    // Limit seconds to 59
-    if (seconds !== null && seconds > 59) {
-      seconds = 59;
-    }
-    
+    if (seconds !== null && seconds > 59) seconds = 59;
     setCallSecs(seconds);
-
-    // Recalculate and set the total duration in seconds
     const totalSeconds = calculateTotalSeconds(callMins, seconds);
     setCallDuration(totalSeconds);
   }
 
+  // NEW HANDLER: Handle Not Eligible Radio Changes
+  const handleNotEligibleReasonChange = (reason: string) => {
+    setNotEligibleReason(reason)
+    if (reason === "Other") {
+      setNote("") // Clear note so user can type manually
+    } else {
+      setNote(reason) // Auto-fill note with the predefined reason
+    }
+  }
 
-  // MODIFIED FUNCTION: Updates only the status to 'follow_up' after modal success and logs the status change
   const updateLeadStatusToFollowUp = async () => {
     try {
       const updateData: any = { 
@@ -161,14 +161,11 @@ export function LeadStatusUpdater({
         last_contacted: new Date().toISOString()
       }
 
-      // Add loan_amount if provided and valid
       if (loanAmount !== null && !isNaN(loanAmount) && loanAmount >= 0) {
         updateData.loan_amount = loanAmount
       }
 
-      // Add general remarks/notes if provided
       if (remarks.trim()) {
-        // We append the new remarks to the existing notes, if applicable
         updateData.notes = remarks
       }
 
@@ -179,8 +176,6 @@ export function LeadStatusUpdater({
         
       if (error) throw error
       
-      // ------------------------------------------
-      // CORRECTED/ADDED LOGIC: Log the status change to 'follow_up'
       const { data: { user } } = await supabase.auth.getUser()
 
       if (user) {
@@ -189,20 +184,16 @@ export function LeadStatusUpdater({
           .insert({
             lead_id: leadId,
             user_id: user.id,
-            // Log a clean, standardized status change event
             content: "Status changed to: Call Back (Follow-up scheduled)",
-            note_type: "status_change", // CRUCIAL: Tag this as a status change
+            note_type: "status_change", 
           })
         
         if (noteError) console.error("Error logging follow_up status change note:", noteError)
       }
-      // ------------------------------------------
 
-      // Update local state and notify parent
       setStatus("follow_up")
       onStatusUpdate?.("follow_up", note) 
       
-      // OPTIONAL: Reset remarks/notes after successful update
       setRemarks("")
       setNote("")
 
@@ -217,7 +208,6 @@ export function LeadStatusUpdater({
   }
 
 
-  // MODIFIED FUNCTION: Handles status update and logs it as a special note
   const handleStatusUpdate = async () => {
     
     // --- START VALIDATION CHECK ---
@@ -225,7 +215,6 @@ export function LeadStatusUpdater({
     const isNoteEmpty = !note.trim()
     const isNRStatus = status === 'nr'
 
-    // CHECK 1 (Mandatory Status): Check if status is selected at all
     if (!status) {
        toast.error("Validation Failed", {
         description: "Please select a status before submitting."
@@ -233,7 +222,6 @@ export function LeadStatusUpdater({
       return
     }
 
-    // CHECK 2 (Not Eligible Reason):
     if (isNotEligible && isNoteEmpty) {
       toast.error("Validation Failed", {
         description: "Please specify the 'Reason for Not Eligible' before updating the status."
@@ -241,9 +229,7 @@ export function LeadStatusUpdater({
       return 
     }
     
-    // CHECK 3 (Follow Up):
     if (status === "follow_up") {
-      // Re-open the modal if the user tries to click the button without going through the modal
       if (!isModalOpen) {
         setIsModalOpen(true);
       }
@@ -253,7 +239,6 @@ export function LeadStatusUpdater({
       return
     }
 
-    // NEW CHECK 4 (Call Duration): Mandatory call duration > 0 for all statuses except 'nr' when call is initiated
     if (isCallInitiated && !isNRStatus) {
       if (callDuration === null || callDuration <= 0) {
         toast.error("Validation Failed", {
@@ -263,7 +248,6 @@ export function LeadStatusUpdater({
       }
     }
     
-    // Auto-set call duration to 0 for 'nr' if it's not set
     if (isCallInitiated && isNRStatus && callDuration === null) {
       setCallDuration(0) 
     }
@@ -276,23 +260,18 @@ export function LeadStatusUpdater({
         last_contacted: new Date().toISOString()
       }
       
-      // Add loan_amount to update data if it's a valid number
       if (loanAmount !== null && !isNaN(loanAmount) && loanAmount >= 0) {
         updateData.loan_amount = loanAmount
       }
 
-      // Add general remarks/notes if provided
       if (remarks.trim()) {
         updateData.notes = remarks
       }
       
-      // Add specific note if provided for Not Eligible status
       if (isNotEligible && note.trim()) {
         updateData.notes = updateData.notes ? `${updateData.notes}\n\nReason for Not Eligible: ${note}` : `Reason for Not Eligible: ${note}`
       }
 
-      // Only update if status is NOT the current status OR if a call was initiated
-      // We skip the leads update if status is 'nr' but we only want to log the call.
       if (status !== currentStatus || isCallInitiated) {
           const { error } = await supabase
             .from("leads")
@@ -303,11 +282,8 @@ export function LeadStatusUpdater({
           
           onStatusUpdate?.(status, note) 
           
-          // ------------------------------------------
-          // CORRECTED/ADDED LOGIC: Log the status change as a special note
           const { data: { user } } = await supabase.auth.getUser()
 
-          // Only log a status change note if the status actually changed
           if (user && status !== currentStatus) {
             const newStatusLabel = statusOptions.find(o => o.value === status)?.label || status.replace(/_/g, ' ')
             
@@ -316,34 +292,24 @@ export function LeadStatusUpdater({
               .insert({
                 lead_id: leadId,
                 user_id: user.id,
-                // Construct a clean, standardized content for the status change event
                 content: `Status changed to: ${newStatusLabel}`,
-                note_type: "status_change", // CRUCIAL: Tag this as a status change
+                note_type: "status_change", 
               })
             
             if (noteError) console.error("Error logging status change note:", noteError)
           }
-          // ------------------------------------------
       }
 
-
-      // If this is for a call, also log the call
-      // The callDuration will be a valid number here due to the checks above.
       if (isCallInitiated) {
-        // We use the state value, which is guaranteed to be a number (0 or > 0)
         await logCall(callDuration as number)
       }
-
       
-      // Reset form
       setNote("")
       setRemarks("")
-      // MODIFIED: Reset callDuration to null AND new minute/second state
       setCallDuration(null)
       setCallMins(null)
       setCallSecs(null)
-
-      // Set status back to empty string after success for subsequent mandatory selection.
+      setNotEligibleReason("") // Reset radio selection
       setStatus("")
       
       toast.success("Lead status updated successfully!")
@@ -358,7 +324,6 @@ export function LeadStatusUpdater({
     }
   }
 
-  // MODIFIED: logCall now accepts callDuration as a parameter, making it explicit
   const logCall = async (finalCallDuration: number) => {
     try {
       const {
@@ -372,8 +337,6 @@ export function LeadStatusUpdater({
 
       let duration = finalCallDuration
       if (activeCall && activeCall.leadId === leadId) {
-        // If an active call is still running, update the final duration from the tracking context
-        // This handles cases where the user has entered a duration but the active timer is higher
         duration = await updateCallDuration(leadId, "")
       }
 
@@ -385,7 +348,6 @@ export function LeadStatusUpdater({
           call_type: "outbound",
           call_status: "connected",
           duration_seconds: duration,
-          // MODIFIED: Use remarks as notes, falling back to a default message
           notes: remarks || "Call initiated from lead details",
         })
         .select()
@@ -415,38 +377,32 @@ export function LeadStatusUpdater({
 
   const currentStatusOption = statusOptions.find((option) => option.value === currentStatus)
 
-  const showNoteField = status === "not_eligible"
+  // NOTE: We don't use 'showNoteField' boolean anymore, we render conditionally inline based on status
   
-  // Logic for call duration validation (must be > 0 for non-'nr' statuses)
-  // Use callDuration for the validation check
   const isInvalidCallDuration = isCallInitiated && status !== 'nr' && (callDuration === null || callDuration <= 0)
   
-  // Logic to determine if the update button should be disabled
   const isFormInvalid = 
-    (status === "not_eligible" && !note.trim()) || // Not Eligible reason missing
-    (status === "follow_up" && !isCallInitiated) || // Follow up logic via modal
-    isInvalidCallDuration // NEW: Invalid call duration for non-'nr' call
+    (status === "not_eligible" && !note.trim()) || 
+    (status === "follow_up" && !isCallInitiated) || 
+    isInvalidCallDuration 
 
   const isButtonDisabled = 
     isUpdating || 
-    status === "" || // MANDATORY SELECTION: Disabled if no status is selected
-    (status === currentStatus && !isCallInitiated && status !== "follow_up") || // Still disable if status hasn't changed AND no call was initiated (standard update logic)
+    status === "" || 
+    (status === currentStatus && !isCallInitiated && status !== "follow_up") || 
     isFormInvalid || 
-    status === "follow_up" // Disabled if 'follow_up' is selected (update happens via modal success)
+    status === "follow_up" 
 
-  // Check if a valid WhatsApp link can be generated
   const whatsappLink = getWhatsappLink();
   const isWhatsappEnabled = whatsappLink !== "#";
 
   return (
     <Card>
-      {/* MODIFIED: Added flex and justify-between for the WhatsApp icon */}
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="text-lg">
           {isCallInitiated ? "Log Call & Update Status" : "Lead Status"}
         </CardTitle>
 
-        {/* NEW: WHATSAPP ICON - Conditionally rendered and disabled */}
         {isWhatsappEnabled ? (
             <a 
                 href={whatsappLink} 
@@ -455,7 +411,6 @@ export function LeadStatusUpdater({
                 title={`Send WhatsApp Message to ${cleanedPhoneNumber}`}
                 className="flex items-center justify-center p-1 rounded-full bg-green-500 hover:bg-green-600 transition-colors shadow-md"
             >
-                {/* Using MessageSquare icon and styling it white on a green background */}
                 <MessageSquare className="h-4 w-4 text-white" /> 
             </a>
         ) : (
@@ -472,28 +427,24 @@ export function LeadStatusUpdater({
       <CardContent className="space-y-4 max-h-[80vh] overflow-y-auto">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">Current Status:</span>
-          {/* Use currentStatusOption for the BADGE display */}
           <Badge className={currentStatusOption?.color}>{currentStatusOption?.label}</Badge>
         </div>
 
-        {/* REMOVED: The informational text box that was here */}
-        
         <div className="space-y-4">
           <div className="space-y-2">
             <label className="text-sm font-medium">Update Status:</label>
             <Select 
               value={status} 
               onValueChange={(newStatus) => {
-                setTempStatus(newStatus) // Store the status temporarily
+                setTempStatus(newStatus)
                 if (newStatus === "follow_up") {
-                  setIsModalOpen(true) // Open the modal
+                  setIsModalOpen(true)
                 } else {
-                  setStatus(newStatus) // Update status immediately for others
+                  setStatus(newStatus)
                 }
               }}
             >
               <SelectTrigger>
-                {/* Placeholder is shown when value is "" */}
                 <SelectValue placeholder="Select a New Status..." /> 
               </SelectTrigger>
               <SelectContent>
@@ -506,7 +457,6 @@ export function LeadStatusUpdater({
             </Select>
           </div>
           
-          {/* Display a reminder/button if 'follow_up' is selected */}
           {status === "follow_up" && (
             <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
               <div className="flex items-center justify-between">
@@ -525,7 +475,6 @@ export function LeadStatusUpdater({
           )}
 
 
-          {/* New field for Loan Amount */}
           <div className="space-y-2">
             <label className="text-sm font-medium flex items-center gap-2">
               <IndianRupee className="h-4 w-4" />
@@ -543,7 +492,6 @@ export function LeadStatusUpdater({
             />
           </div>
 
-          {/* MODIFIED: Call Duration input for Minutes and Seconds */}
           {isCallInitiated && (
             <div className="space-y-2">
               <label className="text-sm font-medium flex items-center gap-2">
@@ -580,14 +528,12 @@ export function LeadStatusUpdater({
                 </div>
               </div>
               
-              {/* Display total duration in seconds */}
               {callDuration !== null && callDuration > 0 && status !== 'nr' && (
                   <div className="text-sm text-gray-600 mt-1">
                       Total Duration: {callDuration} seconds
                   </div>
               )}
               
-              {/* Validation/Timer display */}
               {isInvalidCallDuration && (
                  <p className="text-sm text-red-500">Call Duration must be greater than 0 for the selected status.</p>
               )}
@@ -601,10 +547,8 @@ export function LeadStatusUpdater({
               )}
             </div>
           )}
-          {/* END MODIFIED CALL DURATION INPUT */}
 
 
-          {/* General remarks/notes field - always visible */}
           <div className="space-y-2">
             <label className="text-sm font-medium">Remarks/Notes:</label>
             <Textarea
@@ -615,29 +559,77 @@ export function LeadStatusUpdater({
             />
           </div>
 
-          {/* Note field for Not Eligible status */}
-          {showNoteField && (
-            <div className="space-y-2">
-              <label className="text-sm font-medium">
-                Reason for Not Eligible: <span className="text-red-500">* (Required)</span>
+          {/* NEW: Updated UI for 'Not Eligible' selection */}
+          {status === "not_eligible" && (
+            <div className="space-y-3 p-4 bg-red-50 border border-red-100 rounded-md">
+              <label className="text-sm font-medium text-red-900 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4" />
+                Reason for Ineligibility: <span className="text-red-600">*</span>
               </label>
-              <Textarea
-                placeholder="Please specify the reason why this lead is not eligible..."
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                rows={3}
-                // Apply a subtle error border if validation fails
-                className={cn(isFormInvalid && "border-red-500")} 
-              />
+              
+              <div className="flex flex-col gap-2 mt-2">
+                {/* Option 1: Salary in CASH */}
+                <label className="flex items-center space-x-2 cursor-pointer p-2 hover:bg-red-100/50 rounded transition-colors">
+                  <input 
+                    type="radio" 
+                    name="notEligibleReason" 
+                    value="Salary in CASH"
+                    checked={notEligibleReason === "Salary in CASH"}
+                    onChange={() => handleNotEligibleReasonChange("Salary in CASH")}
+                    className="w-4 h-4 text-red-600 border-gray-300 focus:ring-red-500"
+                  />
+                  <span className="text-sm text-gray-700">Salary in CASH</span>
+                </label>
+
+                {/* Option 2: Low CIBIL Score */}
+                <label className="flex items-center space-x-2 cursor-pointer p-2 hover:bg-red-100/50 rounded transition-colors">
+                  <input 
+                    type="radio" 
+                    name="notEligibleReason" 
+                    value="Low CIBIL Score"
+                    checked={notEligibleReason === "Low CIBIL Score"}
+                    onChange={() => handleNotEligibleReasonChange("Low CIBIL Score")}
+                    className="w-4 h-4 text-red-600 border-gray-300 focus:ring-red-500"
+                  />
+                  <span className="text-sm text-gray-700">Low CIBIL Score</span>
+                </label>
+
+                {/* Option 3: Other */}
+                <label className="flex items-center space-x-2 cursor-pointer p-2 hover:bg-red-100/50 rounded transition-colors">
+                  <input 
+                    type="radio" 
+                    name="notEligibleReason" 
+                    value="Other"
+                    checked={notEligibleReason === "Other"}
+                    onChange={() => handleNotEligibleReasonChange("Other")}
+                    className="w-4 h-4 text-red-600 border-gray-300 focus:ring-red-500"
+                  />
+                  <span className="text-sm text-gray-700">Other</span>
+                </label>
+              </div>
+
+              {/* Conditional Input for 'Other' */}
+              {notEligibleReason === "Other" && (
+                <div className="mt-2 animate-in fade-in slide-in-from-top-1">
+                   <Textarea
+                    placeholder="Please specify the reason..."
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    rows={2}
+                    className={cn("bg-white", isFormInvalid && "border-red-500")} 
+                  />
+                </div>
+              )}
+
                {isFormInvalid && (
-                  <p className="text-sm text-red-500">This field is mandatory for 'Not Eligible' status.</p>
+                  <p className="text-xs text-red-500 mt-1 font-medium">Please select a reason or specify details.</p>
                 )}
             </div>
           )}
 
           <Button 
             onClick={handleStatusUpdate} 
-            disabled={isButtonDisabled} // Used comprehensive disabled check
+            disabled={isButtonDisabled} 
             className="w-full"
           >
             {isUpdating ? "Updating..." : isCallInitiated ? "Log Call & Update Status" : "Update Status"}
@@ -649,18 +641,15 @@ export function LeadStatusUpdater({
           )}
         </div>
       </CardContent>
-      {/* NEW: ScheduleFollowUpModal Integration */}
       <ScheduleFollowUpModal
         open={isModalOpen}
         onOpenChange={(open) => {
           setIsModalOpen(open)
-          // If modal is closed, status reverts to "" (unselected)
           if (!open) {
             setStatus("") 
           }
         }}
         onScheduleSuccess={() => {
-          // If scheduling is successful, update the lead status in the leads table
           updateLeadStatusToFollowUp() 
         }}
         defaultLeadId={leadId}
