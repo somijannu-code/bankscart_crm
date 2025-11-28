@@ -1520,6 +1520,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     {visibleColumns.source && <TableHead>Source</TableHead>}
                     {visibleColumns.assignedTo && <TableHead>Assigned To</TableHead>}
                     {visibleColumns.tags && <TableHead>Tags</TableHead>}
+                    {visibleColumns.notes && <TableHead>Notes</TableHead>}                  
                     {visibleColumns.actions && <TableHead className="w-20">Actions</TableHead>}
                 </TableRow>
                 </TableHeader>
