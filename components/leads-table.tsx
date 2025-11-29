@@ -234,7 +234,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     status: true,
     notes: false,// Added
     priority: false,
-    score: false,
+    score: true,
     created: true,
     lastContacted: true,
     loanAmount: true,
@@ -1401,11 +1401,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
                 {/* Bulk Add Tags */}
                 <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm">
-                            <Tag className="h-4 w-4 mr-2" />
-                            Add Tag
-                        </Button>
+                    <DropdownMenuTrigger className={triggerButtonClass}>
+                        <Tag className="h-4 w-4 mr-2" />
+                        Add Tag
                     </DropdownMenuTrigger>
                     <DropdownMenuContent className="w-56">
                         <DropdownMenuLabel>Add Tag to Selected</DropdownMenuLabel>
