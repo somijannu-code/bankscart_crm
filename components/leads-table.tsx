@@ -231,18 +231,18 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     name: true,
     contact: true,
     company: false, // Added
+    notes: false,// Added
     status: true,
     priority: false,
-    score: true,
+    score: false,
     created: true,
     lastContacted: true,
     loanAmount: true,
     loanType: false, // Added (default hidden)
     source: false,   // Added (default hidden)
     tags: false,
-    notes: false,// Added
     assignedTo: true,
-    actions: true
+    actions: false
   })
 
   const [currentPage, setCurrentPage] = useState(1)
@@ -1517,11 +1517,11 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                         </div>
                     </TableHead>
                     )}
+                    {visibleColumns.notes && <TableHead>Notes</TableHead>}                  
                     {visibleColumns.loanType && <TableHead>Loan Type</TableHead>}
                     {visibleColumns.source && <TableHead>Source</TableHead>}
                     {visibleColumns.assignedTo && <TableHead>Assigned To</TableHead>}
                     {visibleColumns.tags && <TableHead>Tags</TableHead>}
-                    {visibleColumns.notes && <TableHead>Notes</TableHead>}                  
                     {visibleColumns.actions && <TableHead className="w-20">Actions</TableHead>}
                 </TableRow>
                 </TableHeader>
