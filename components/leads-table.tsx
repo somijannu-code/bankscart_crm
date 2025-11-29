@@ -89,7 +89,7 @@ const parseCSV = (text: string) => {
       else if (h.includes('company')) entry.company = values[i];
       else if (h.includes('source')) entry.source = values[i];
       else if (h.includes('city')) entry.city = values[i];
-      else if (h.includes('notes')) entry.notes = values[i]; // Added notes support in CSV
+      else if (h.includes('notes')) entry.notes = values[i];
     });
     entry.status = entry.status || 'new';
     entry.priority = entry.priority || 'medium';
@@ -120,7 +120,7 @@ interface Lead {
   follow_up_date: string | null
   lead_score?: number
   tags?: string[]
-  notes?: string // Added notes field
+  notes?: string
 }
 
 interface SavedFilter {
@@ -228,13 +228,13 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [sortField, setSortField] = useState<string>("created_at")
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
   
-  // Columns Visibility - Updated defaults for Notes and Tags
+  // Columns Visibility
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
     name: true,
     contact: true,
     company: false, 
     status: true,
-    notes: true, // Defaulting to TRUE
+    notes: true,
     priority: false,
     score: true,
     created: true,
@@ -242,7 +242,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     loanAmount: true,
     loanType: false, 
     source: false,   
-    tags: true, // Defaulting to TRUE
+    tags: true, 
     assignedTo: true,
     actions: false
   })
@@ -372,7 +372,8 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     return leads.map(lead => ({
       ...lead,
       lead_score: calculateLeadScore(lead),
-      tags: lead.tags || []
+      // --- CRITICAL FIX: Ensure tags is always an array ---
+      tags: Array.isArray(lead.tags) ? lead.tags : [] 
     }))
   }, [leads])
 
@@ -1744,7 +1745,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                         </TableCell>
                         )}
 
-                        {/* --- FIXED: Added Missing Notes Cell --- */}
                         {visibleColumns.notes && (
                             <TableCell>
                                 <InlineEditableCell 
@@ -1755,7 +1755,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                                 />
                             </TableCell>
                         )}
-                        {/* -------------------------------------- */}
 
                         {visibleColumns.loanType && (
                         <TableCell>
@@ -1785,12 +1784,13 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                         {visibleColumns.tags && (
                         <TableCell>
                             <div className="flex flex-wrap gap-1">
-                            {(lead.tags || []).slice(0, 2).map((tag) => (
+                            {/* --- ADDED SAFETY CHECK HERE TOO --- */}
+                            {(Array.isArray(lead.tags) ? lead.tags : []).slice(0, 2).map((tag) => (
                                 <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
                             ))}
-                            {(lead.tags || []).length > 2 && (
+                            {(Array.isArray(lead.tags) ? lead.tags : []).length > 2 && (
                                 <Badge variant="outline" className="text-xs">
-                                +{(lead.tags || []).length - 2}
+                                +{(lead.tags?.length || 0) - 2}
                                 </Badge>
                             )}
                             </div>
