@@ -231,8 +231,8 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     name: true,
     contact: true,
     company: false, // Added
-    notes: false,// Added
     status: true,
+    notes: false,// Added
     priority: false,
     score: false,
     created: true,
@@ -254,6 +254,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [lastCallTo, setLastCallTo] = useState("")
   const [bulkAssignTo, setBulkAssignTo] = useState<string[]>([])
   const [bulkStatus, setBulkStatus] = useState<string>("")
+  const [bulkTagInput, setBulkTagInput] = useState("") // New state for custom bulk tag
   const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([])
   const [filterName, setFilterName] = useState("")
   const [showSaveFilterDialog, setShowSaveFilterDialog] = useState(false)
@@ -668,7 +669,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   }
 
   const handleBulkAddTag = async (tag: string) => {
-    if (selectedLeads.length === 0) return
+    if (selectedLeads.length === 0 || !tag.trim()) return
 
     try {
       const updates = selectedLeads.map(async (leadId) => {
@@ -691,9 +692,34 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       if (errors.length > 0) throw new Error(`Failed to add tag to ${errors.length} leads`)
 
       setSelectedLeads([])
+      setBulkTagInput("")
       window.location.reload()
     } catch (error) {
       console.error("Error adding tag:", error)
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedLeads.length === 0) return
+    
+    if (!confirm(`Are you sure you want to delete ${selectedLeads.length} leads? This action cannot be undone.`)) {
+        return;
+    }
+
+    try {
+        const { error } = await supabase
+            .from('leads')
+            .delete()
+            .in('id', selectedLeads)
+
+        if (error) throw error
+
+        setSelectedLeads([])
+        setSuccessMessage(`Successfully deleted ${selectedLeads.length} leads.`)
+        window.location.reload()
+    } catch (error) {
+        console.error("Error deleting leads:", error)
+        setErrorMessage("Failed to delete leads")
     }
   }
 
@@ -1345,7 +1371,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               <div className="flex flex-wrap gap-2">
                 {/* Bulk Status Update */}
                 <Select value={bulkStatus} onValueChange={setBulkStatus}>
-                  <SelectTrigger className="w-[180px]">
+                  <SelectTrigger className="w-[160px]">
                     <SelectValue placeholder="Update Status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1368,8 +1394,46 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                   onClick={handleBulkStatusUpdate}
                   disabled={!bulkStatus}
                 >
-                  Update Status
+                  Update
                 </Button>
+
+                <Separator orientation="vertical" className="h-8 mx-2" />
+
+                {/* Bulk Add Tags */}
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm">
+                            <Tag className="h-4 w-4 mr-2" />
+                            Add Tag
+                        </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-56">
+                        <DropdownMenuLabel>Add Tag to Selected</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        <div className="p-2 flex gap-2">
+                             <Input 
+                                placeholder="Custom Tag" 
+                                value={bulkTagInput}
+                                onChange={(e) => setBulkTagInput(e.target.value)}
+                                className="h-8 text-xs"
+                             />
+                             <Button 
+                                size="sm" 
+                                className="h-8 px-2"
+                                onClick={() => handleBulkAddTag(bulkTagInput)}
+                                disabled={!bulkTagInput.trim()}
+                             >
+                                <Plus className="h-3 w-3" />
+                             </Button>
+                        </div>
+                        <DropdownMenuSeparator />
+                        {availableTags.map(tag => (
+                            <DropdownMenuItem key={tag} onClick={() => handleBulkAddTag(tag)}>
+                                {tag}
+                            </DropdownMenuItem>
+                        ))}
+                    </DropdownMenuContent>
+                </DropdownMenu>
 
                 {/* Manual Bulk Assignment with Status Dots */}
                 <DropdownMenu>
@@ -1437,13 +1501,25 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     : ''}
                 </Button>
 
+                <div className="flex-1" />
+
+                {/* Bulk Delete Button */}
                 <Button 
-                  variant="outline" 
+                  variant="destructive" 
+                  size="sm" 
+                  onClick={handleBulkDelete}
+                  className="ml-auto"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete
+                </Button>
+
+                <Button 
+                  variant="ghost" 
                   size="sm" 
                   onClick={() => setSelectedLeads([])}
                 >
-                  <X className="h-4 w-4 mr-2" />
-                  Clear
+                  <X className="h-4 w-4" />
                 </Button>
               </div>
             </div>
