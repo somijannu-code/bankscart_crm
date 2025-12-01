@@ -38,7 +38,7 @@ export async function POST(request: Request) {
 
     // Define who is allowed to CREATE users
     // We allow Super Admins, Tenant Admins, and Team Leaders to create users
-    const creators = ["super_admin", "tenant_admin", "team_leader"];
+    const creators = ["super_admin", "tenant_admin"];
     
     if (!adminCheck?.role || !creators.includes(adminCheck.role)) {
       return NextResponse.json({ error: "Forbidden: You do not have permission to create users." }, { status: 403 });
