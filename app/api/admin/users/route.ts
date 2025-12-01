@@ -2,23 +2,26 @@ import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
-// Initialize the Admin Client (Bypasses RLS)
-// We use supabase-js directly here because we need the SERVICE_ROLE_KEY
-// to create users without logging out the current admin.
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!, // MAKE SURE THIS IS IN YOUR .ENV FILE
-  {
+// Helper to get Admin Client lazily
+function getAdminClient() {
+  const adminUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const adminKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!adminUrl || !adminKey) {
+    throw new Error("Missing Supabase Admin Keys");
+  }
+
+  return createClient(adminUrl, adminKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
-  }
-);
+  });
+}
 
 export async function POST(request: Request) {
   try {
-    // 1. Check if the requester is actually an Admin
+    // 1. AUTH CHECK: Who is trying to create a user?
     const supabase = await createServerClient();
     const { data: { user: currentUser }, error: authError } = await supabase.auth.getUser();
 
@@ -26,32 +29,50 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check user role in public.users table
+    // Get the creator's role from the DB
     const { data: adminCheck } = await supabase
       .from("users")
       .select("role")
       .eq("id", currentUser.id)
       .single();
 
-    // NEW CODE (Updated to include 'tenant_admin')
-    const allowedRoles = ["admin", "super_admin", "tenant_admin"];
+    // Define who is allowed to CREATE users
+    // We allow Super Admins, Tenant Admins, and Team Leaders to create users
+    const creators = ["super_admin", "tenant_admin", "team_leader"];
     
-    if (!allowedRoles.includes(adminCheck?.role)) {
-      return NextResponse.json({ error: "Forbidden: Admins only" }, { status: 403 });
+    if (!adminCheck?.role || !creators.includes(adminCheck.role)) {
+      return NextResponse.json({ error: "Forbidden: You do not have permission to create users." }, { status: 403 });
     }
 
-    // 2. Parse the body data
+    // 2. PARSE DATA
     const body = await request.json();
+    console.log("👉 Incoming Data:", body); // Debug log
+
     const { email, password, full_name, phone, role, manager_id } = body;
 
-    // 3. Create the user in Supabase Auth (using Service Role)
+    // 3. VALIDATE ROLE
+    // We strictly check against your ALLOWED database roles
+    const validRoles = [
+      'super_admin', 
+      'tenant_admin', 
+      'team_leader', 
+      'telecaller', 
+      'kyc_team', 
+      'marketing_manager'
+    ];
+
+    // If the requested role isn't valid, fallback to telecaller or throw error
+    const roleToSave = validRoles.includes(role) ? role : "telecaller";
+
+    console.log(`👉 Creating user '${full_name}' with role: '${roleToSave}'`);
+
+    // 4. CREATE USER (Auth System)
+    const supabaseAdmin = getAdminClient();
     const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
       email: email,
       password: password,
-      email_confirm: true, // Auto-confirm email so they can login immediately
-      user_metadata: {
-        full_name: full_name,
-      },
+      email_confirm: true,
+      user_metadata: { full_name: full_name, role: roleToSave },
     });
 
     if (createError) {
@@ -59,15 +80,11 @@ export async function POST(request: Request) {
     }
 
     if (!newUser.user) {
-      return NextResponse.json({ error: "Failed to create user object" }, { status: 500 });
+      return NextResponse.json({ error: "User creation failed" }, { status: 500 });
     }
 
-    // 4. Update the public.users table with the extra details (Phone, Role, Manager)
-    // Note: A trigger usually creates the row, so we UPDATE it. 
-    // If you don't have a trigger, change this to .insert()
-    
-    // We wait a brief moment to ensure the trigger (if any) has run
-    // But to be safe, let's try an upsert (insert or update)
+    // 5. UPDATE USER PROFILE (Database)
+    // We deliberately UPSERT to ensure the role is set correctly
     const { error: profileError } = await supabaseAdmin
       .from("users")
       .upsert({
@@ -75,18 +92,16 @@ export async function POST(request: Request) {
         email: email,
         full_name: full_name,
         phone: phone,
-        role: role || "telecaller",
+        role: roleToSave, // <--- This now matches your DB constraint perfectly
         manager_id: manager_id,
+        // tenant_id: adminCheck.tenant_id // Optional: If you use tenant_id, you should copy it from the creator here
         created_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
+      });
 
     if (profileError) {
-      console.error("Profile update error:", profileError);
-      // We don't fail the whole request since Auth user is created, but we warn
+      console.error("Profile Error:", profileError);
       return NextResponse.json({ 
-        message: "User created but profile update failed", 
+        message: "User created in Auth, but Profile update failed.", 
         details: profileError.message 
       }, { status: 201 });
     }
@@ -94,7 +109,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, user: newUser.user }, { status: 200 });
 
   } catch (error: any) {
-    console.error("API Error:", error);
+    console.error("Server Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
