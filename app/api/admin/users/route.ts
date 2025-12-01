@@ -33,7 +33,10 @@ export async function POST(request: Request) {
       .eq("id", currentUser.id)
       .single();
 
-    if (adminCheck?.role !== "admin" && adminCheck?.role !== "super_admin") {
+    // NEW CODE (Updated to include 'tenant_admin')
+    const allowedRoles = ["admin", "super_admin", "tenant_admin"];
+    
+    if (!allowedRoles.includes(adminCheck?.role)) {
       return NextResponse.json({ error: "Forbidden: Admins only" }, { status: 403 });
     }
 
