@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Users, UserPlus, Mail, Phone, AlertCircle, Shield, ShieldOff } from "lucide-react"
+import { Users, UserPlus, Mail, Phone, AlertCircle, Shield, ShieldOff, Edit } from "lucide-react"
 import Link from "next/link"
 
 // Define type for attendance record
@@ -19,12 +19,11 @@ export default async function UsersPage() {
   let error = null
   
   try {
-    // Try a simple query first
     const { data: userData, error: userError } = await supabase
       .from("users")
-      .select("id, email, full_name, role, phone, is_active, created_at")
+      .select("id, email, full_name, role, phone, is_active, created_at, manager_id")
       .order("created_at", { ascending: false })
-      .limit(10) // Limit results for safety
+      .limit(100) 
     
     if (userError) {
       console.error("Error fetching users:", userError)
@@ -34,11 +33,11 @@ export default async function UsersPage() {
     }
   } catch (err) {
     console.error("Exception when fetching users:", err)
-    error = err
+    error = err as any
   }
 
   // If there's an error related to RLS, we need to handle it differently
-  if (error && error.message.includes("infinite recursion")) {
+  if (error && error.message?.includes("infinite recursion")) {
     return (
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between">
@@ -46,7 +45,7 @@ export default async function UsersPage() {
             <h1 className="text-3xl font-bold text-gray-900">Telecallers</h1>
             <p className="text-gray-600 mt-1">Manage your team members</p>
           </div>
-          <Link href="/auth/signup">
+          <Link href="/admin/users/new">
             <Button className="flex items-center gap-2">
               <UserPlus className="h-4 w-4" />
               Add New User
@@ -60,13 +59,13 @@ export default async function UsersPage() {
               <AlertCircle className="h-12 w-12 mb-4" />
               <h3 className="text-lg font-medium mb-2">RLS Policy Configuration Issue</h3>
               <p className="text-sm text-center max-w-md mb-4">
-                There's an infinite recursion issue in your Row Level Security policies for the users table.
+                There is an infinite recursion issue in your Row Level Security policies for the users table.
               </p>
               <div className="bg-muted p-4 rounded-md text-sm max-w-md">
                 <p className="mb-2">To fix this, you need to:</p>
                 <ol className="list-decimal pl-5 space-y-1">
                   <li>Disable RLS on the users table temporarily</li>
-                  <li>Fix the recursive policy</li>
+                  <li>Fix the recursive policy (use the database function provided)</li>
                   <li>Re-enable RLS with proper policies</li>
                 </ol>
               </div>
@@ -85,7 +84,7 @@ export default async function UsersPage() {
             <h1 className="text-3xl font-bold text-gray-900">Telecallers</h1>
             <p className="text-gray-600 mt-1">Manage your team members</p>
           </div>
-          <Link href="/auth/signup">
+          <Link href="/admin/users/new">
             <Button className="flex items-center gap-2">
               <UserPlus className="h-4 w-4" />
               Add New User
@@ -144,7 +143,7 @@ export default async function UsersPage() {
           <span className="text-sm text-muted-foreground">
             {users.length} {users.length === 1 ? 'user' : 'users'}
           </span>
-          <Link href="/auth/signup">
+          <Link href="/admin/users/new">
             <Button className="flex items-center gap-2">
               <UserPlus className="h-4 w-4" />
               Add New User
@@ -211,6 +210,14 @@ export default async function UsersPage() {
                         </span>
                       }
                     </Badge>
+                    
+                    {/* EDIT BUTTON - Links to the Edit User Page */}
+                    <Link href={`/admin/users/${user.id}/edit`}>
+                      <Button variant="ghost" size="sm">
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                    </Link>
+
                   </div>
                 </div>
               ))}
@@ -220,9 +227,9 @@ export default async function UsersPage() {
               <Users className="h-12 w-12 mb-4 opacity-50" />
               <h3 className="text-lg font-medium mb-2">No users found</h3>
               <p className="text-sm mb-4">
-                There are no telecallers in the system yet.
+                There are no telecallers in your team yet.
               </p>
-              <Link href="/auth/signup">
+              <Link href="/admin/users/new">
                 <Button className="flex items-center gap-2">
                   <UserPlus className="h-4 w-4" />
                   Add Your First User
