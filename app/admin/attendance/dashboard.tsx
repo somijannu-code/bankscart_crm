@@ -5,7 +5,7 @@ import { format, startOfMonth, endOfMonth, subMonths, addMonths, parseISO, isSam
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
-  Calendar as CalendarIcon, // Renamed to avoid conflict
+  Calendar as CalendarIcon, // Renamed icon to avoid conflict
   Users, 
   Clock, 
   Download, 
@@ -21,8 +21,7 @@ import {
   UserCheck,
   Pause,
   Monitor,
-  LogOut, // Added for Check-out
-  PlayCircle // Added for Resume/End Break
+  LogOut,
 } from "lucide-react";
 import { 
   Select, 
@@ -47,28 +46,28 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu";
-import { Calendar } from "@/components/ui/calendar"; // UI Component
+import { Calendar } from "@/components/ui/calendar"; // Ensure this component exists
 import { 
   Popover, 
   PopoverContent, 
   PopoverTrigger 
-} from "@/components/ui/popover"; // UI Component
+} from "@/components/ui/popover"; // Ensure this component exists
 import { createClient } from "@/lib/supabase/client";
 import { User, AttendanceRecord } from "@/lib/database-schema";
 
-// Helper type for the unified feed
 type ActivityItem = {
   id: string;
   type: 'check-in' | 'check-out' | 'break-start' | 'break-end';
   user_name: string;
   time: string;
-  timestamp: number; // for sorting
+  timestamp: number;
 };
 
 export function AdminAttendanceDashboard() {
+  // Initialize with today or a specific date if needed
   const [dateRange, setDateRange] = useState<{ start: Date; end: Date }>({
-    start: startOfMonth(new Date()),
-    end: endOfMonth(new Date())
+    start: new Date(), // Default to today
+    end: new Date()
   });
   const [view, setView] = useState<'daily' | 'monthly'>('daily');
   const [users, setUsers] = useState<User[]>([]);
@@ -77,7 +76,6 @@ export function AdminAttendanceDashboard() {
   const [searchTerm, setSearchTerm] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("all");
   
-  // New state for the unified activity feed
   const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([]);
   const [activeEmployees, setActiveEmployees] = useState<number>(0);
   const [employeesOnBreak, setEmployeesOnBreak] = useState<number>(0);
@@ -87,7 +85,6 @@ export function AdminAttendanceDashboard() {
   useEffect(() => {
     loadData();
     
-    // Set up real-time subscription
     const channel = supabase
       .channel('attendance-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
@@ -114,32 +111,35 @@ export function AdminAttendanceDashboard() {
       setUsers(usersData || []);
 
       // 2. Fetch Attendance Data for Selected Range
+      const startDateStr = format(dateRange.start, "yyyy-MM-dd");
+      const endDateStr = format(dateRange.end, "yyyy-MM-dd");
+
       const { data: attendanceData, error: attendanceError } = await supabase
         .from("attendance")
         .select(`*, user:users!attendance_user_id_fkey(full_name, email, role, department)`)
-        .gte("date", format(dateRange.start, "yyyy-MM-dd"))
-        .lte("date", format(dateRange.end, "yyyy-MM-dd"))
+        .gte("date", startDateStr)
+        .lte("date", endDateStr)
         .order("date", { ascending: false });
 
       if (attendanceError) throw attendanceError;
       setAttendanceData(attendanceData || []);
 
-      // 3. Process Live Activity Feed (Today's Data Only)
-      const todayStr = format(new Date(), "yyyy-MM-dd");
+      // 3. Process Activity Feed (BASED ON SELECTED DATE, not just "Today")
+      // If viewing daily, show feed for that day. If monthly, show for the latest day in range.
+      const feedDateStr = view === 'daily' ? startDateStr : format(new Date(), "yyyy-MM-dd");
       
-      // Fetch specifically for "Today" to build the live feed
-      const { data: todayData } = await supabase
+      const { data: feedData } = await supabase
         .from("attendance")
         .select(`*, user:users!attendance_user_id_fkey(full_name)`)
-        .eq("date", todayStr);
+        .eq("date", feedDateStr);
 
-      if (todayData) {
+      if (feedData) {
         let feed: ActivityItem[] = [];
         let activeCount = 0;
         let breakCount = 0;
 
-        todayData.forEach((record) => {
-          // Track counts
+        feedData.forEach((record) => {
+          // Track counts (snapshot for that day)
           if (record.check_in && !record.check_out) activeCount++;
           if (record.on_break) breakCount++;
 
@@ -165,8 +165,7 @@ export function AdminAttendanceDashboard() {
             });
           }
 
-          // Add Break Event (If strictly tracking break start/end requires separate columns)
-          // Assuming 'updated_at' reflects the last status change if on_break is true
+          // Add Break Events (Simulated based on status/timestamps)
           if (record.on_break && record.updated_at) {
              feed.push({
               id: `${record.id}-break-start`,
@@ -231,29 +230,26 @@ export function AdminAttendanceDashboard() {
   };
 
   const navigateDateRange = (direction: 'prev' | 'next') => {
+    const newDate = new Date(dateRange.start);
+    
     if (view === 'daily') {
-      const newDate = direction === 'prev' 
-        ? new Date(dateRange.start.setDate(dateRange.start.getDate() - 1))
-        : new Date(dateRange.start.setDate(dateRange.start.getDate() + 1));
-      
+      newDate.setDate(newDate.getDate() + (direction === 'next' ? 1 : -1));
       setDateRange({ start: newDate, end: newDate });
     } else {
       const newStart = direction === 'prev' 
         ? subMonths(dateRange.start, 1)
         : addMonths(dateRange.start, 1);
-      
       setDateRange({ start: startOfMonth(newStart), end: endOfMonth(newStart) });
     }
   };
 
   // Stats calculation
   const getStats = () => {
-    const today = format(new Date(), "yyyy-MM-dd");
-    const todayRecords = attendanceData.filter(record => record.date === today);
+    // Filter attendance data to match the view's date range
     return {
-      present: todayRecords.filter(r => r.status === "present" || r.status === "late").length,
-      absent: todayRecords.filter(r => r.status === "absent").length,
-      late: todayRecords.filter(r => r.status === "late").length
+      present: attendanceData.filter(r => r.status === "present" || r.status === "late").length,
+      absent: attendanceData.filter(r => r.status === "absent").length,
+      late: attendanceData.filter(r => r.status === "late").length
     };
   };
   const stats = getStats();
@@ -277,12 +273,12 @@ export function AdminAttendanceDashboard() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Team Attendance Dashboard</h1>
           <p className="text-gray-600 mt-1">Monitor and manage team attendance</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Select value={view} onValueChange={(v) => setView(v as 'daily' | 'monthly')}>
             <SelectTrigger className="w-32">
               <SelectValue />
@@ -297,7 +293,7 @@ export function AdminAttendanceDashboard() {
             Previous
           </Button>
           
-          {/* FIXED: Interactive Date Picker Popover */}
+          {/* Calendar Popover - Ensure components are installed */}
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="outline" className={!dateRange ? "text-muted-foreground" : ""}>
@@ -307,7 +303,7 @@ export function AdminAttendanceDashboard() {
                   : format(dateRange.start, "MMMM yyyy")}
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
+            <PopoverContent className="w-auto p-0" align="end">
               <Calendar
                 mode="single"
                 selected={dateRange.start}
@@ -345,11 +341,10 @@ export function AdminAttendanceDashboard() {
         </div>
       </div>
 
-      {/* Real-Time Status Section */}
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Statistics */}
-        <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-4 gap-4">
-          {/* Total Team */}
+        {/* Statistics Grid */}
+        <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Team</CardTitle>
@@ -357,61 +352,53 @@ export function AdminAttendanceDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{users.length}</div>
-              <p className="text-xs text-muted-foreground">Active team members</p>
+              <p className="text-xs text-muted-foreground">Active members</p>
             </CardContent>
           </Card>
 
-          {/* Present Today */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Present Today</CardTitle>
+              <CardTitle className="text-sm font-medium">Present</CardTitle>
               <CheckCircle className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-green-600">{stats.present}</div>
               <div className="flex items-center text-xs text-muted-foreground">
                 <TrendingUp className="h-3 w-3 mr-1 text-green-500" />
-                Updated just now
+                For selected date
               </div>
             </CardContent>
           </Card>
 
-          {/* Late Today */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Late Today</CardTitle>
+              <CardTitle className="text-sm font-medium">Late</CardTitle>
               <AlertCircle className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-yellow-600">{stats.late}</div>
-              <div className="flex items-center text-xs text-muted-foreground">
-                <TrendingDown className="h-3 w-3 mr-1 text-red-500" />
-                Monitor punctuality
-              </div>
+              <p className="text-xs text-muted-foreground">Arrived late</p>
             </CardContent>
           </Card>
 
-          {/* Absent Today */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Absent Today</CardTitle>
+              <CardTitle className="text-sm font-medium">Absent</CardTitle>
               <XCircle className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-red-600">{stats.absent}</div>
-              <div className="flex items-center text-xs text-muted-foreground">
-                Review leave requests
-              </div>
+              <p className="text-xs text-muted-foreground">Not checked in</p>
             </CardContent>
           </Card>
         </div>
 
-        {/* UPDATED: Live Activity Feed */}
+        {/* Activity Feed */}
         <Card className="h-full">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Activity className="h-5 w-5" />
-              Live Activity Feed
+              Activity Feed ({format(dateRange.start, "MMM dd")})
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -431,11 +418,8 @@ export function AdminAttendanceDashboard() {
                         {item.type === 'check-out' && "Checked out"}
                         {item.type === 'break-start' && "Started break"}
                         <span className="mx-1">•</span>
-                        {getTimeAgo(item.time)}
+                        {format(new Date(item.time), "hh:mm a")}
                       </p>
-                    </div>
-                    <div className="text-xs text-gray-400 whitespace-nowrap">
-                      {format(new Date(item.time), "hh:mm a")}
                     </div>
                   </div>
                 ))}
@@ -443,14 +427,14 @@ export function AdminAttendanceDashboard() {
             ) : (
               <div className="text-center py-8 text-gray-500">
                 <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No recent activity today</p>
+                <p className="text-sm">No activity recorded for this date</p>
               </div>
             )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Real-Time Status Cards */}
+      {/* Real-Time Status Cards (Snapshots) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -459,7 +443,7 @@ export function AdminAttendanceDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">{activeEmployees}</div>
-            <p className="text-xs text-muted-foreground">Active employees working now</p>
+            <p className="text-xs text-muted-foreground">Employees with active session</p>
           </CardContent>
         </Card>
 
@@ -470,7 +454,7 @@ export function AdminAttendanceDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-yellow-600">{employeesOnBreak}</div>
-            <p className="text-xs text-muted-foreground">Employees currently on break</p>
+            <p className="text-xs text-muted-foreground">Employees paused</p>
           </CardContent>
         </Card>
 
@@ -533,7 +517,7 @@ export function AdminAttendanceDashboard() {
             <TableBody>
               {filteredUsers.map(user => {
                 const userRecords = attendanceData.filter(a => a.user_id === user.id);
-                // For daily view find exact match, for monthly just take the latest or aggregate
+                // Daily view: find match. Monthly view: take latest.
                 const record = view === 'daily' 
                   ? userRecords.find(r => isSameDay(parseISO(r.date), dateRange.start))
                   : userRecords[0]; 
