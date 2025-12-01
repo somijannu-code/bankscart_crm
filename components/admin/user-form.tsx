@@ -184,8 +184,13 @@ export function UserForm({ initialData, isEditing = false }: UserFormProps) {
                 <SelectValue placeholder="Select role" />
               </SelectTrigger>
               <SelectContent>
+                {/* These values MUST match your database exactly */}
                 <SelectItem value="telecaller">Telecaller</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
+                <SelectItem value="team_leader">Team Leader</SelectItem>
+                <SelectItem value="kyc_team">KYC Team</SelectItem>
+                <SelectItem value="marketing_manager">Marketing Manager</SelectItem>
+                <SelectItem value="tenant_admin">Tenant Admin</SelectItem>
+                <SelectItem value="super_admin">Super Admin</SelectItem>
               </SelectContent>
             </Select>
           </div>
