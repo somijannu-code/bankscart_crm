@@ -38,11 +38,14 @@ export default function LoginPage() {
       const { data: userData } = await supabase.from("users").select("role").eq("email", email).single()
 
       // Redirect based on user role
-      if (userData?.role === "admin") {
+      const adminRoles = ["admin", "super_admin", "tenant_admin", "team_leader"];
+
+      if (adminRoles.includes(userData?.role)) {
         router.push("/admin")
       } else if (userData?.role === "kyc_team") {
         router.push("/kyc-team")
       } else {
+        // Default to telecaller for everyone else
         router.push("/telecaller")
       }
     } catch (error: unknown) {
