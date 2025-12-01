@@ -14,7 +14,26 @@ interface AttendanceRecord {
 export default async function UsersPage() {
   const supabase = await createClient()
 
-  // First, let's check if we can access the users table at all
+  // 1. AUTH CHECK: Determine if the current user is allowed to create new users
+  // We fetch the current user's role first
+  const { data: { user: currentUser } } = await supabase.auth.getUser()
+  
+  let canCreateUser = false
+  
+  if (currentUser) {
+    const { data: userRoleData } = await supabase
+      .from("users")
+      .select("role")
+      .eq("id", currentUser.id)
+      .single()
+      
+    // Define who is allowed to see the "Add User" button
+    // We EXCLUDE 'team_leader' from this list
+    const creators = ["super_admin", "tenant_admin", "owner", "admin"]
+    canCreateUser = creators.includes(userRoleData?.role || "")
+  }
+
+  // 2. DATA FETCHING: Get the list of users
   let users: any[] = []
   let error = null
   
@@ -36,7 +55,7 @@ export default async function UsersPage() {
     error = err as any
   }
 
-  // If there's an error related to RLS, we need to handle it differently
+  // Handle RLS Recursion Error
   if (error && error.message?.includes("infinite recursion")) {
     return (
       <div className="p-6 space-y-6">
@@ -45,12 +64,15 @@ export default async function UsersPage() {
             <h1 className="text-3xl font-bold text-gray-900">Telecallers</h1>
             <p className="text-gray-600 mt-1">Manage your team members</p>
           </div>
-          <Link href="/admin/users/new">
-            <Button className="flex items-center gap-2">
-              <UserPlus className="h-4 w-4" />
-              Add New User
-            </Button>
-          </Link>
+          {/* Only show button if allowed */}
+          {canCreateUser && (
+            <Link href="/admin/users/new">
+              <Button className="flex items-center gap-2">
+                <UserPlus className="h-4 w-4" />
+                Add New User
+              </Button>
+            </Link>
+          )}
         </div>
 
         <Card>
@@ -61,14 +83,6 @@ export default async function UsersPage() {
               <p className="text-sm text-center max-w-md mb-4">
                 There is an infinite recursion issue in your Row Level Security policies for the users table.
               </p>
-              <div className="bg-muted p-4 rounded-md text-sm max-w-md">
-                <p className="mb-2">To fix this, you need to:</p>
-                <ol className="list-decimal pl-5 space-y-1">
-                  <li>Disable RLS on the users table temporarily</li>
-                  <li>Fix the recursive policy (use the database function provided)</li>
-                  <li>Re-enable RLS with proper policies</li>
-                </ol>
-              </div>
             </div>
           </CardContent>
         </Card>
@@ -76,6 +90,7 @@ export default async function UsersPage() {
     )
   }
 
+  // Handle General Error
   if (error) {
     return (
       <div className="p-6 space-y-6">
@@ -84,12 +99,15 @@ export default async function UsersPage() {
             <h1 className="text-3xl font-bold text-gray-900">Telecallers</h1>
             <p className="text-gray-600 mt-1">Manage your team members</p>
           </div>
-          <Link href="/admin/users/new">
-            <Button className="flex items-center gap-2">
-              <UserPlus className="h-4 w-4" />
-              Add New User
-            </Button>
-          </Link>
+          {/* Only show button if allowed */}
+          {canCreateUser && (
+            <Link href="/admin/users/new">
+              <Button className="flex items-center gap-2">
+                <UserPlus className="h-4 w-4" />
+                Add New User
+              </Button>
+            </Link>
+          )}
         </div>
 
         <Card>
@@ -100,9 +118,6 @@ export default async function UsersPage() {
               <p className="text-sm text-center max-w-md">
                 We couldn't load the user list. Please check your connection and try again.
               </p>
-              <pre className="mt-4 text-xs bg-muted p-2 rounded max-w-md overflow-auto">
-                {error.message}
-              </pre>
             </div>
           </CardContent>
         </Card>
@@ -122,7 +137,6 @@ export default async function UsersPage() {
     const attendanceRecords = attendanceRecordsData as AttendanceRecord[] | null
     
     if (attendanceRecords) {
-      // Create a map of telecaller ID to checked-in status
       telecallerStatus = attendanceRecords.reduce((acc: Record<string, boolean>, record: AttendanceRecord) => {
         acc[record.user_id] = !!record.check_in
         return acc
@@ -143,12 +157,16 @@ export default async function UsersPage() {
           <span className="text-sm text-muted-foreground">
             {users.length} {users.length === 1 ? 'user' : 'users'}
           </span>
-          <Link href="/admin/users/new">
-            <Button className="flex items-center gap-2">
-              <UserPlus className="h-4 w-4" />
-              Add New User
-            </Button>
-          </Link>
+          
+          {/* CONDITIONAL RENDERING: Only show Add User button for Big Bosses */}
+          {canCreateUser && (
+            <Link href="/admin/users/new">
+              <Button className="flex items-center gap-2">
+                <UserPlus className="h-4 w-4" />
+                Add New User
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -212,6 +230,8 @@ export default async function UsersPage() {
                     </Badge>
                     
                     {/* EDIT BUTTON - Links to the Edit User Page */}
+                    {/* Assuming Team Leaders CAN edit their existing team members, we keep this. 
+                        If you want to hide this too, wrap it in {canCreateUser && (...)} */}
                     <Link href={`/admin/users/${user.id}/edit`}>
                       <Button variant="ghost" size="sm">
                         <Edit className="h-4 w-4" />
@@ -229,12 +249,16 @@ export default async function UsersPage() {
               <p className="text-sm mb-4">
                 There are no telecallers in your team yet.
               </p>
-              <Link href="/admin/users/new">
-                <Button className="flex items-center gap-2">
-                  <UserPlus className="h-4 w-4" />
-                  Add Your First User
-                </Button>
-              </Link>
+              
+              {/* Only show button if allowed */}
+              {canCreateUser && (
+                <Link href="/admin/users/new">
+                  <Button className="flex items-center gap-2">
+                    <UserPlus className="h-4 w-4" />
+                    Add Your First User
+                  </Button>
+                </Link>
+              )}
             </div>
           )}
         </CardContent>
