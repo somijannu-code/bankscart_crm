@@ -1,8 +1,6 @@
-// components/auth-guard.tsx 
 "use client"
 
 import type React from "react"
-
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
@@ -21,6 +19,7 @@ export function AuthGuard({ children, requiredRole }: AuthGuardProps) {
   useEffect(() => {
     const checkAuth = async () => {
       try {
+        // 1. Get the Auth User
         const {
           data: { user },
         } = await supabase.auth.getUser()
@@ -30,21 +29,42 @@ export function AuthGuard({ children, requiredRole }: AuthGuardProps) {
           return
         }
 
-        if (requiredRole) {
-          const userRole = user.user_metadata?.role || user.app_metadata?.role || "telecaller"
+        // 2. Fetch the REAL role from the public.users table
+        // (We do this because user_metadata might be stale if you edited the DB directly)
+        const { data: userData, error } = await supabase
+          .from("users")
+          .select("role")
+          .eq("id", user.id)
+          .single()
 
-          if (userRole !== requiredRole) {
-            // Redirect based on actual role
-            if (userRole === "admin") {
-              router.push("/admin")
-            } else {
+        const userRole = userData?.role || "telecaller"
+
+        // 3. Define Access Rights
+        // These are the roles allowed to access the "Admin" dashboard
+        const adminAccessRoles = ["admin", "super_admin", "tenant_admin", "team_leader"]
+
+        if (requiredRole) {
+          // SCENARIO: Accessing Admin Pages
+          if (requiredRole === "admin") {
+            // Check if the user has ANY of the admin-level roles
+            const hasAdminAccess = adminAccessRoles.includes(userRole)
+            
+            if (!hasAdminAccess) {
+              console.log(`User role '${userRole}' not allowed in Admin area. Redirecting to telecaller.`)
               router.push("/telecaller")
+              return
             }
-            return
+          } 
+          // SCENARIO: Accessing Telecaller Pages (Strict check usually not needed, but good for safety)
+          else if (requiredRole === "telecaller") {
+             // Usually admins can see everything, but if you want to restrict:
+             // if (adminAccessRoles.includes(userRole)) { router.push("/admin"); return; }
           }
         }
 
+        // If we passed the checks, authorized!
         setIsAuthorized(true)
+
       } catch (error) {
         console.error("Auth check failed:", error)
         router.push("/auth/login")
