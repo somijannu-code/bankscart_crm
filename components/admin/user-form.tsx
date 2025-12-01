@@ -44,10 +44,14 @@ export function UserForm({ initialData, isEditing = false }: UserFormProps) {
       const { data, error } = await supabase
         .from("users")
         .select("id, full_name")
-        .eq("role", "admin")
+        .in("role", ["admin", "tenant_admin", "team_leader", "super_admin"])
+        .eq("is_active", true) // Optional: Only show active managers
+        .order("full_name", { ascending: true }) // Sort A-Z for easier finding
       
       if (data) {
         setAdmins(data)
+      } else if (error) {
+        console.error("Error fetching managers:", error)
       }
     }
     
