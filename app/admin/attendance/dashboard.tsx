@@ -22,6 +22,7 @@ import {
   Pause,
   Monitor,
   LogOut,
+  Globe // Added Globe icon for location
 } from "lucide-react";
 import { 
   Select, 
@@ -55,12 +56,15 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { User, AttendanceRecord } from "@/lib/database-schema";
 
+// Updated ActivityItem to include tracking info
 type ActivityItem = {
   id: string;
   type: 'check-in' | 'check-out' | 'break-start' | 'break-end';
   user_name: string;
   time: string;
   timestamp: number;
+  location?: string | null; // Added location
+  ip?: string | null;       // Added IP
 };
 
 export function AdminAttendanceDashboard() {
@@ -96,17 +100,12 @@ export function AdminAttendanceDashboard() {
     };
   }, [dateRange, view]);
 
-  // --- NEW: Helper to determine Late status dynamically ---
+  // Logic: Late if check-in is after 09:30 AM
   const determineStatus = (record: AttendanceRecord) => {
     if (!record.check_in) return "absent";
-    
-    // Check if check-in is after 09:30 AM
     const checkInTime = parseISO(record.check_in);
-    const lateThreshold = setMinutes(setHours(checkInTime, 9), 30); // Set time to 09:30 AM same day
-
-    if (isAfter(checkInTime, lateThreshold)) {
-      return "late";
-    }
+    const lateThreshold = setMinutes(setHours(checkInTime, 9), 30); 
+    if (isAfter(checkInTime, lateThreshold)) return "late";
     return "present";
   };
 
@@ -123,7 +122,7 @@ export function AdminAttendanceDashboard() {
       if (usersError) throw usersError;
       setUsers(usersData || []);
 
-      // 2. Fetch Attendance Data
+      // 2. Fetch Attendance
       const startDateStr = format(dateRange.start, "yyyy-MM-dd");
       const endDateStr = format(dateRange.end, "yyyy-MM-dd");
 
@@ -136,15 +135,14 @@ export function AdminAttendanceDashboard() {
 
       if (attendanceError) throw attendanceError;
 
-      // Process data to apply strict 09:30 AM Late Logic
       const processedData = (rawAttendanceData || []).map(record => ({
         ...record,
-        status: determineStatus(record) // Override status based on time
+        status: determineStatus(record)
       }));
 
       setAttendanceData(processedData);
 
-      // 3. Process Live Activity Feed
+      // 3. Process Live Activity Feed with Location/IP
       const feedDateStr = view === 'daily' ? startDateStr : format(new Date(), "yyyy-MM-dd");
       const { data: feedData } = await supabase
         .from("attendance")
@@ -166,7 +164,9 @@ export function AdminAttendanceDashboard() {
               type: 'check-in',
               user_name: record.user?.full_name || 'Unknown',
               time: record.check_in,
-              timestamp: new Date(record.check_in).getTime()
+              timestamp: new Date(record.check_in).getTime(),
+              location: record.location_check_in, // Capture Location
+              ip: record.ip_check_in              // Capture IP
             });
           }
           if (record.check_out) {
@@ -204,7 +204,7 @@ export function AdminAttendanceDashboard() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case "present": return "bg-green-100 text-green-800";
-      case "late": return "bg-yellow-100 text-yellow-800"; // Distinct Late Color
+      case "late": return "bg-yellow-100 text-yellow-800";
       case "absent": return "bg-red-100 text-red-800";
       default: return "bg-gray-100 text-gray-800";
     }
@@ -213,7 +213,7 @@ export function AdminAttendanceDashboard() {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "present": return <CheckCircle className="h-4 w-4 text-green-500" />;
-      case "late": return <Clock className="h-4 w-4 text-yellow-500" />; // Clock icon for late
+      case "late": return <Clock className="h-4 w-4 text-yellow-500" />;
       case "absent": return <XCircle className="h-4 w-4 text-red-500" />;
       default: return <AlertCircle className="h-4 w-4 text-gray-500" />;
     }
@@ -230,33 +230,25 @@ export function AdminAttendanceDashboard() {
     }
   };
 
-  // --- NEW: Accurate Stats Calculation ---
   const getStats = () => {
     const totalUsers = users.length;
-    
-    // Get records specifically for the view (Daily usually)
     const currentRecords = view === 'daily' 
       ? attendanceData.filter(r => isSameDay(parseISO(r.date), dateRange.start))
       : attendanceData;
 
-    // Count strictly based on processed status
     const presentCount = currentRecords.filter(r => r.status === "present").length;
     const lateCount = currentRecords.filter(r => r.status === "late").length;
-    
-    // Absent = Everyone who isn't Present or Late
-    // This fixes the issue where people with NO record weren't counting as absent
     const absentCount = totalUsers - (presentCount + lateCount);
 
     return {
       present: presentCount,
       late: lateCount,
-      absent: Math.max(0, absentCount) // Prevent negative numbers
+      absent: Math.max(0, absentCount)
     };
   };
   
   const stats = getStats();
 
-  // Filter Users Logic
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.full_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           user.email.toLowerCase().includes(searchTerm.toLowerCase());
@@ -265,6 +257,12 @@ export function AdminAttendanceDashboard() {
   });
 
   const departments = Array.from(new Set(users.map(user => user.department).filter(Boolean))) as string[];
+
+  // Helper to format long IPs or Locations
+  const formatLocationData = (text: string | null) => {
+    if (!text) return '-';
+    return text.length > 20 ? text.substring(0, 20) + '...' : text;
+  };
 
   if (loading && users.length === 0) return <div className="p-6">Loading...</div>;
 
@@ -326,7 +324,7 @@ export function AdminAttendanceDashboard() {
               <div className="text-2xl font-bold text-green-600">{stats.present}</div>
               <div className="flex items-center text-xs text-muted-foreground">
                 <TrendingUp className="h-3 w-3 mr-1 text-green-500" />
-                On time (Before 9:30 AM)
+                On time
               </div>
             </CardContent>
           </Card>
@@ -338,7 +336,7 @@ export function AdminAttendanceDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-yellow-600">{stats.late}</div>
-              <p className="text-xs text-muted-foreground">Arrived after 09:30 AM</p>
+              <p className="text-xs text-muted-foreground">After 09:30 AM</p>
             </CardContent>
           </Card>
 
@@ -349,12 +347,12 @@ export function AdminAttendanceDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-red-600">{stats.absent}</div>
-              <p className="text-xs text-muted-foreground">No check-in detected</p>
+              <p className="text-xs text-muted-foreground">No check-in</p>
             </CardContent>
           </Card>
         </div>
 
-        {/* Activity Feed */}
+        {/* UPDATED: Activity Feed with Location/IP */}
         <Card className="h-full">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -381,6 +379,23 @@ export function AdminAttendanceDashboard() {
                         <span className="mx-1">•</span>
                         {format(new Date(item.time), "hh:mm a")}
                       </p>
+                      {/* Show Location/IP only for check-ins */}
+                      {item.type === 'check-in' && (item.location || item.ip) && (
+                        <div className="flex gap-2 mt-1">
+                          {item.location && (
+                            <div className="flex items-center text-[10px] text-gray-400 bg-gray-100 px-1 rounded">
+                              <MapPin className="h-3 w-3 mr-1" />
+                              {formatLocationData(item.location)}
+                            </div>
+                          )}
+                          {item.ip && (
+                            <div className="flex items-center text-[10px] text-gray-400 bg-gray-100 px-1 rounded">
+                              <Wifi className="h-3 w-3 mr-1" />
+                              {item.ip}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -403,7 +418,7 @@ export function AdminAttendanceDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">{activeEmployees}</div>
-            <p className="text-xs text-muted-foreground">Employees working now</p>
+            <p className="text-xs text-muted-foreground">Active employees</p>
           </CardContent>
         </Card>
         <Card>
@@ -428,6 +443,7 @@ export function AdminAttendanceDashboard() {
         </Card>
       </div>
 
+      {/* UPDATED: Table to show dynamic Location and IP */}
       <Card>
         <CardHeader>
           <div className="flex flex-col sm:flex-row justify-between gap-4">
@@ -461,12 +477,10 @@ export function AdminAttendanceDashboard() {
             <TableBody>
               {filteredUsers.map(user => {
                 const userRecords = attendanceData.filter(a => a.user_id === user.id);
-                // In daily view, if no record is found, we assume they are absent
                 const record = view === 'daily' 
                   ? userRecords.find(r => isSameDay(parseISO(r.date), dateRange.start))
                   : userRecords[0]; 
 
-                // If record exists, use its status (which we calculated in loadData). If not, 'absent'.
                 const displayStatus = record ? record.status : 'absent';
                 
                 return (
@@ -491,8 +505,31 @@ export function AdminAttendanceDashboard() {
                         {record?.overtime_hours ? <><TrendingUp className="h-4 w-4 text-green-500" />{record.overtime_hours}</> : '-'}
                       </div>
                     </TableCell>
-                    <TableCell>{record?.location_check_in ? <div className="flex items-center gap-1 text-xs"><MapPin className="h-3 w-3 text-blue-500" />Office</div> : record?.location_check_in === null ? <div className="flex items-center gap-1 text-xs"><Monitor className="h-3 w-3 text-gray-500" />Remote</div> : '-'}</TableCell>
-                    <TableCell>{record?.ip_check_in ? <div className="flex items-center gap-1 text-xs"><Wifi className="h-3 w-3 text-green-500" />{record.ip_check_in.substring(0, 7) + "..."}</div> : '-'}</TableCell>
+                    
+                    {/* UPDATED: Dynamic Location Column */}
+                    <TableCell>
+                      {record?.location_check_in ? (
+                        <div className="flex items-center gap-1 text-xs" title={record.location_check_in}>
+                          <MapPin className="h-3 w-3 text-blue-500" />
+                          {formatLocationData(record.location_check_in)}
+                        </div>
+                      ) : record?.check_in ? (
+                        <div className="flex items-center gap-1 text-xs text-gray-400">
+                          <Globe className="h-3 w-3" />
+                          Remote
+                        </div>
+                      ) : '-'}
+                    </TableCell>
+
+                    {/* UPDATED: Dynamic IP Column */}
+                    <TableCell>
+                      {record?.ip_check_in ? (
+                        <div className="flex items-center gap-1 text-xs" title={record.ip_check_in}>
+                          <Wifi className="h-3 w-3 text-green-500" />
+                          {formatLocationData(record.ip_check_in)}
+                        </div>
+                      ) : '-'}
+                    </TableCell>
                   </TableRow>
                 );
               })}
