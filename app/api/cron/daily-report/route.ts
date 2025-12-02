@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js' // Use direct client for Cron
 import { NextResponse } from 'next/server'
-import { Resend } from 'resend'
 
 // Initialize specialized clients
 const resend = new Resend(process.env.RESEND_API_KEY)
