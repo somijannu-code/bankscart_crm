@@ -11,7 +11,6 @@ import Link from "next/link"
 interface SearchParams {
   start_date?: string
   end_date?: string
-  // Changed to handle comma-separated IDs for multi-select
   telecaller?: string 
 }
 
@@ -22,60 +21,66 @@ export default async function ReportsPage({
 }) {
   const supabase = await createClient()
 
-  // 1. IMPROVEMENT: Set default date range to current date only
-  const defaultDate = new Date().toISOString().split("T")[0] // YYYY-MM-DD
+  const defaultDate = new Date().toISOString().split("T")[0]
   const endDate = searchParams.end_date || defaultDate
   const startDate = searchParams.start_date || defaultDate
 
-  // Get telecallers for filter
   const { data: telecallers } = await supabase
     .from("users")
     .select("id, full_name")
     .eq("role", "telecaller")
     .eq("is_active", true)
 
-  // Build base queries with date filters
-  let leadsQuery = supabase
-    .from("leads")
-    .select("*")
-    .gte("created_at", startDate)
-    .lte("created_at", `${endDate}T23:59:59`)
-
-  let callsQuery = supabase
-    .from("call_logs")
-    .select("*, users!call_logs_user_id_fkey(full_name)")
-    .gte("created_at", startDate)
-    .lte("created_at", `${endDate}T23:59:59`)
-
-  // 2. IMPROVEMENT: Apply multi-telecaller filter if specified
+  // Handle filters
   let telecallerIds: string[] = []
   if (searchParams.telecaller) {
-    telecallerIds = searchParams.telecaller.split(',') // Split the comma-separated string
+    telecallerIds = searchParams.telecaller.split(',')
+  }
 
-    // Use the `in` operator for Supabase multi-selection
+  // --- OPTIMIZATION START: Use COUNT only queries ---
+
+  // 1. Total Leads All Time (Just count)
+  const { count: totalLeads } = await supabase
+    .from("leads")
+    .select("*", { count: "exact", head: true })
+
+  // 2. Base Period Queries
+  let leadsQuery = supabase.from("leads").select("status", { count: "exact" }) // Select minimal fields
+    .gte("created_at", startDate)
+    .lte("created_at", `${endDate}T23:59:59`)
+
+  let callsQuery = supabase.from("call_logs").select("call_status", { count: "exact" })
+    .gte("created_at", startDate)
+    .lte("created_at", `${endDate}T23:59:59`)
+
+  if (telecallerIds.length > 0) {
     leadsQuery = leadsQuery.in("assigned_to", telecallerIds)
     callsQuery = callsQuery.in("user_id", telecallerIds)
   }
 
-  const [{ data: leads }, { data: calls }, { count: totalLeads }, { count: totalCalls }] = await Promise.all([
+  // Execute Queries
+  const [{ data: leadsData }, { data: callsData }] = await Promise.all([
     leadsQuery,
-    callsQuery,
-    supabase.from("leads").select("*", { count: "exact", head: true }),
-    supabase.from("call_logs").select("*", { count: "exact", head: true }),
+    callsQuery
   ])
 
-  // Calculate metrics
-  const newLeads = leads?.filter((lead) => lead.status === "new").length || 0
-  const convertedLeads = leads?.filter((lead) => lead.status === "closed_won").length || 0
-  const conversionRate = leads?.length ? ((convertedLeads / leads.length) * 100).toFixed(1) : "0"
+  // Process counts in memory (but now on much smaller/lighter objects)
+  const periodLeadsCount = leadsData?.length || 0
+  const periodCallsCount = callsData?.length || 0
 
-  const connectedCalls = calls?.filter((call) => call.call_status === "connected").length || 0
-  const callConnectRate = calls?.length ? ((connectedCalls / calls.length) * 100).toFixed(1) : "0"
+  const newLeads = leadsData?.filter((lead) => lead.status === "new").length || 0
+  const convertedLeads = leadsData?.filter((lead) => lead.status === "closed_won").length || 0
+  const conversionRate = periodLeadsCount ? ((convertedLeads / periodLeadsCount) * 100).toFixed(1) : "0"
+
+  const connectedCalls = callsData?.filter((call) => call.call_status === "connected").length || 0
+  const callConnectRate = periodCallsCount ? ((connectedCalls / periodCallsCount) * 100).toFixed(1) : "0"
+
+  // --- OPTIMIZATION END ---
 
   const stats = [
     {
       title: "Total Leads",
-      value: leads?.length || 0,
+      value: periodLeadsCount, // Shows period count as main value
       subtitle: `${totalLeads} all time`,
       icon: TrendingUp,
       color: "text-blue-600",
@@ -100,7 +105,7 @@ export default async function ReportsPage({
     {
       title: "Call Connect Rate",
       value: `${callConnectRate}%`,
-      subtitle: `${connectedCalls}/${calls?.length || 0} calls`,
+      subtitle: `${connectedCalls}/${periodCallsCount} calls`,
       icon: BarChart3,
       color: "text-orange-600",
       bgColor: "bg-orange-50",
@@ -113,13 +118,10 @@ export default async function ReportsPage({
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Reports & Analytics</h1>
           <p className="text-gray-600 mt-1">Performance insights and data export</p>
-          {/* 3. IMPROVEMENT NOTE: For auto-refresh, the data fetching and stats calculation above
-          must be moved into a client component that uses setInterval to poll for new data. */}
         </div>
         <ExportButtons startDate={startDate} endDate={endDate} telecallerId={searchParams.telecaller} />
       </div>
 
-      {/* Filters */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -128,13 +130,10 @@ export default async function ReportsPage({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {/* NOTE: The ReportsFilters component must be updated to use a multi-select 
-          UI for telecallers and output a comma-separated string for the 'telecaller' search param. */}
           <ReportsFilters telecallers={telecallers || []} defaultStartDate={startDate} defaultEndDate={endDate} />
         </CardContent>
       </Card>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {stats.map((stat, index) => (
           <Card key={index} className="hover:shadow-md transition-shadow">
@@ -155,7 +154,6 @@ export default async function ReportsPage({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Performance Chart */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -168,7 +166,6 @@ export default async function ReportsPage({
           </CardContent>
         </Card>
 
-        {/* Lead Conversion Chart */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -182,7 +179,6 @@ export default async function ReportsPage({
         </Card>
       </div>
 
-      {/* Telecaller Performance */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -195,7 +191,6 @@ export default async function ReportsPage({
         </CardContent>
       </Card>
 
-      {/* Attendance Reports */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
