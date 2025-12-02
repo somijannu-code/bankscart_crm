@@ -1,5 +1,5 @@
-import { createClient } from "./supabase/client" // Changed from server to client
-import { differenceInMinutes } from "date-fns" // Add missing import
+import { createClient } from "./supabase/client"
+import { differenceInMinutes } from "date-fns"
 
 export interface AttendanceRecord {
   id: string
@@ -13,19 +13,8 @@ export interface AttendanceRecord {
   break_hours: string | null
   status: string
   notes: string | null
-}
-
-export interface BreakRecord {
-  id: string
-  user_id: string
-  date: string
-  break_type: string
-  start_time: string
-  end_time: string | null
-  duration_minutes: number | null
-  notes: string | null
-  created_at: string
-  updated_at: string
+  location_check_in?: any // Added to interface
+  ip_check_in?: string | null // Added to interface
 }
 
 export class AttendanceService {
@@ -40,9 +29,20 @@ export class AttendanceService {
     return AttendanceService.instance
   }
 
-  async checkIn(userId: string, notes?: string): Promise<AttendanceRecord> {
-    const supabase = createClient() // Client-side instance
+  // UPDATED: Added location parameter
+  async checkIn(userId: string, notes?: string, location?: string): Promise<AttendanceRecord> {
+    const supabase = createClient()
     const now = new Date().toISOString()
+    
+    // Optional: Try to get IP address (Client-side fetch)
+    let ipAddress = null;
+    try {
+        const res = await fetch('https://api.ipify.org?format=json');
+        const data = await res.json();
+        ipAddress = data.ip;
+    } catch (e) {
+        console.warn("Could not fetch IP", e);
+    }
 
     const { data, error } = await supabase
       .from("attendance")
@@ -54,6 +54,9 @@ export class AttendanceService {
           status: "present",
           notes: notes || null,
           updated_at: now,
+          // UPDATED: Insert Location (as JSON) and IP
+          location_check_in: location ? { coordinates: location } : null,
+          ip_check_in: ipAddress
         },
         {
           onConflict: "user_id, date",
@@ -70,7 +73,6 @@ export class AttendanceService {
     const supabase = await createClient()
     const now = new Date().toISOString()
 
-    // Get today's attendance record
     const { data: attendance } = await supabase
       .from("attendance")
       .select()
@@ -82,12 +84,10 @@ export class AttendanceService {
       throw new Error("No check-in record found for today")
     }
 
-    // Calculate total hours
     const checkInTime = new Date(attendance.check_in!)
     const checkOutTime = new Date(now)
     const totalMinutes = differenceInMinutes(checkOutTime, checkInTime)
 
-    // Subtract break time if any
     let breakMinutes = 0
     if (attendance.lunch_start && attendance.lunch_end) {
       breakMinutes = differenceInMinutes(new Date(attendance.lunch_end), new Date(attendance.lunch_start))
@@ -193,7 +193,6 @@ export class AttendanceService {
       .single()
 
     if (error && error.code !== "PGRST116") {
-      // PGRST116 is "no rows found"
       throw error
     }
 
@@ -225,15 +224,6 @@ export class AttendanceService {
       `)
       .eq("date", date)
       .order("check_in", { ascending: false })
-
-    if (error) throw error
-    return data || []
-  }
-
-  async getBreakTypes(): Promise<any[]> {
-    const supabase = await createClient()
-
-    const { data, error } = await supabase.from("break_types").select().eq("is_active", true).order("name")
 
     if (error) throw error
     return data || []
