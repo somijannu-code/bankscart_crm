@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { format, startOfMonth, endOfMonth, parseISO, differenceInMinutes, subMonths, isAfter, isSameDay } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,6 @@ import {
   XCircle,
   AlertCircle,
   Pause,
-  Play,
   Monitor,
   ChevronDown
 } from "lucide-react";
@@ -51,7 +50,6 @@ import { createClient } from "@/lib/supabase/client";
 import { AttendanceRecord, BreakRecord } from "@/lib/database-schema";
 import { enhancedAttendanceService } from "@/lib/attendance-service-enhanced";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 
 export default function EnhancedTelecallerAttendancePage() {
   const [dateRange, setDateRange] = useState<{ start: Date; end: Date }>({
@@ -59,7 +57,6 @@ export default function EnhancedTelecallerAttendancePage() {
     end: endOfMonth(new Date())
   });
   const [attendanceHistory, setAttendanceHistory] = useState<AttendanceRecord[]>([]);
-  // FIX 1: Renamed breakRecords to allBreakRecords to store all breaks for the date range
   const [allBreakRecords, setAllBreakRecords] = useState<BreakRecord[]>([]); 
   const [todayAttendance, setTodayAttendance] = useState<AttendanceRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,60 +66,50 @@ export default function EnhancedTelecallerAttendancePage() {
   const [showBreakDialog, setShowBreakDialog] = useState(false);
   const [breakType, setBreakType] = useState("lunch");
   const [idleTime, setIdleTime] = useState(0);
-  const [lastActivity, setLastActivity] = useState<Date | null>(null);
   const [dateRangeOpen, setDateRangeOpen] = useState(false);
+  
+  // FIX: Use useRef for lastActivity to prevent re-render loops
+  const lastActivityRef = useRef<Date>(new Date());
+  
   const supabase = createClient();
 
-  // Track user activity for idle time detection (omitting for brevity, as it was not the source of the crash)
+  // FIX: completely rewritten idle timer logic
   useEffect(() => {
-    let idleTimer: NodeJS.Timeout;
-    let idleInterval: NodeJS.Timeout;
-    
-    const resetIdleTimer = () => {
-      clearTimeout(idleTimer);
-      setLastActivity(new Date());
-      
-      // Set idle timeout to 5 minutes
-      idleTimer = setTimeout(() => {
-        // User is idle
-        setIdleTime(prev => prev + 1);
-      }, 5 * 60 * 1000); // 5 minutes
+    // Function to handle user activity
+    const handleUserActivity = () => {
+      lastActivityRef.current = new Date();
+      // Only reset state if it was previously > 0 to avoid unnecessary renders
+      setIdleTime((prev) => (prev > 0 ? 0 : prev));
     };
-    
+
+    // Events to track
     const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
     events.forEach(event => {
-      window.addEventListener(event, resetIdleTimer, true);
+      window.addEventListener(event, handleUserActivity, true);
     });
     
-    resetIdleTimer();
-    
-    idleInterval = setInterval(() => {
-      if (lastActivity) {
-        const minutesSinceLastActivity = Math.floor(
-          (new Date().getTime() - lastActivity.getTime()) / (1000 * 60)
-        );
-        // Only show idle time if more than 5 minutes have passed
-        if (minutesSinceLastActivity >= 5) {
-          setIdleTime(minutesSinceLastActivity - 5);
-        } else {
-          setIdleTime(0); // FIX: Reset idle time if activity detected
-        }
+    // Check for idle status every minute
+    const intervalId = setInterval(() => {
+      const now = new Date();
+      // Calculate difference in minutes
+      const diff = differenceInMinutes(now, lastActivityRef.current);
+      
+      // If idle for more than 5 minutes, update the state
+      if (diff >= 5) {
+        setIdleTime(diff - 5);
       }
-    }, 60000); // Update every minute
+    }, 60000); // Check every 1 minute
     
     return () => {
-      clearTimeout(idleTimer);
-      clearInterval(idleInterval);
+      clearInterval(intervalId);
       events.forEach(event => {
-        window.removeEventListener(event, resetIdleTimer, true);
+        window.removeEventListener(event, handleUserActivity, true);
       });
     };
-  }, [lastActivity]);
-
+  }, []); // Empty dependency array ensures this only runs once on mount
 
   useEffect(() => {
     loadAttendanceData();
-    // Re-call loadAttendanceData on mount/dateRange change to ensure full data is loaded
   }, [dateRange]);
 
   const loadAttendanceData = async () => {
@@ -134,18 +121,14 @@ export default function EnhancedTelecallerAttendancePage() {
       const startDateStr = format(dateRange.start, "yyyy-MM-dd");
       const endDateStr = format(dateRange.end, "yyyy-MM-dd");
 
-      // Load today's attendance (for live status widget)
       const today = new Date();
-      let todayRecord: AttendanceRecord | null = null;
       if (isAfter(today, dateRange.start) || isSameDay(today, dateRange.start)) {
-          todayRecord = await enhancedAttendanceService.getTodayAttendance(user.id);
+          const todayRecord = await enhancedAttendanceService.getTodayAttendance(user.id);
           setTodayAttendance(todayRecord);
       } else {
           setTodayAttendance(null);
       }
-      
 
-      // Load attendance history for the whole range
       const history = await enhancedAttendanceService.getAttendanceHistory(
         user.id,
         startDateStr,
@@ -153,9 +136,6 @@ export default function EnhancedTelecallerAttendancePage() {
       );
       setAttendanceHistory(history);
 
-      // FIX 1 CONTINUED: Load ALL break records for the entire date range
-      // NOTE: This assumes enhancedAttendanceService.getBreakRecords is updated 
-      // to accept a date range (start_date, end_date) and not just a single date string.
       const breaks = await enhancedAttendanceService.getBreakRecords(
          user.id,
          startDateStr, 
@@ -170,7 +150,6 @@ export default function EnhancedTelecallerAttendancePage() {
     }
   };
 
-  // Ensure check-in/out updates history
   const handleCheckIn = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -187,7 +166,7 @@ export default function EnhancedTelecallerAttendancePage() {
       setTodayAttendance(attendance);
       setNotes("");
       setShowCheckInDialog(false);
-      loadAttendanceData(); // Reload history and breaks
+      loadAttendanceData(); 
     } catch (error) {
       console.error("Check-in failed:", error);
     }
@@ -209,7 +188,7 @@ export default function EnhancedTelecallerAttendancePage() {
       setTodayAttendance(attendance);
       setNotes("");
       setShowCheckOutDialog(false);
-      loadAttendanceData(); // Reload history and breaks
+      loadAttendanceData(); 
     } catch (error) {
       console.error("Check-out failed:", error);
     }
@@ -226,13 +205,11 @@ export default function EnhancedTelecallerAttendancePage() {
         notes
       );
       
-      // Only refresh today's break records and attendance status
       const todayBreaks = await enhancedAttendanceService.getBreakRecords(
         user.id,
         todayAttendance.date,
-        todayAttendance.date // Fetching only today
+        todayAttendance.date 
       );
-      // Update the allBreakRecords state with the refreshed today's records
       setAllBreakRecords(prev => prev.filter(b => b.date !== todayAttendance.date).concat(todayBreaks));
       
       const updatedAttendance = await enhancedAttendanceService.getTodayAttendance(user.id);
@@ -252,13 +229,11 @@ export default function EnhancedTelecallerAttendancePage() {
 
       await enhancedAttendanceService.endBreak(breakId, notes);
       
-      // Only refresh today's break records and attendance status
       const todayBreaks = await enhancedAttendanceService.getBreakRecords(
         user.id,
         todayAttendance.date,
-        todayAttendance.date // Fetching only today
+        todayAttendance.date 
       );
-      // Update the allBreakRecords state with the refreshed today's records
       setAllBreakRecords(prev => prev.filter(b => b.date !== todayAttendance.date).concat(todayBreaks));
       
       const updatedAttendance = await enhancedAttendanceService.getTodayAttendance(user.id);
@@ -270,37 +245,30 @@ export default function EnhancedTelecallerAttendancePage() {
     }
   };
 
-  // FIX 2: Use the full allBreakRecords and filter by the record's date
   const getWorkingHours = (record: AttendanceRecord) => {
     if (!record.check_in) return null;
     
     const checkInTime = new Date(record.check_in);
-    // If check_out is null, use current time for live calculation
     const checkOutTime = record.check_out ? new Date(record.check_out) : new Date();
     
     let totalMinutes = differenceInMinutes(checkOutTime, checkInTime);
     
-    // Subtract break time relevant to THIS record's date
-    // Note: We need to filter by record.date to only use breaks from that day
     const recordBreaks = allBreakRecords.filter(b => b.date === record.date);
     
     recordBreaks.forEach(breakRecord => {
       if (breakRecord.end_time) {
-        // Break has ended - subtract full duration
         totalMinutes -= differenceInMinutes(
           new Date(breakRecord.end_time),
           new Date(breakRecord.start_time)
         );
       } else if (isSameDay(parseISO(record.date), new Date())) {
-        // FIX 4: Break is ongoing (only possible for today's live record) - subtract time from start to now
         totalMinutes -= differenceInMinutes(
-          new Date(), // Current Time
+          new Date(), 
           new Date(breakRecord.start_time)
         );
       }
     });
 
-    // Ensure total minutes doesn't go below zero
     if (totalMinutes < 0) totalMinutes = 0;
     
     return {
@@ -309,7 +277,6 @@ export default function EnhancedTelecallerAttendancePage() {
     };
   };
 
-  // Get break records for today's attendance (for display in the widget)
   const todayBreakRecords = todayAttendance ? allBreakRecords.filter(b => b.date === todayAttendance.date) : [];
 
   const getStatusColor = (status: string) => {
@@ -340,31 +307,21 @@ export default function EnhancedTelecallerAttendancePage() {
     const lateDays = attendanceHistory.filter(a => a.status === 'late').length;
     const halfDays = attendanceHistory.filter(a => a.status === 'half-day').length;
     
-    // Calculate total overtime hours
     let totalOvertime = 0;
     attendanceHistory.forEach(record => {
       if (record.overtime_hours) {
-        // Handle "HH:MM" format
         const parts = record.overtime_hours.split(':');
         const hours = parseInt(parts[0], 10);
         const minutes = parts.length > 1 ? parseInt(parts[1], 10) : 0;
-        
         totalOvertime += hours + (minutes / 60);
       }
     });
     
-    return {
-      presentDays,
-      absentDays,
-      lateDays,
-      halfDays,
-      totalOvertime
-    };
+    return { presentDays, absentDays, lateDays, halfDays, totalOvertime };
   };
 
   const stats = calculateStats();
 
-  // Calculate total break time for today
   const getTotalBreakTime = () => {
     let totalMinutes = 0;
     todayBreakRecords.forEach(breakRecord => {
@@ -374,7 +331,6 @@ export default function EnhancedTelecallerAttendancePage() {
           new Date(breakRecord.start_time)
         );
       } else {
-        // For ongoing breaks, calculate time so far
         totalMinutes += differenceInMinutes(
           new Date(),
           new Date(breakRecord.start_time)
@@ -389,7 +345,6 @@ export default function EnhancedTelecallerAttendancePage() {
 
   const breakTime = getTotalBreakTime();
 
-  // Quick date range options (omitted for brevity)
   const quickDateRanges = [
     { label: "This Month", value: "current-month" },
     { label: "Last Month", value: "last-month" },
@@ -435,7 +390,6 @@ export default function EnhancedTelecallerAttendancePage() {
     return <div className="p-6">Loading attendance data...</div>;
   }
 
-  // --- Display logic for today's status ---
   const isCheckedIn = !!todayAttendance?.check_in;
   const isCheckedOut = !!todayAttendance?.check_out;
   const isOnBreak = todayBreakRecords.some(b => !b.end_time);
@@ -448,7 +402,6 @@ export default function EnhancedTelecallerAttendancePage() {
           <p className="text-gray-600 mt-1">Track your daily attendance and working hours</p>
         </div>
         
-        {/* Date Range Selector (omitted for brevity) */}
         <Popover open={dateRangeOpen} onOpenChange={setDateRangeOpen}>
           <PopoverTrigger asChild>
             <Button variant="outline" className="flex items-center gap-2">
@@ -515,7 +468,6 @@ export default function EnhancedTelecallerAttendancePage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Statistics (omitted for brevity) */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -549,7 +501,6 @@ export default function EnhancedTelecallerAttendancePage() {
           </CardContent>
         </Card>
 
-        {/* Today's Attendance Widget */}
         <div className="lg:col-span-2">
           <Card>
             <CardHeader>
@@ -560,14 +511,12 @@ export default function EnhancedTelecallerAttendancePage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {/* Check-in Status (omitted for brevity) */}
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium">Check-in:</span>
                   {isCheckedIn ? (
                     <div className="flex items-center gap-2 text-green-600">
                       <CheckCircle className="h-4 w-4" />
                       <span>{format(new Date(todayAttendance!.check_in!), "hh:mm a")}</span>
-                      {/* Simplified location/ip display */}
                       {todayAttendance!.location_check_in && (
                         <div className="flex items-center gap-1">
                           <MapPin className="h-4 w-4 text-blue-500" />
@@ -591,7 +540,6 @@ export default function EnhancedTelecallerAttendancePage() {
                   )}
                 </div>
 
-                {/* Break Status */}
                 {isCheckedIn && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -625,7 +573,6 @@ export default function EnhancedTelecallerAttendancePage() {
                   </div>
                 )}
 
-                {/* Idle Time (omitted for brevity) */}
                  {isCheckedIn && !isCheckedOut && (
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">Idle Time:</span>
@@ -644,7 +591,6 @@ export default function EnhancedTelecallerAttendancePage() {
                   </div>
                 )}
 
-                {/* Check-out Status (omitted for brevity) */}
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium">Check-out:</span>
                   {isCheckedOut ? (
@@ -659,7 +605,6 @@ export default function EnhancedTelecallerAttendancePage() {
                   )}
                 </div>
 
-                {/* Working Hours */}
                 {isCheckedIn && (
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">Working Hours:</span>
@@ -669,7 +614,6 @@ export default function EnhancedTelecallerAttendancePage() {
                   </div>
                 )}
 
-                {/* Total Break Time */}
                 {todayBreakRecords.length > 0 && (
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">Total Break Time:</span>
@@ -679,7 +623,6 @@ export default function EnhancedTelecallerAttendancePage() {
                   </div>
                 )}
 
-                {/* Overtime (omitted for brevity) */}
                 {todayAttendance?.overtime_hours && (
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">Overtime:</span>
@@ -690,7 +633,6 @@ export default function EnhancedTelecallerAttendancePage() {
                 )}
               </div>
 
-              {/* Action Buttons (omitted for brevity) */}
               <div className="flex gap-2 mt-6 flex-wrap">
                 {!isCheckedIn ? (
                   <Dialog open={showCheckInDialog} onOpenChange={setShowCheckInDialog}>
@@ -724,7 +666,6 @@ export default function EnhancedTelecallerAttendancePage() {
                     </DialogContent>
                   </Dialog>
                 ) : !isCheckedOut && !isOnBreak ? (
-                  // Clocked in, not checked out, not on break -> Show Break/Check Out
                   <>
                     <Dialog open={showBreakDialog} onOpenChange={setShowBreakDialog}>
                       <DialogTrigger asChild>
@@ -803,7 +744,6 @@ export default function EnhancedTelecallerAttendancePage() {
                     </Dialog>
                   </>
                 ) : isCheckedIn && isOnBreak && (
-                    // Clocked in, on break -> Show On Break status
                     <Button disabled className="flex-1 bg-orange-500 hover:bg-orange-600">
                         <Pause className="h-4 w-4 mr-2" />
                         On Break
@@ -815,7 +755,6 @@ export default function EnhancedTelecallerAttendancePage() {
         </div>
       </div>
 
-      {/* Attendance History */}
       <Card>
         <CardHeader>
           <CardTitle>
@@ -837,7 +776,6 @@ export default function EnhancedTelecallerAttendancePage() {
             </TableHeader>
             <TableBody>
               {attendanceHistory.map(record => {
-                // FIX 3: Get break records for this date from the allBreakRecords state
                 const dateBreaks = allBreakRecords.filter(b => b.date === record.date);
                 const totalBreakMinutes = dateBreaks.reduce((total, breakRecord) => {
                   if (breakRecord.end_time) {
@@ -846,14 +784,12 @@ export default function EnhancedTelecallerAttendancePage() {
                       new Date(breakRecord.start_time)
                     );
                   }
-                  // Do not count ongoing breaks in history table (only today's widget)
                   return total;
                 }, 0);
                 
                 const breakHours = Math.floor(totalBreakMinutes / 60);
                 const breakMinutes = totalBreakMinutes % 60;
 
-                // Use the total_hours from the record if checked out, or calculate live if today and checked in
                 const displayHours = record.check_out 
                   ? record.total_hours
                   : (isSameDay(parseISO(record.date), new Date()) && record.check_in 
@@ -904,7 +840,3 @@ export default function EnhancedTelecallerAttendancePage() {
     </div>
   );
 }
-
-// NOTE: Please ensure the enhancedAttendanceService.getBreakRecords function is implemented 
-// to fetch break records by a date range (start_date, end_date) for the fixes in 
-// loadAttendanceData to work correctly for historical data.
