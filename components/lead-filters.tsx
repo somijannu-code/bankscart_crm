@@ -3,13 +3,10 @@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
-import { Search, X, Calendar as CalendarIcon, Filter } from "lucide-react"
+import { Search, X } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useState, useEffect } from "react"
-import { format } from "date-fns"
-import { cn } from "@/lib/utils"
+import { createClient } from "@/lib/supabase/client"
 
 interface LeadFiltersProps {
   telecallers: Array<{ id: string; full_name: string }>
@@ -18,15 +15,43 @@ interface LeadFiltersProps {
 export function LeadFilters({ telecallers }: LeadFiltersProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const supabase = createClient()
 
-  // State initialization from URL
   const [search, setSearch] = useState(searchParams.get("search") || "")
   const [status, setStatus] = useState(searchParams.get("status") || "all")
   const [priority, setPriority] = useState(searchParams.get("priority") || "all")
   const [assignedTo, setAssignedTo] = useState(searchParams.get("assigned_to") || "all")
+  const [telecallerStatus, setTelecallerStatus] = useState<Record<string, boolean>>({})
+
+  // --- NEW FILTER STATES (Date filters removed) ---
   const [source, setSource] = useState(searchParams.get("source") || "all")
-  const [dateFrom, setDateFrom] = useState<Date | undefined>(searchParams.get("date_from") ? new Date(searchParams.get("date_from")!) : undefined)
-  const [dateTo, setDateTo] = useState<Date | undefined>(searchParams.get("date_to") ? new Date(searchParams.get("date_to")!) : undefined)
+  // -------------------------------------------------
+
+  // Fetch telecaller status
+  useEffect(() => {
+    const fetchTelecallerStatus = async () => {
+      try {
+        const today = new Date().toISOString().split('T')[0]
+        const { data: attendanceRecords } = await supabase
+          .from("attendance")
+          .select("user_id, check_in")
+          .eq("date", today)
+        
+        if (attendanceRecords) {
+          // Create a map of telecaller ID to checked-in status
+          const statusMap: Record<string, boolean> = {}
+          attendanceRecords.forEach(record => {
+            statusMap[record.user_id] = !!record.check_in
+          })
+          setTelecallerStatus(statusMap)
+        }
+      } catch (err) {
+        console.error("Error fetching telecaller status:", err)
+      }
+    }
+
+    fetchTelecallerStatus()
+  }, [supabase])
 
   const applyFilters = () => {
     const params = new URLSearchParams()
@@ -34,10 +59,11 @@ export function LeadFilters({ telecallers }: LeadFiltersProps) {
     if (status !== "all") params.set("status", status)
     if (priority !== "all") params.set("priority", priority)
     if (assignedTo !== "all") params.set("assigned_to", assignedTo)
+
+    // --- NEW FILTER PARAMETER APPLICATION (Date filters removed) ---
     if (source !== "all") params.set("source", source)
-    if (dateFrom) params.set("date_from", dateFrom.toISOString().split('T')[0])
-    if (dateTo) params.set("date_to", dateTo.toISOString().split('T')[0])
-    
+    // -------------------------------------------------------------
+
     router.push(`/admin/leads?${params.toString()}`)
   }
 
@@ -46,21 +72,23 @@ export function LeadFilters({ telecallers }: LeadFiltersProps) {
     setStatus("all")
     setPriority("all")
     setAssignedTo("all")
+
+    // --- NEW FILTER CLEARING (Date filters removed) ---
     setSource("all")
-    setDateFrom(undefined)
-    setDateTo(undefined)
+    // --------------------------------------------------
+    
     router.push("/admin/leads")
   }
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-3"> 
+      {/* Primary Select Filters (can use a larger grid layout for more filters) */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4"> 
         
-        {/* 1. Search */}
-        <div className="relative col-span-1 md:col-span-2">
+        <div className="relative col-span-2 lg:col-span-1">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
           <Input
-            placeholder="Search name, phone, email..."
+            placeholder="Search leads..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-10"
@@ -68,75 +96,88 @@ export function LeadFilters({ telecallers }: LeadFiltersProps) {
           />
         </div>
 
-        {/* 2. Status */}
         <Select value={status} onValueChange={setStatus}>
           <SelectTrigger>
-            <SelectValue placeholder="Status" />
+            <SelectValue placeholder="Filter by status" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Statuses</SelectItem>
             <SelectItem value="new">New</SelectItem>
             <SelectItem value="contacted">Contacted</SelectItem>
             <SelectItem value="Interested">Interested</SelectItem>
-            <SelectItem value="follow_up">Follow Up</SelectItem>
             <SelectItem value="Documents_Sent">Documents Sent</SelectItem>
             <SelectItem value="Login">Login</SelectItem>
             <SelectItem value="Disbursed">Disbursed</SelectItem>
-            <SelectItem value="nr">Not Reachable</SelectItem>
             <SelectItem value="Not_Interested">Not Interested</SelectItem>
+            <SelectItem value="follow_up">Follow Up</SelectItem>
+            <SelectItem value="not_eligible">not eligible</SelectItem>
+            <SelectItem value="nr">nr</SelectItem>
+            <SelectItem value="self_employed">selfemployed</SelectItem>
           </SelectContent>
         </Select>
 
-        {/* 3. Assignee */}
+        <Select value={priority} onValueChange={setPriority}>
+          <SelectTrigger>
+            <SelectValue placeholder="Filter by priority" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Priorities</SelectItem>
+            <SelectItem value="low">Low</SelectItem>
+            <SelectItem value="medium">Medium</SelectItem>
+            <SelectItem value="high">High</SelectItem>
+            <SelectItem value="urgent">Urgent</SelectItem>
+          </SelectContent>
+        </Select>
+
         <Select value={assignedTo} onValueChange={setAssignedTo}>
           <SelectTrigger>
-            <SelectValue placeholder="Telecaller" />
+            <SelectValue placeholder="Filter by telecaller" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Telecallers</SelectItem>
             <SelectItem value="unassigned">Unassigned</SelectItem>
             {telecallers.map((telecaller) => (
               <SelectItem key={telecaller.id} value={telecaller.id}>
-                {telecaller.full_name}
+                <div className="flex items-center gap-2">
+                  {/* Status indicator for telecaller */}
+                  <div className={`w-2 h-2 rounded-full ${telecallerStatus[telecaller.id] ? 'bg-green-500' : 'bg-red-500'}`} 
+                       title={telecallerStatus[telecaller.id] ? 'Checked in' : 'Not checked in'} />
+                  {telecaller.full_name}
+                </div>
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
 
-        {/* 4. Date From */}
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button variant="outline" className={cn("justify-start text-left font-normal", !dateFrom && "text-muted-foreground")}>
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {dateFrom ? format(dateFrom, "PPP") : "From Date"}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0">
-            <Calendar mode="single" selected={dateFrom} onSelect={setDateFrom} initialFocus />
-          </PopoverContent>
-        </Popover>
-
-        {/* 5. Date To */}
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button variant="outline" className={cn("justify-start text-left font-normal", !dateTo && "text-muted-foreground")}>
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {dateTo ? format(dateTo, "PPP") : "To Date"}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0">
-            <Calendar mode="single" selected={dateTo} onSelect={setDateTo} initialFocus />
-          </PopoverContent>
-        </Popover>
-
+        {/* --- NEW SOURCE FILTER --- */}
+        <Select value={source} onValueChange={setSource}>
+          <SelectTrigger>
+            <SelectValue placeholder="Filter by source" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Sources</SelectItem>
+            <SelectItem value="website">Website</SelectItem>
+            <SelectItem value="referral">Referral</SelectItem>
+            <SelectItem value="campaign">Campaign</SelectItem>
+            <SelectItem value="cold_call">Cold Call</SelectItem>
+            {/* Add more source options as needed */}
+          </SelectContent>
+        </Select>
       </div>
 
-      <div className="flex justify-end gap-2">
-        <Button variant="ghost" onClick={clearFilters} className="h-8">
-          <X className="h-4 w-4 mr-2" /> Reset
+      {/* Date Range Filters (Removed) */}
+      <div className="pt-2 border-t">
+        {/* All date range Inputs have been removed */}
+      </div>
+
+      <div className="flex gap-2">
+        <Button onClick={applyFilters} className="flex items-center gap-2">
+          <Search className="h-4 w-4" />
+          Apply Filters
         </Button>
-        <Button onClick={applyFilters} className="h-8">
-          <Filter className="h-4 w-4 mr-2" /> Apply Filters
+        <Button variant="outline" onClick={clearFilters} className="flex items-center gap-2 bg-transparent">
+          <X className="h-4 w-4" />
+          Clear Filters
         </Button>
       </div>
     </div>
