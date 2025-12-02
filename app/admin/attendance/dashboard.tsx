@@ -16,13 +16,12 @@ import {
   Wifi, 
   Coffee,
   TrendingUp,
-  TrendingDown,
   Activity,
   UserCheck,
   Pause,
   Monitor,
   LogOut,
-  Globe // Added Globe icon for location
+  Globe
 } from "lucide-react";
 import { 
   Select, 
@@ -56,15 +55,15 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { User, AttendanceRecord } from "@/lib/database-schema";
 
-// Updated ActivityItem to include tracking info
+// Updated ActivityItem type
 type ActivityItem = {
   id: string;
   type: 'check-in' | 'check-out' | 'break-start' | 'break-end';
   user_name: string;
   time: string;
   timestamp: number;
-  location?: string | null; // Added location
-  ip?: string | null;       // Added IP
+  location?: any; // Changed to any to handle JSONB
+  ip?: string | null;
 };
 
 export function AdminAttendanceDashboard() {
@@ -87,7 +86,6 @@ export function AdminAttendanceDashboard() {
 
   useEffect(() => {
     loadData();
-    
     const channel = supabase
       .channel('attendance-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
@@ -100,7 +98,26 @@ export function AdminAttendanceDashboard() {
     };
   }, [dateRange, view]);
 
-  // Logic: Late if check-in is after 09:30 AM
+  // --- Helper to safely extract string from Location JSON/String ---
+  const getLocationString = (data: any): string | null => {
+    if (!data) return null;
+    if (typeof data === 'string') return data;
+    // Check if it's the object structure we defined { coordinates: "..." }
+    if (typeof data === 'object' && data !== null) {
+      if (data.coordinates) return data.coordinates;
+      // Fallback: try to stringify or return a placeholder
+      return JSON.stringify(data);
+    }
+    return String(data);
+  };
+
+  // --- Helper to shorten the display text ---
+  const formatLocationData = (data: any) => {
+    const text = getLocationString(data);
+    if (!text || text === 'null' || text === '{}') return '-';
+    return text.length > 25 ? text.substring(0, 25) + '...' : text;
+  };
+
   const determineStatus = (record: AttendanceRecord) => {
     if (!record.check_in) return "absent";
     const checkInTime = parseISO(record.check_in);
@@ -112,7 +129,6 @@ export function AdminAttendanceDashboard() {
   const loadData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch Users
       const { data: usersData, error: usersError } = await supabase
         .from("users")
         .select("*")
@@ -122,7 +138,6 @@ export function AdminAttendanceDashboard() {
       if (usersError) throw usersError;
       setUsers(usersData || []);
 
-      // 2. Fetch Attendance
       const startDateStr = format(dateRange.start, "yyyy-MM-dd");
       const endDateStr = format(dateRange.end, "yyyy-MM-dd");
 
@@ -142,7 +157,6 @@ export function AdminAttendanceDashboard() {
 
       setAttendanceData(processedData);
 
-      // 3. Process Live Activity Feed with Location/IP
       const feedDateStr = view === 'daily' ? startDateStr : format(new Date(), "yyyy-MM-dd");
       const { data: feedData } = await supabase
         .from("attendance")
@@ -165,8 +179,8 @@ export function AdminAttendanceDashboard() {
               user_name: record.user?.full_name || 'Unknown',
               time: record.check_in,
               timestamp: new Date(record.check_in).getTime(),
-              location: record.location_check_in, // Capture Location
-              ip: record.ip_check_in              // Capture IP
+              location: record.location_check_in,
+              ip: record.ip_check_in
             });
           }
           if (record.check_out) {
@@ -258,12 +272,6 @@ export function AdminAttendanceDashboard() {
 
   const departments = Array.from(new Set(users.map(user => user.department).filter(Boolean))) as string[];
 
-  // Helper to format long IPs or Locations
-  const formatLocationData = (text: string | null) => {
-    if (!text) return '-';
-    return text.length > 20 ? text.substring(0, 20) + '...' : text;
-  };
-
   if (loading && users.length === 0) return <div className="p-6">Loading...</div>;
 
   return (
@@ -352,7 +360,6 @@ export function AdminAttendanceDashboard() {
           </Card>
         </div>
 
-        {/* UPDATED: Activity Feed with Location/IP */}
         <Card className="h-full">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -379,11 +386,11 @@ export function AdminAttendanceDashboard() {
                         <span className="mx-1">•</span>
                         {format(new Date(item.time), "hh:mm a")}
                       </p>
-                      {/* Show Location/IP only for check-ins */}
+                      {/* FIX: Use helper function to render location string */}
                       {item.type === 'check-in' && (item.location || item.ip) && (
                         <div className="flex gap-2 mt-1">
                           {item.location && (
-                            <div className="flex items-center text-[10px] text-gray-400 bg-gray-100 px-1 rounded">
+                            <div className="flex items-center text-[10px] text-gray-400 bg-gray-100 px-1 rounded" title={getLocationString(item.location) || ''}>
                               <MapPin className="h-3 w-3 mr-1" />
                               {formatLocationData(item.location)}
                             </div>
@@ -443,7 +450,6 @@ export function AdminAttendanceDashboard() {
         </Card>
       </div>
 
-      {/* UPDATED: Table to show dynamic Location and IP */}
       <Card>
         <CardHeader>
           <div className="flex flex-col sm:flex-row justify-between gap-4">
@@ -506,10 +512,10 @@ export function AdminAttendanceDashboard() {
                       </div>
                     </TableCell>
                     
-                    {/* UPDATED: Dynamic Location Column */}
+                    {/* FIX: Handle JSONB location safely */}
                     <TableCell>
                       {record?.location_check_in ? (
-                        <div className="flex items-center gap-1 text-xs" title={record.location_check_in}>
+                        <div className="flex items-center gap-1 text-xs" title={getLocationString(record.location_check_in) || ''}>
                           <MapPin className="h-3 w-3 text-blue-500" />
                           {formatLocationData(record.location_check_in)}
                         </div>
@@ -521,12 +527,11 @@ export function AdminAttendanceDashboard() {
                       ) : '-'}
                     </TableCell>
 
-                    {/* UPDATED: Dynamic IP Column */}
                     <TableCell>
                       {record?.ip_check_in ? (
                         <div className="flex items-center gap-1 text-xs" title={record.ip_check_in}>
                           <Wifi className="h-3 w-3 text-green-500" />
-                          {formatLocationData(record.ip_check_in)}
+                          {record.ip_check_in}
                         </div>
                       ) : '-'}
                     </TableCell>
