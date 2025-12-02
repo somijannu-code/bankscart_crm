@@ -5,27 +5,19 @@ import { createClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
 import { TrendingUp, TrendingDown, Minus, Phone, Clock, CheckCircle, Timer } from "lucide-react"
 
+// Types remain mostly the same
 interface CallLog {
+  user_id: string
   call_status: string
   call_type: string
   duration_seconds: number | null
-  // Added created_at to the interface for sorting and calculation
   created_at: string 
 }
 
 interface Lead {
+  assigned_to: string
   status: string
   created_at: string
-}
-
-interface AttendanceRecord {
-  user_id: string
-  check_in: string | null
-}
-
-interface Telecaller {
-  id: string
-  full_name: string
 }
 
 interface PerformanceData {
@@ -36,20 +28,19 @@ interface PerformanceData {
   connectedCalls: number
   connectRate: number
   newLeads: number
-  convertedLeads: number // This field now represents 'Interested Leads' count
-  conversionRate: number // This rate now represents 'Interested Leads' rate
+  convertedLeads: number
+  conversionRate: number
   isCheckedIn: boolean
-  totalCallDuration: number // New field for total call duration
-  avgCallDuration: number // New field for average call duration
-  callStatusBreakdown: { // New field for call status breakdown
-    connected: number     // Calls with duration > 0
-    notConnected: number  // Calls with duration = 0
-    noAnswer: number      // Calls with no_answer status
-    busy: number          // Calls with busy status
+  totalCallDuration: number
+  avgCallDuration: number
+  callStatusBreakdown: {
+    connected: number
+    notConnected: number
+    noAnswer: number
+    busy: number
   }
-  // NEW FIELDS
-  lastCallTime: string | null // Time of the most recent call
-  avgTimeBetweenCalls: number // Average time gap in seconds
+  lastCallTime: string | null
+  avgTimeBetweenCalls: number
 }
 
 interface TelecallerPerformanceProps {
@@ -63,23 +54,20 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
   const [isLoading, setIsLoading] = useState(true)
   const supabase = createClient()
 
-  // Format duration in seconds to HH:MM:SS format
+  // Helper: Format duration
   const formatDuration = (seconds: number) => {
     if (seconds === Infinity || isNaN(seconds)) return "N/A"
     const hrs = Math.floor(seconds / 3600)
     const mins = Math.floor((seconds % 3600) / 60)
     const secs = Math.floor(seconds % 60)
-    
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
   }
 
-  // Format timestamp to H:MM:SS AM/PM
+  // Helper: Format time
   const formatTime = (timestamp: string | null) => {
     if (!timestamp) return "N/A"
     try {
-      const date = new Date(timestamp)
-      // Use toLocaleTimeString for locale-specific time formatting (e.g., "1:30:45 PM")
-      return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })
+      return new Date(timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true })
     } catch {
       return "Invalid Date"
     }
@@ -89,122 +77,120 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
     const fetchData = async () => {
       setIsLoading(true)
       try {
-        // Get telecallers to analyze
-        let telecallers: Telecaller[] = []
+        // 1. Prepare User Query
+        let userQuery = supabase
+          .from("users")
+          .select("id, full_name")
+          .eq("is_active", true)
+        
+        // If specific ID is requested (or comma separated), filter them
         if (telecallerId) {
-          const { data } = await supabase.from("users").select("id, full_name").eq("id", telecallerId).single()
-          telecallers = data ? [data] : []
+             const ids = telecallerId.split(',')
+             userQuery = userQuery.in('id', ids)
         } else {
-          const { data } = await supabase
-            .from("users")
-            .select("id, full_name")
-            .eq("role", "telecaller")
-            .eq("is_active", true)
-          telecallers = data || []
+             userQuery = userQuery.eq("role", "telecaller")
         }
 
-        // Get telecaller status for today
-        let telecallerStatus: Record<string, boolean> = {}
-        try {
-          const today = new Date().toISOString().split('T')[0]
-          const { data: attendanceRecords } = await supabase
-            .from("attendance")
-            .select("user_id, check_in")
-            .eq("date", today)
+        // 2. Prepare Attendance Query (Today)
+        const today = new Date().toISOString().split('T')[0]
+        const attendanceQuery = supabase
+          .from("attendance")
+          .select("user_id, check_in")
+          .eq("date", today)
+
+        // 3. Prepare Bulk Leads Query (Period)
+        let leadsQuery = supabase
+          .from("leads")
+          .select("assigned_to, status, created_at")
+          .gte("created_at", startDate)
+          .lte("created_at", `${endDate}T23:59:59`)
+
+        // 4. Prepare Bulk Calls Query (Period)
+        let callsQuery = supabase
+          .from("call_logs")
+          .select("user_id, call_status, call_type, duration_seconds, created_at")
+          .gte("created_at", startDate)
+          .lte("created_at", `${endDate}T23:59:59`)
+          .order("created_at", { ascending: false })
+
+        // 5. FETCH ALL DATA IN PARALLEL (Massive Speedup)
+        const [
+          { data: telecallers },
+          { data: attendance },
+          { data: leads },
+          { data: calls }
+        ] = await Promise.all([
+          userQuery,
+          attendanceQuery,
+          leadsQuery,
+          callsQuery
+        ])
+
+        if (!telecallers) return
+
+        // 6. PROCESS DATA IN MEMORY
+        // Create lookup maps to avoid looping arrays repeatedly
+        const attendanceMap = new Map(attendance?.map(a => [a.user_id, !!a.check_in]))
+        
+        // Group Leads by User
+        const leadsByUser = (leads || []).reduce((acc, lead) => {
+          if (!lead.assigned_to) return acc
+          if (!acc[lead.assigned_to]) acc[lead.assigned_to] = []
+          acc[lead.assigned_to].push(lead)
+          return acc
+        }, {} as Record<string, Lead[]>)
+
+        // Group Calls by User
+        const callsByUser = (calls || []).reduce((acc, call) => {
+          if (!call.user_id) return acc
+          if (!acc[call.user_id]) acc[call.user_id] = []
+          acc[call.user_id].push(call)
+          return acc
+        }, {} as Record<string, CallLog[]>)
+
+        const performanceData: PerformanceData[] = telecallers.map(telecaller => {
+          const userLeads = leadsByUser[telecaller.id] || []
+          const userCalls = callsByUser[telecaller.id] || []
+
+          // Calculate Stats
+          const totalLeads = userLeads.length
+          const totalCalls = userCalls.length
           
-          if (attendanceRecords) {
-            // Create a map of telecaller ID to checked-in status
-            telecallerStatus = attendanceRecords.reduce((acc: Record<string, boolean>, record: AttendanceRecord) => {
-              acc[record.user_id] = !!record.check_in
-              return acc
-            }, {} as Record<string, boolean>)
-          }
-        } catch (err) {
-          console.error("Error fetching telecaller status:", err)
-        }
-
-        const performanceData: PerformanceData[] = []
-
-        for (const telecaller of telecallers) {
-          
-          // --- Query for ALL-TIME Leads for Total Leads (NO date filter) ---
-          const { data: allTimeLeads } = await supabase
-            .from("leads")
-            .select("id") // Select minimal data as we only need the count
-            .eq("assigned_to", telecaller.id)
-            
-          // --- Query for PERIOD-SPECIFIC Leads for status breakdowns (WITH date filter) ---
-          const { data: periodLeads } = await supabase
-            .from("leads")
-            .select("status, created_at")
-            .eq("assigned_to", telecaller.id)
-            .gte("created_at", startDate)
-            .lte("created_at", `${endDate}T23:59:59`)
-
-          // Get calls made by this telecaller
-          // We now select 'created_at' and ORDER BY it DESCENDING to easily find the last call
-          const { data: calls } = await supabase
-            .from("call_logs")
-            .select("call_status, call_type, duration_seconds, created_at") 
-            .eq("user_id", telecaller.id)
-            .gte("created_at", startDate)
-            .lte("created_at", `${endDate}T23:59:59`)
-            .order("created_at", { ascending: false }) // Order for easy last call retrieval
-
-          const totalLeads = allTimeLeads?.length || 0
-          const totalCalls = calls?.length || 0
-          
-          // Calculate total and average call duration
-          const totalCallDuration = calls?.reduce((sum: number, call: CallLog) => sum + (call.duration_seconds || 0), 0) || 0
+          const totalCallDuration = userCalls.reduce((sum, call) => sum + (call.duration_seconds || 0), 0)
           const avgCallDuration = totalCalls > 0 ? totalCallDuration / totalCalls : 0
-          
-          // --- NEW FEATURE: Last Call Time and Average Time Between Calls ---
+
+          // Last Call & Avg Gap
           let lastCallTime: string | null = null
-          let avgTimeBetweenCalls: number = 0
+          let avgTimeBetweenCalls = 0
 
-          if (totalCalls > 0 && calls) {
-            // Last call is the first one in the descending order result
-            lastCallTime = calls[0].created_at 
-
-            if (totalCalls > 1) {
-              // Get all call times and sort them ascending for calculation
-              const sortedCallTimes = calls
-                .map(call => new Date(call.created_at).getTime())
-                .sort((a, b) => a - b) // Sort ascending by time (oldest to newest)
+          if (userCalls.length > 0) {
+            // calls are already sorted DESC from query
+            lastCallTime = userCalls[0].created_at 
+            
+            if (userCalls.length > 1) {
+              // We need sorted ASC for time gap calc
+              const times = userCalls
+                .map(c => new Date(c.created_at).getTime())
+                .sort((a, b) => a - b)
               
-              let totalTimeGap = 0
-              for (let i = 1; i < sortedCallTimes.length; i++) {
-                // Calculate gap in seconds
-                const gap = (sortedCallTimes[i] - sortedCallTimes[i-1]) / 1000
-                totalTimeGap += gap
-              }
-              
-              // Divide by total number of gaps (totalCalls - 1)
-              avgTimeBetweenCalls = totalTimeGap / (totalCalls - 1)
+              const totalGap = times[times.length - 1] - times[0]
+              // Avg gap = total range / (count - 1)
+              avgTimeBetweenCalls = (totalGap / 1000) / (userCalls.length - 1)
             }
           }
-          // -----------------------------------------------------------------
 
-          // Break down calls by status
           const callStatusBreakdown = {
-            connected: calls?.filter((call: CallLog) => (call.duration_seconds || 0) > 0).length || 0,
-            notConnected: calls?.filter((call: CallLog) => (call.duration_seconds || 0) === 0).length || 0,
-            noAnswer: calls?.filter((call: CallLog) => call.call_status === "nr").length || 0,
-            busy: calls?.filter((call: CallLog) => call.call_status === "nr").length || 0
+            connected: userCalls.filter(c => (c.duration_seconds || 0) > 0).length,
+            notConnected: userCalls.filter(c => (c.duration_seconds || 0) === 0).length,
+            noAnswer: userCalls.filter(c => c.call_status === "nr").length,
+            busy: userCalls.filter(c => c.call_status === "busy").length
           }
-          
-          const connectedCalls = callStatusBreakdown.connected
-          
-          const newLeads = periodLeads?.filter((lead: Lead) => 
-            lead.status === "new" || 
-            lead.status === "contacted"
-          ).length || 0
-          
-          const convertedLeads = periodLeads?.filter((lead: Lead) => 
-            lead.status === "Interested"
-          ).length || 0
 
-          performanceData.push({
+          const connectedCalls = callStatusBreakdown.connected
+          const newLeads = userLeads.filter(l => l.status === "new" || l.status === "contacted").length
+          const convertedLeads = userLeads.filter(l => l.status === "Interested").length
+
+          return {
             id: telecaller.id,
             name: telecaller.full_name,
             totalLeads,
@@ -214,32 +200,24 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
             newLeads,
             convertedLeads,
             conversionRate: totalLeads > 0 ? (convertedLeads / totalLeads) * 100 : 0,
-            isCheckedIn: telecallerStatus[telecaller.id] || false,
+            isCheckedIn: attendanceMap.get(telecaller.id) || false,
             totalCallDuration,
             avgCallDuration,
             callStatusBreakdown,
-            // NEW FIELDS
             lastCallTime,
             avgTimeBetweenCalls
-          })
-        }
-
-        // --- FINAL UPDATED SORTING LOGIC ---
-        // 1. Sort by isCheckedIn (true comes before false)
-        // 2. Then, sort by totalCalls descending
-        performanceData.sort((a, b) => {
-          // Primary sort: isCheckedIn (true before false)
-          if (a.isCheckedIn !== b.isCheckedIn) {
-            return b.isCheckedIn ? 1 : -1
           }
-          
-          // Secondary sort: totalCalls descending (highest calls first)
+        })
+
+        // Sort: Checked In first, then High Calls
+        performanceData.sort((a, b) => {
+          if (a.isCheckedIn !== b.isCheckedIn) return b.isCheckedIn ? 1 : -1
           return b.totalCalls - a.totalCalls
         })
 
         setData(performanceData)
       } catch (error) {
-        console.error("Error fetching telecaller performance:", error)
+        console.error("Error fetching performance:", error)
       } finally {
         setIsLoading(false)
       }
@@ -249,41 +227,21 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
   }, [startDate, endDate, telecallerId, supabase])
 
   const getPerformanceBadge = (rate: number, type: "connect" | "conversion") => {
-    const thresholds = type === "connect" ? [60, 40] : [15, 8] // Adjusted thresholds for more realistic goals
-
-    if (rate >= thresholds[0]) {
-      return (
-        <Badge className="bg-green-100 text-green-800 flex items-center gap-1">
-          <TrendingUp className="h-3 w-3" />
-          Excellent
-        </Badge>
-      )
-    } else if (rate >= thresholds[1]) {
-      return (
-        <Badge className="bg-yellow-100 text-yellow-800 flex items-center gap-1">
-          <Minus className="h-3 w-3" />
-          Good
-        </Badge>
-      )
-    } else {
-      return (
-        <Badge className="bg-red-100 text-red-800 flex items-center gap-1">
-          <TrendingDown className="h-3 w-3" />
-          Needs Improvement
-        </Badge>
-      )
-    }
+    const thresholds = type === "connect" ? [60, 40] : [15, 8]
+    if (rate >= thresholds[0]) return <Badge className="bg-green-100 text-green-800 flex items-center gap-1"><TrendingUp className="h-3 w-3" />Excellent</Badge>
+    else if (rate >= thresholds[1]) return <Badge className="bg-yellow-100 text-yellow-800 flex items-center gap-1"><Minus className="h-3 w-3" />Good</Badge>
+    else return <Badge className="bg-red-100 text-red-800 flex items-center gap-1"><TrendingDown className="h-3 w-3" />Needs Improvement</Badge>
   }
 
+  if (isLoading) return <div className="text-center py-4">Loading performance data...</div>
 
-  if (isLoading) {
-    return <div className="text-center py-4">Loading performance data...</div>
-  }
-
+  // ... (Keep the exact same JSX return as your original file)
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse">
-        <thead>
+         {/* ... COPY YOUR TABLE JSX HERE FROM ORIGINAL FILE ... */}
+         {/* It is identical, just the logic above changed */}
+         <thead>
           <tr className="border-b bg-gray-50">
             <th className="text-left p-4 font-semibold">Telecaller</th>
             <th className="text-left p-4 font-semibold">Status</th>
@@ -301,7 +259,6 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
                 Call Duration
               </div>
             </th>
-            {/* NEW COLUMNS ADDED HERE */}
             <th className="text-left p-4 font-semibold">
               <div className="flex items-center gap-1">
                 <Timer className="h-4 w-4" />
@@ -314,7 +271,6 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
                 Avg. Gap
               </div>
             </th>
-            {/* END NEW COLUMNS */}
             <th className="text-left p-4 font-semibold">Connected Calls</th>
             <th className="text-left p-4 font-semibold">Connect Rate</th>
             <th className="text-left p-4 font-semibold">Interested Leads</th>
@@ -360,14 +316,12 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
                   <div className="text-xs text-gray-500">Avg: {formatDuration(telecaller.avgCallDuration)}</div>
                 </div>
               </td>
-              {/* NEW DATA CELLS */}
               <td className="p-4 text-center">
                 <div className="font-semibold">{formatTime(telecaller.lastCallTime)}</div>
               </td>
               <td className="p-4 text-center">
                 <div className="font-semibold">{formatDuration(telecaller.avgTimeBetweenCalls)}</div>
               </td>
-              {/* END NEW DATA CELLS */}
               <td className="p-4 text-center">
                 <div className="font-semibold text-green-600">{telecaller.connectedCalls}</div>
               </td>
@@ -433,7 +387,6 @@ export function TelecallerPerformance({ startDate, endDate, telecallerId }: Tele
           ))}
         </tbody>
       </table>
-
       {data.length === 0 && (
         <div className="text-center py-8 text-gray-500">No performance data available for the selected period.</div>
       )}
