@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { attendanceService, AttendanceRecord, BreakRecord } from "@/lib/attendance-service";
-import { createClient } from "@/lib/supabase/client"; // Use client-side Supabase
-import { format, differenceInMinutes } from "date-fns"; // Add missing import
+import { attendanceService, AttendanceRecord } from "@/lib/attendance-service";
+import { createClient } from "@/lib/supabase/client"; 
 
 export function useAttendance() {
   const [todayAttendance, setTodayAttendance] = useState<AttendanceRecord | null>(null);
@@ -31,13 +30,15 @@ export function useAttendance() {
     }
   };
 
-  const checkIn = async (notes?: string) => {
+  // UPDATED: Added location argument here
+  const checkIn = async (notes?: string, location?: string) => {
     try {
       setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
       
       if (user) {
-        const attendance = await attendanceService.checkIn(user.id, notes);
+        // UPDATED: Pass location to the service
+        const attendance = await attendanceService.checkIn(user.id, notes, location);
         setTodayAttendance(attendance);
         return attendance;
       }
