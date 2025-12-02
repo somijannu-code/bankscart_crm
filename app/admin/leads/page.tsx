@@ -10,6 +10,7 @@ interface SearchParams {
   status?: string
   priority?: string
   assigned_to?: string
+  source?: string
   search?: string
   page?: string
   limit?: string
@@ -22,54 +23,59 @@ export default async function LeadsPage({
 }) {
   const supabase = await createClient()
   
-  // Pagination parameters
+  // 1. PERFORMANCE: Reduced limit to 50 for instant load
   const page = parseInt(searchParams.page || "1")
-  const limit = Math.min(parseInt(searchParams.limit || "1000"), 10000) // Cap at 10,000
+  const limit = parseInt(searchParams.limit || "50") 
   const offset = (page - 1) * limit
 
-  // Build query with filters
+  // 2. Build optimized query
   let query = supabase
     .from("leads")
     .select(`
       *,
       assigned_user:users!leads_assigned_to_fkey(id, full_name),
       assigner:users!leads_assigned_by_fkey(id, full_name)
-    `)
+    `, { count: 'exact' }) // Get count in same query
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1)
 
-  // Apply filters
-  if (searchParams.status) {
-    query = query.eq("status", searchParams.status)
+  // Apply filters server-side
+  if (searchParams.status && searchParams.status !== 'all') query = query.eq("status", searchParams.status)
+  if (searchParams.priority && searchParams.priority !== 'all') query = query.eq("priority", searchParams.priority)
+  if (searchParams.assigned_to && searchParams.assigned_to !== 'all') {
+    if (searchParams.assigned_to === 'unassigned') query = query.is("assigned_to", null)
+    else query = query.eq("assigned_to", searchParams.assigned_to)
   }
-  if (searchParams.priority) {
-    query = query.eq("priority", searchParams.priority)
-  }
-  if (searchParams.assigned_to) {
-    query = query.eq("assigned_to", searchParams.assigned_to)
-  }
+  if (searchParams.source && searchParams.source !== 'all') query = query.eq("source", searchParams.source)
+  
   if (searchParams.search) {
     query = query.or(
-      `name.ilike.%${searchParams.search}%,email.ilike.%${searchParams.search}%,phone.ilike.%${searchParams.search}%,company.ilike.%${searchParams.search}%`,
+      `name.ilike.%${searchParams.search}%,email.ilike.%${searchParams.search}%,phone.ilike.%${searchParams.search}%,company.ilike.%${searchParams.search}%`
     )
   }
 
-  const { data: leads } = await query
+  const { data: leads, count: totalResults } = await query
 
-  // Get telecallers for assignment
+  // 3. Fetch supporting data efficiently
   const { data: telecallers } = await supabase
     .from("users")
     .select("id, full_name")
     .eq("role", "telecaller")
     .eq("is_active", true)
 
-  // Get stats
-  const { count: totalLeads } = await supabase.from("leads").select("*", { count: "exact", head: true })
+  // Fetch today's attendance once (to pass to table)
+  const today = new Date().toISOString().split('T')[0]
+  const { data: attendance } = await supabase
+    .from("attendance")
+    .select("user_id, check_in")
+    .eq("date", today)
+  
+  const telecallerStatus: Record<string, boolean> = {}
+  attendance?.forEach(r => telecallerStatus[r.user_id] = !!r.check_in)
 
-  const { count: unassignedLeads } = await supabase
-    .from("leads")
-    .select("*", { count: "exact", head: true })
-    .is("assigned_to", null)
+  // Stats (kept separate for accuracy independent of filters)
+  const { count: totalLeads } = await supabase.from("leads").select("*", { count: "exact", head: true })
+  const { count: unassignedLeads } = await supabase.from("leads").select("*", { count: "exact", head: true }).is("assigned_to", null)
 
   return (
     <div className="p-6 space-y-6">
@@ -139,7 +145,7 @@ export default async function LeadsPage({
         </Card>
       </div>
 
-      {/* Filters */}
+      {/* Filters Component */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -157,11 +163,18 @@ export default async function LeadsPage({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <FileSpreadsheet className="h-5 w-5" />
-            All Leads ({totalLeads?.toLocaleString() || 0})
+            Leads List ({totalResults?.toLocaleString() || 0} results)
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <LeadsTable leads={leads || []} telecallers={telecallers || []} />
+          <LeadsTable 
+            leads={leads || []} 
+            telecallers={telecallers || []} 
+            telecallerStatus={telecallerStatus}
+            totalCount={totalResults || 0}
+            currentPage={page}
+            pageSize={limit}
+          />
         </CardContent>
       </Card>
     </div>
