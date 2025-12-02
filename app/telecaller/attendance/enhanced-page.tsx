@@ -47,9 +47,10 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
-import { AttendanceRecord, BreakRecord } from "@/lib/database-schema";
-import { enhancedAttendanceService } from "@/lib/attendance-service-enhanced";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+
+// Import your specific service and types
+import { attendanceService, AttendanceRecord } from "@/lib/attendance-service";
 
 export default function EnhancedTelecallerAttendancePage() {
   const [dateRange, setDateRange] = useState<{ start: Date; end: Date }>({
@@ -57,44 +58,36 @@ export default function EnhancedTelecallerAttendancePage() {
     end: endOfMonth(new Date())
   });
   const [attendanceHistory, setAttendanceHistory] = useState<AttendanceRecord[]>([]);
-  const [allBreakRecords, setAllBreakRecords] = useState<BreakRecord[]>([]); 
   const [todayAttendance, setTodayAttendance] = useState<AttendanceRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [notes, setNotes] = useState("");
   const [showCheckInDialog, setShowCheckInDialog] = useState(false);
   const [showCheckOutDialog, setShowCheckOutDialog] = useState(false);
   const [showBreakDialog, setShowBreakDialog] = useState(false);
-  const [breakType, setBreakType] = useState("lunch");
   const [idleTime, setIdleTime] = useState(0);
   const [dateRangeOpen, setDateRangeOpen] = useState(false);
   
-  // FIX: Use useRef for lastActivity to prevent re-render loops
+  // FIX: Stable ref for activity tracking to prevent re-render loops
   const lastActivityRef = useRef<Date>(new Date());
   
   const supabase = createClient();
 
-  // FIX: completely rewritten idle timer logic
+  // FIX: Simplified Idle Timer Logic
   useEffect(() => {
-    // Function to handle user activity
     const handleUserActivity = () => {
       lastActivityRef.current = new Date();
-      // Only reset state if it was previously > 0 to avoid unnecessary renders
+      // Only reset if currently showing idle time to prevent constant re-renders
       setIdleTime((prev) => (prev > 0 ? 0 : prev));
     };
 
-    // Events to track
     const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
     events.forEach(event => {
       window.addEventListener(event, handleUserActivity, true);
     });
     
-    // Check for idle status every minute
     const intervalId = setInterval(() => {
       const now = new Date();
-      // Calculate difference in minutes
       const diff = differenceInMinutes(now, lastActivityRef.current);
-      
-      // If idle for more than 5 minutes, update the state
       if (diff >= 5) {
         setIdleTime(diff - 5);
       }
@@ -106,7 +99,7 @@ export default function EnhancedTelecallerAttendancePage() {
         window.removeEventListener(event, handleUserActivity, true);
       });
     };
-  }, []); // Empty dependency array ensures this only runs once on mount
+  }, []);
 
   useEffect(() => {
     loadAttendanceData();
@@ -121,27 +114,22 @@ export default function EnhancedTelecallerAttendancePage() {
       const startDateStr = format(dateRange.start, "yyyy-MM-dd");
       const endDateStr = format(dateRange.end, "yyyy-MM-dd");
 
+      // Load Today's Record
       const today = new Date();
       if (isAfter(today, dateRange.start) || isSameDay(today, dateRange.start)) {
-          const todayRecord = await enhancedAttendanceService.getTodayAttendance(user.id);
+          const todayRecord = await attendanceService.getTodayAttendance(user.id);
           setTodayAttendance(todayRecord);
       } else {
           setTodayAttendance(null);
       }
 
-      const history = await enhancedAttendanceService.getAttendanceHistory(
+      // Load History
+      const history = await attendanceService.getAttendanceHistory(
         user.id,
         startDateStr,
         endDateStr
       );
       setAttendanceHistory(history);
-
-      const breaks = await enhancedAttendanceService.getBreakRecords(
-         user.id,
-         startDateStr, 
-         endDateStr 
-      );
-      setAllBreakRecords(breaks);
 
     } catch (error) {
       console.error("Error loading attendance data:", error);
@@ -155,13 +143,9 @@ export default function EnhancedTelecallerAttendancePage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const attendance = await enhancedAttendanceService.checkIn(
-        user.id,
-        undefined, 
-        undefined, 
-        undefined, 
-        notes
-      );
+      // NOTE: We pass 'Office' as hardcoded location since browser geo-location 
+      // requires extra permission handling logic not present in your snippet.
+      const attendance = await attendanceService.checkIn(user.id, notes, "Office");
       
       setTodayAttendance(attendance);
       setNotes("");
@@ -177,13 +161,7 @@ export default function EnhancedTelecallerAttendancePage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const attendance = await enhancedAttendanceService.checkOut(
-        user.id,
-        undefined, 
-        undefined, 
-        undefined, 
-        notes
-      );
+      const attendance = await attendanceService.checkOut(user.id, notes);
       
       setTodayAttendance(attendance);
       setNotes("");
@@ -194,80 +172,55 @@ export default function EnhancedTelecallerAttendancePage() {
     }
   };
 
-  const handleStartBreak = async () => {
+  const handleStartLunch = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !todayAttendance) return;
+      if (!user) return;
 
-      await enhancedAttendanceService.startBreak(
-        user.id,
-        breakType,
-        notes
-      );
+      const attendance = await attendanceService.startLunchBreak(user.id);
       
-      const todayBreaks = await enhancedAttendanceService.getBreakRecords(
-        user.id,
-        todayAttendance.date,
-        todayAttendance.date 
-      );
-      setAllBreakRecords(prev => prev.filter(b => b.date !== todayAttendance.date).concat(todayBreaks));
-      
-      const updatedAttendance = await enhancedAttendanceService.getTodayAttendance(user.id);
-      setTodayAttendance(updatedAttendance);
-      
-      setNotes("");
+      setTodayAttendance(attendance);
       setShowBreakDialog(false);
     } catch (error) {
       console.error("Start break failed:", error);
     }
   };
 
-  const handleEndBreak = async (breakId: string) => {
+  const handleEndLunch = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !todayAttendance) return;
+      if (!user) return;
 
-      await enhancedAttendanceService.endBreak(breakId, notes);
+      const attendance = await attendanceService.endLunchBreak(user.id);
       
-      const todayBreaks = await enhancedAttendanceService.getBreakRecords(
-        user.id,
-        todayAttendance.date,
-        todayAttendance.date 
-      );
-      setAllBreakRecords(prev => prev.filter(b => b.date !== todayAttendance.date).concat(todayBreaks));
-      
-      const updatedAttendance = await enhancedAttendanceService.getTodayAttendance(user.id);
-      setTodayAttendance(updatedAttendance);
-      
-      setNotes("");
+      setTodayAttendance(attendance);
     } catch (error) {
       console.error("End break failed:", error);
     }
   };
 
-  const getWorkingHours = (record: AttendanceRecord) => {
-    if (!record.check_in) return null;
+  // Helper to calculate hours live on the client side
+  const getLiveWorkingHours = (record: AttendanceRecord) => {
+    if (!record.check_in) return { hours: 0, minutes: 0 };
     
     const checkInTime = new Date(record.check_in);
     const checkOutTime = record.check_out ? new Date(record.check_out) : new Date();
     
     let totalMinutes = differenceInMinutes(checkOutTime, checkInTime);
     
-    const recordBreaks = allBreakRecords.filter(b => b.date === record.date);
-    
-    recordBreaks.forEach(breakRecord => {
-      if (breakRecord.end_time) {
-        totalMinutes -= differenceInMinutes(
-          new Date(breakRecord.end_time),
-          new Date(breakRecord.start_time)
-        );
-      } else if (isSameDay(parseISO(record.date), new Date())) {
-        totalMinutes -= differenceInMinutes(
-          new Date(), 
-          new Date(breakRecord.start_time)
-        );
-      }
-    });
+    // Calculate break deductions
+    if (record.lunch_start) {
+        if (record.lunch_end) {
+            // Completed break
+            const breakDuration = differenceInMinutes(new Date(record.lunch_end), new Date(record.lunch_start));
+            totalMinutes -= breakDuration;
+        } else {
+            // Ongoing break - subtract time from start of break to NOW
+            // Because 'checkOutTime' (now) keeps advancing, we must remove the break portion
+            const breakDuration = differenceInMinutes(new Date(), new Date(record.lunch_start));
+            totalMinutes -= breakDuration;
+        }
+    }
 
     if (totalMinutes < 0) totalMinutes = 0;
     
@@ -277,15 +230,11 @@ export default function EnhancedTelecallerAttendancePage() {
     };
   };
 
-  const todayBreakRecords = todayAttendance ? allBreakRecords.filter(b => b.date === todayAttendance.date) : [];
-
   const getStatusColor = (status: string) => {
     switch (status) {
       case "present": return "bg-green-100 text-green-800";
       case "late": return "bg-yellow-100 text-yellow-800";
       case "absent": return "bg-red-100 text-red-800";
-      case "half-day": return "bg-orange-100 text-orange-800";
-      case "leave": return "bg-blue-100 text-blue-800";
       default: return "bg-gray-100 text-gray-800";
     }
   };
@@ -295,61 +244,24 @@ export default function EnhancedTelecallerAttendancePage() {
       case "present": return <CheckCircle className="h-4 w-4 text-green-500" />;
       case "late": return <AlertCircle className="h-4 w-4 text-yellow-500" />;
       case "absent": return <XCircle className="h-4 w-4 text-red-500" />;
-      case "half-day": return <Clock className="h-4 w-4 text-orange-500" />;
-      case "leave": return <Coffee className="h-4 w-4 text-blue-500" />;
       default: return <AlertCircle className="h-4 w-4 text-gray-500" />;
     }
   };
 
   const calculateStats = () => {
-    const presentDays = attendanceHistory.filter(a => a.status === 'present' || a.status === 'late').length;
-    const absentDays = attendanceHistory.filter(a => a.status === 'absent').length;
-    const lateDays = attendanceHistory.filter(a => a.status === 'late').length;
-    const halfDays = attendanceHistory.filter(a => a.status === 'half-day').length;
+    const presentDays = attendanceHistory.filter(a => a.status === 'present').length;
+    // Assuming absent/late logic is handled by your backend or simplified here
+    const totalDays = attendanceHistory.length;
     
-    let totalOvertime = 0;
-    attendanceHistory.forEach(record => {
-      if (record.overtime_hours) {
-        const parts = record.overtime_hours.split(':');
-        const hours = parseInt(parts[0], 10);
-        const minutes = parts.length > 1 ? parseInt(parts[1], 10) : 0;
-        totalOvertime += hours + (minutes / 60);
-      }
-    });
-    
-    return { presentDays, absentDays, lateDays, halfDays, totalOvertime };
+    return { presentDays, totalDays };
   };
 
   const stats = calculateStats();
-
-  const getTotalBreakTime = () => {
-    let totalMinutes = 0;
-    todayBreakRecords.forEach(breakRecord => {
-      if (breakRecord.end_time) {
-        totalMinutes += differenceInMinutes(
-          new Date(breakRecord.end_time),
-          new Date(breakRecord.start_time)
-        );
-      } else {
-        totalMinutes += differenceInMinutes(
-          new Date(),
-          new Date(breakRecord.start_time)
-        );
-      }
-    });
-    return {
-      hours: Math.floor(totalMinutes / 60),
-      minutes: totalMinutes % 60
-    };
-  };
-
-  const breakTime = getTotalBreakTime();
 
   const quickDateRanges = [
     { label: "This Month", value: "current-month" },
     { label: "Last Month", value: "last-month" },
     { label: "Last 30 Days", value: "last-30-days" },
-    { label: "Last 3 Months", value: "last-3-months" },
   ];
 
   const handleQuickDateRange = (range: string) => {
@@ -372,11 +284,6 @@ export default function EnhancedTelecallerAttendancePage() {
         start.setDate(today.getDate() - 30);
         end = today;
         break;
-      case "last-3-months":
-        start = new Date(today);
-        start.setMonth(today.getMonth() - 3);
-        end = today;
-        break;
       default:
         start = startOfMonth(today);
         end = endOfMonth(today);
@@ -386,13 +293,13 @@ export default function EnhancedTelecallerAttendancePage() {
     setDateRangeOpen(false);
   };
 
-  if (loading) {
+  if (loading && !todayAttendance && attendanceHistory.length === 0) {
     return <div className="p-6">Loading attendance data...</div>;
   }
 
   const isCheckedIn = !!todayAttendance?.check_in;
   const isCheckedOut = !!todayAttendance?.check_out;
-  const isOnBreak = todayBreakRecords.some(b => !b.end_time);
+  const isOnLunch = !!todayAttendance?.lunch_start && !todayAttendance?.lunch_end;
 
   return (
     <div className="p-6 space-y-6">
@@ -482,20 +389,8 @@ export default function EnhancedTelecallerAttendancePage() {
                 <span className="text-green-600 font-semibold">{stats.presentDays} days</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-sm font-medium">Late:</span>
-                <span className="text-yellow-600 font-semibold">{stats.lateDays} days</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium">Absent:</span>
-                <span className="text-red-600 font-semibold">{stats.absentDays} days</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium">Half Days:</span>
-                <span className="text-orange-600 font-semibold">{stats.halfDays} days</span>
-              </div>
-              <div className="flex justify-between items-center pt-2 border-t">
-                <span className="text-sm font-medium">Overtime:</span>
-                <span className="font-semibold">{stats.totalOvertime.toFixed(1)} hours</span>
+                <span className="text-sm font-medium">Working Days:</span>
+                <span className="text-gray-600 font-semibold">{stats.totalDays} days</span>
               </div>
             </div>
           </CardContent>
@@ -517,17 +412,11 @@ export default function EnhancedTelecallerAttendancePage() {
                     <div className="flex items-center gap-2 text-green-600">
                       <CheckCircle className="h-4 w-4" />
                       <span>{format(new Date(todayAttendance!.check_in!), "hh:mm a")}</span>
-                      {todayAttendance!.location_check_in && (
-                        <div className="flex items-center gap-1">
-                          <MapPin className="h-4 w-4 text-blue-500" />
-                          <span className="text-xs">Office</span> 
-                        </div>
-                      )}
                       {todayAttendance!.ip_check_in && (
                         <div className="flex items-center gap-1">
                           <Wifi className="h-4 w-4 text-green-500" />
                           <span className="text-xs">
-                            {todayAttendance!.ip_check_in.substring(0, 7) + "..."}
+                            {todayAttendance!.ip_check_in}
                           </span>
                         </div>
                       )}
@@ -540,36 +429,39 @@ export default function EnhancedTelecallerAttendancePage() {
                   )}
                 </div>
 
+                {/* Lunch Break Section based on simple schema */}
                 {isCheckedIn && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">Breaks:</span>
+                      <span className="text-sm font-medium">Lunch Break:</span>
                       <span className="text-sm text-gray-500">
-                        {todayBreakRecords.filter(b => b.end_time).length} taken
+                         {todayAttendance?.lunch_start ? (
+                            todayAttendance.lunch_end ? "Completed" : "In Progress"
+                         ) : "Not taken"}
                       </span>
                     </div>
                     
-                    {todayBreakRecords.map(breakRecord => (
-                      <div key={breakRecord.id} className="flex items-center justify-between text-sm pl-4">
+                    {todayAttendance?.lunch_start && (
+                      <div className="flex items-center justify-between text-sm pl-4">
                         <div>
-                          <span className="capitalize">{breakRecord.break_type}</span>
+                          <span className="capitalize">Lunch</span>
                           <span className="text-gray-500 ml-2">
-                            {format(new Date(breakRecord.start_time), "hh:mm a")}
-                            {breakRecord.end_time && ` - ${format(new Date(breakRecord.end_time), "hh:mm a")}`}
+                            {format(new Date(todayAttendance.lunch_start), "hh:mm a")}
+                            {todayAttendance.lunch_end && ` - ${format(new Date(todayAttendance.lunch_end), "hh:mm a")}`}
                           </span>
                         </div>
-                        {!breakRecord.end_time && (
+                        {!todayAttendance.lunch_end && (
                           <Button 
                             size="sm" 
                             variant="outline" 
-                            onClick={() => handleEndBreak(breakRecord.id)}
+                            onClick={handleEndLunch}
                             className="text-red-500 border-red-200 hover:bg-red-50"
                           >
-                            End Break
+                            End Lunch
                           </Button>
                         )}
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
 
@@ -609,26 +501,8 @@ export default function EnhancedTelecallerAttendancePage() {
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">Working Hours:</span>
                     <span className="text-sm font-semibold">
-                      {getWorkingHours(todayAttendance!)?.hours}h {getWorkingHours(todayAttendance!)?.minutes}m
+                      {getLiveWorkingHours(todayAttendance!).hours}h {getLiveWorkingHours(todayAttendance!).minutes}m
                     </span>
-                  </div>
-                )}
-
-                {todayBreakRecords.length > 0 && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Total Break Time:</span>
-                    <span className="text-sm font-semibold">
-                      {breakTime.hours}h {breakTime.minutes}m
-                    </span>
-                  </div>
-                )}
-
-                {todayAttendance?.overtime_hours && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Overtime:</span>
-                    <div className="flex items-center gap-1">
-                      <span className="text-sm font-semibold text-green-600">{todayAttendance.overtime_hours}</span>
-                    </div>
                   </div>
                 )}
               </div>
@@ -665,52 +539,31 @@ export default function EnhancedTelecallerAttendancePage() {
                       </div>
                     </DialogContent>
                   </Dialog>
-                ) : !isCheckedOut && !isOnBreak ? (
+                ) : !isCheckedOut && !isOnLunch ? (
                   <>
-                    <Dialog open={showBreakDialog} onOpenChange={setShowBreakDialog}>
-                      <DialogTrigger asChild>
-                        <Button variant="outline" className="flex-1">
-                          <Coffee className="h-4 w-4 mr-2" />
-                          Start Break
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>Start Break</DialogTitle>
-                          <DialogDescription>
-                            Take a break from work.
-                          </DialogDescription>
-                        </DialogHeader>
-                        <div className="space-y-4">
-                          <div className="space-y-2">
-                            <Label>Break Type</Label>
-                            <Select value={breakType} onValueChange={setBreakType}>
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="lunch">Lunch Break</SelectItem>
-                                <SelectItem value="tea">Tea Break</SelectItem>
-                                <SelectItem value="personal">Personal Break</SelectItem>
-                                <SelectItem value="meeting">Meeting</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="break-notes">Notes (Optional)</Label>
-                            <Textarea
-                              id="break-notes"
-                              placeholder="Any notes..."
-                              value={notes}
-                              onChange={(e) => setNotes(e.target.value)}
-                            />
-                          </div>
-                          <Button onClick={handleStartBreak} className="w-full">
-                            Start Break
-                          </Button>
-                        </div>
-                      </DialogContent>
-                    </Dialog>
+                    {!todayAttendance?.lunch_start && (
+                        <Dialog open={showBreakDialog} onOpenChange={setShowBreakDialog}>
+                        <DialogTrigger asChild>
+                            <Button variant="outline" className="flex-1">
+                            <Coffee className="h-4 w-4 mr-2" />
+                            Start Lunch
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                            <DialogHeader>
+                            <DialogTitle>Start Lunch Break</DialogTitle>
+                            <DialogDescription>
+                                Take a lunch break.
+                            </DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-4">
+                            <Button onClick={handleStartLunch} className="w-full">
+                                Confirm Start Lunch
+                            </Button>
+                            </div>
+                        </DialogContent>
+                        </Dialog>
+                    )}
 
                     <Dialog open={showCheckOutDialog} onOpenChange={setShowCheckOutDialog}>
                       <DialogTrigger asChild>
@@ -743,10 +596,10 @@ export default function EnhancedTelecallerAttendancePage() {
                       </DialogContent>
                     </Dialog>
                   </>
-                ) : isCheckedIn && isOnBreak && (
+                ) : isCheckedIn && isOnLunch && (
                     <Button disabled className="flex-1 bg-orange-500 hover:bg-orange-600">
                         <Pause className="h-4 w-4 mr-2" />
-                        On Break
+                        On Lunch Break
                     </Button>
                 )}
               </div>
@@ -769,33 +622,12 @@ export default function EnhancedTelecallerAttendancePage() {
                 <TableHead>Status</TableHead>
                 <TableHead>Check-in</TableHead>
                 <TableHead>Check-out</TableHead>
-                <TableHead>Hours</TableHead>
-                <TableHead>Breaks</TableHead>
-                <TableHead>Overtime</TableHead>
+                <TableHead>Total Hours</TableHead>
+                <TableHead>Break</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {attendanceHistory.map(record => {
-                const dateBreaks = allBreakRecords.filter(b => b.date === record.date);
-                const totalBreakMinutes = dateBreaks.reduce((total, breakRecord) => {
-                  if (breakRecord.end_time) {
-                    return total + differenceInMinutes(
-                      new Date(breakRecord.end_time),
-                      new Date(breakRecord.start_time)
-                    );
-                  }
-                  return total;
-                }, 0);
-                
-                const breakHours = Math.floor(totalBreakMinutes / 60);
-                const breakMinutes = totalBreakMinutes % 60;
-
-                const displayHours = record.check_out 
-                  ? record.total_hours
-                  : (isSameDay(parseISO(record.date), new Date()) && record.check_in 
-                      ? `${getWorkingHours(record)?.hours}h ${getWorkingHours(record)?.minutes}m` 
-                      : record.total_hours || '-');
-                
                 return (
                   <TableRow key={record.id}>
                     <TableCell>
@@ -807,7 +639,7 @@ export default function EnhancedTelecallerAttendancePage() {
                       <div className="flex items-center gap-2">
                         {getStatusIcon(record.status)}
                         <Badge className={getStatusColor(record.status)}>
-                          {record.status.replace('-', ' ')}
+                          {record.status}
                         </Badge>
                       </div>
                     </TableCell>
@@ -818,17 +650,10 @@ export default function EnhancedTelecallerAttendancePage() {
                       {record.check_out ? format(new Date(record.check_out), "hh:mm a") : '-'}
                     </TableCell>
                     <TableCell>
-                      {displayHours}
+                      {record.total_hours || '-'}
                     </TableCell>
                     <TableCell>
-                      {totalBreakMinutes > 0 ? `${breakHours}h ${breakMinutes}m` : '-'}
-                    </TableCell>
-                    <TableCell>
-                      {record.overtime_hours ? (
-                        <div className="flex items-center gap-1">
-                          <span className="text-green-600">{record.overtime_hours}</span>
-                        </div>
-                      ) : '-'}
+                      {record.break_hours || '-'}
                     </TableCell>
                   </TableRow>
                 );
