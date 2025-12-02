@@ -1,11 +1,9 @@
 // app/telecaller/calls/page.tsx
 import { createClient } from "@/lib/supabase/server"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Phone, Clock, Calendar, User, FileText, Bell } from "lucide-react"
+import { Phone, Clock, Calendar, User, FileText, Bell, MessageSquare } from "lucide-react"
 import { format, isFuture } from "date-fns"
 
 export default async function CallHistoryPage({
@@ -21,10 +19,18 @@ export default async function CallHistoryPage({
   } = await supabase.auth.getUser()
   if (!user) return null
 
-  // Build query with filters - using simple select without joins first
+  // Build query - JOINING leads table directly
   let query = supabase
     .from("call_logs")
-    .select("*")
+    .select(`
+      *,
+      leads (
+        id,
+        name,
+        phone,
+        company
+      )
+    `)
     .eq("user_id", user.id)
 
   // Apply filters
@@ -64,24 +70,6 @@ export default async function CallHistoryPage({
         </Card>
       </div>
     )
-  }
-
-  // If you need lead information, fetch it separately
-  const leadIds = callLogs?.map((call: { lead_id: any; }) => call.lead_id).filter(Boolean) || []
-  let leadsData: Record<string, any> = {}
-  
-  if (leadIds.length > 0) {
-    const { data: leads } = await supabase
-      .from("leads")
-      .select("id, name, phone, company")
-      .in("id", leadIds)
-    
-    if (leads) {
-      leadsData = leads.reduce((acc: Record<string, any>, lead: { id: string | number; }) => {
-        acc[lead.id] = lead
-        return acc
-      }, {} as Record<string, any>)
-    }
   }
 
   const getStatusColor = (callType: string) => {
@@ -271,7 +259,11 @@ export default async function CallHistoryPage({
       {/* Call History List */}
       <div className="space-y-4">
         {callLogs?.map((call: any) => {
-          const lead = leadsData[call.lead_id]
+          // Access the joined lead data directly
+          // Supabase might return it as an object or an array depending on your FK setup
+          const rawLead = call.leads
+          const lead = Array.isArray(rawLead) ? rawLead[0] : rawLead
+          
           return (
             <Card key={call.id} className="hover:shadow-md transition-shadow">
               <CardContent className="p-6">
@@ -284,7 +276,9 @@ export default async function CallHistoryPage({
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center space-x-2 mb-2">
-                        <p className="text-lg font-semibold text-gray-900">{lead?.name || "Unknown Lead"}</p>
+                        <p className="text-lg font-semibold text-gray-900">
+                          {lead?.name || "Unknown Lead"}
+                        </p>
                         <Badge className={getStatusColor(call.call_type)}>
                           {call.call_type?.replace("_", " ").toUpperCase() || "UNKNOWN"}
                         </Badge>
