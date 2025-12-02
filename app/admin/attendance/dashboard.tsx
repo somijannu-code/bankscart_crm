@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { format, startOfMonth, endOfMonth, subMonths, addMonths, parseISO, isSameDay } from "date-fns";
+import { format, startOfMonth, endOfMonth, subMonths, addMonths, parseISO, isSameDay, setHours, setMinutes, isAfter } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
-  Calendar as CalendarIcon, // Renamed icon to avoid conflict
+  Calendar as CalendarIcon,
   Users, 
   Clock, 
   Download, 
@@ -46,12 +46,12 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu";
-import { Calendar } from "@/components/ui/calendar"; // Ensure this component exists
+import { Calendar } from "@/components/ui/calendar"; 
 import { 
   Popover, 
   PopoverContent, 
   PopoverTrigger 
-} from "@/components/ui/popover"; // Ensure this component exists
+} from "@/components/ui/popover";
 import { createClient } from "@/lib/supabase/client";
 import { User, AttendanceRecord } from "@/lib/database-schema";
 
@@ -64,9 +64,8 @@ type ActivityItem = {
 };
 
 export function AdminAttendanceDashboard() {
-  // Initialize with today or a specific date if needed
   const [dateRange, setDateRange] = useState<{ start: Date; end: Date }>({
-    start: new Date(), // Default to today
+    start: new Date(),
     end: new Date()
   });
   const [view, setView] = useState<'daily' | 'monthly'>('daily');
@@ -97,6 +96,20 @@ export function AdminAttendanceDashboard() {
     };
   }, [dateRange, view]);
 
+  // --- NEW: Helper to determine Late status dynamically ---
+  const determineStatus = (record: AttendanceRecord) => {
+    if (!record.check_in) return "absent";
+    
+    // Check if check-in is after 09:30 AM
+    const checkInTime = parseISO(record.check_in);
+    const lateThreshold = setMinutes(setHours(checkInTime, 9), 30); // Set time to 09:30 AM same day
+
+    if (isAfter(checkInTime, lateThreshold)) {
+      return "late";
+    }
+    return "present";
+  };
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -110,11 +123,11 @@ export function AdminAttendanceDashboard() {
       if (usersError) throw usersError;
       setUsers(usersData || []);
 
-      // 2. Fetch Attendance Data for Selected Range
+      // 2. Fetch Attendance Data
       const startDateStr = format(dateRange.start, "yyyy-MM-dd");
       const endDateStr = format(dateRange.end, "yyyy-MM-dd");
 
-      const { data: attendanceData, error: attendanceError } = await supabase
+      const { data: rawAttendanceData, error: attendanceError } = await supabase
         .from("attendance")
         .select(`*, user:users!attendance_user_id_fkey(full_name, email, role, department)`)
         .gte("date", startDateStr)
@@ -122,12 +135,17 @@ export function AdminAttendanceDashboard() {
         .order("date", { ascending: false });
 
       if (attendanceError) throw attendanceError;
-      setAttendanceData(attendanceData || []);
 
-      // 3. Process Activity Feed (BASED ON SELECTED DATE, not just "Today")
-      // If viewing daily, show feed for that day. If monthly, show for the latest day in range.
+      // Process data to apply strict 09:30 AM Late Logic
+      const processedData = (rawAttendanceData || []).map(record => ({
+        ...record,
+        status: determineStatus(record) // Override status based on time
+      }));
+
+      setAttendanceData(processedData);
+
+      // 3. Process Live Activity Feed
       const feedDateStr = view === 'daily' ? startDateStr : format(new Date(), "yyyy-MM-dd");
-      
       const { data: feedData } = await supabase
         .from("attendance")
         .select(`*, user:users!attendance_user_id_fkey(full_name)`)
@@ -139,11 +157,9 @@ export function AdminAttendanceDashboard() {
         let breakCount = 0;
 
         feedData.forEach((record) => {
-          // Track counts (snapshot for that day)
           if (record.check_in && !record.check_out) activeCount++;
           if (record.on_break) breakCount++;
 
-          // Add Check-in Event
           if (record.check_in) {
             feed.push({
               id: `${record.id}-in`,
@@ -153,8 +169,6 @@ export function AdminAttendanceDashboard() {
               timestamp: new Date(record.check_in).getTime()
             });
           }
-
-          // Add Check-out Event
           if (record.check_out) {
             feed.push({
               id: `${record.id}-out`,
@@ -164,8 +178,6 @@ export function AdminAttendanceDashboard() {
               timestamp: new Date(record.check_out).getTime()
             });
           }
-
-          // Add Break Events (Simulated based on status/timestamps)
           if (record.on_break && record.updated_at) {
              feed.push({
               id: `${record.id}-break-start`,
@@ -177,14 +189,11 @@ export function AdminAttendanceDashboard() {
           }
         });
 
-        // Sort by timestamp descending (newest first)
         feed.sort((a, b) => b.timestamp - a.timestamp);
-        
         setActivityFeed(feed);
         setActiveEmployees(activeCount);
         setEmployeesOnBreak(breakCount);
       }
-
     } catch (error) {
       console.error("Error loading data:", error);
     } finally {
@@ -195,11 +204,8 @@ export function AdminAttendanceDashboard() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case "present": return "bg-green-100 text-green-800";
-      case "late": return "bg-yellow-100 text-yellow-800";
+      case "late": return "bg-yellow-100 text-yellow-800"; // Distinct Late Color
       case "absent": return "bg-red-100 text-red-800";
-      case "half-day": return "bg-orange-100 text-orange-800";
-      case "leave": return "bg-blue-100 text-blue-800";
-      case "holiday": return "bg-purple-100 text-purple-800";
       default: return "bg-gray-100 text-gray-800";
     }
   };
@@ -207,53 +213,50 @@ export function AdminAttendanceDashboard() {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "present": return <CheckCircle className="h-4 w-4 text-green-500" />;
-      case "late": return <AlertCircle className="h-4 w-4 text-yellow-500" />;
+      case "late": return <Clock className="h-4 w-4 text-yellow-500" />; // Clock icon for late
       case "absent": return <XCircle className="h-4 w-4 text-red-500" />;
-      case "half-day": return <Clock className="h-4 w-4 text-orange-500" />;
-      case "leave": return <Coffee className="h-4 w-4 text-blue-500" />;
-      case "holiday": return <CalendarIcon className="h-4 w-4 text-purple-500" />;
       default: return <AlertCircle className="h-4 w-4 text-gray-500" />;
     }
   };
 
-  const getTimeAgo = (dateString: string) => {
-    if (!dateString) return "";
-    const date = parseISO(dateString);
-    const now = new Date();
-    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
-    
-    if (diffInMinutes < 1) return "Just now";
-    if (diffInMinutes < 60) return `${diffInMinutes} min ago`;
-    const diffInHours = Math.floor(diffInMinutes / 60);
-    if (diffInHours < 24) return `${diffInHours} hours ago`;
-    return `${Math.floor(diffInHours / 24)} days ago`;
-  };
-
   const navigateDateRange = (direction: 'prev' | 'next') => {
     const newDate = new Date(dateRange.start);
-    
     if (view === 'daily') {
       newDate.setDate(newDate.getDate() + (direction === 'next' ? 1 : -1));
       setDateRange({ start: newDate, end: newDate });
     } else {
-      const newStart = direction === 'prev' 
-        ? subMonths(dateRange.start, 1)
-        : addMonths(dateRange.start, 1);
+      const newStart = direction === 'prev' ? subMonths(dateRange.start, 1) : addMonths(dateRange.start, 1);
       setDateRange({ start: startOfMonth(newStart), end: endOfMonth(newStart) });
     }
   };
 
-  // Stats calculation
+  // --- NEW: Accurate Stats Calculation ---
   const getStats = () => {
-    // Filter attendance data to match the view's date range
+    const totalUsers = users.length;
+    
+    // Get records specifically for the view (Daily usually)
+    const currentRecords = view === 'daily' 
+      ? attendanceData.filter(r => isSameDay(parseISO(r.date), dateRange.start))
+      : attendanceData;
+
+    // Count strictly based on processed status
+    const presentCount = currentRecords.filter(r => r.status === "present").length;
+    const lateCount = currentRecords.filter(r => r.status === "late").length;
+    
+    // Absent = Everyone who isn't Present or Late
+    // This fixes the issue where people with NO record weren't counting as absent
+    const absentCount = totalUsers - (presentCount + lateCount);
+
     return {
-      present: attendanceData.filter(r => r.status === "present" || r.status === "late").length,
-      absent: attendanceData.filter(r => r.status === "absent").length,
-      late: attendanceData.filter(r => r.status === "late").length
+      present: presentCount,
+      late: lateCount,
+      absent: Math.max(0, absentCount) // Prevent negative numbers
     };
   };
+  
   const stats = getStats();
 
+  // Filter Users Logic
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.full_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           user.email.toLowerCase().includes(searchTerm.toLowerCase());
@@ -263,13 +266,7 @@ export function AdminAttendanceDashboard() {
 
   const departments = Array.from(new Set(users.map(user => user.department).filter(Boolean))) as string[];
 
-  const exportData = (format: 'csv' | 'excel' | 'pdf') => {
-    console.log(`Exporting data in ${format} format`);
-  };
-
-  if (loading && users.length === 0) {
-    return <div className="p-6">Loading attendance data...</div>;
-  }
+  if (loading && users.length === 0) return <div className="p-6">Loading...</div>;
 
   return (
     <div className="p-6 space-y-6">
@@ -280,70 +277,34 @@ export function AdminAttendanceDashboard() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Select value={view} onValueChange={(v) => setView(v as 'daily' | 'monthly')}>
-            <SelectTrigger className="w-32">
-              <SelectValue />
-            </SelectTrigger>
+            <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="daily">Daily View</SelectItem>
               <SelectItem value="monthly">Monthly View</SelectItem>
             </SelectContent>
           </Select>
-          
-          <Button variant="outline" onClick={() => navigateDateRange('prev')}>
-            Previous
-          </Button>
-          
-          {/* Calendar Popover - Ensure components are installed */}
+          <Button variant="outline" onClick={() => navigateDateRange('prev')}>Previous</Button>
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="outline" className={!dateRange ? "text-muted-foreground" : ""}>
                 <CalendarIcon className="h-4 w-4 mr-2" />
-                {view === 'daily' 
-                  ? format(dateRange.start, "EEE, MMM dd, yyyy")
-                  : format(dateRange.start, "MMMM yyyy")}
+                {view === 'daily' ? format(dateRange.start, "EEE, MMM dd, yyyy") : format(dateRange.start, "MMMM yyyy")}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="end">
               <Calendar
                 mode="single"
                 selected={dateRange.start}
-                onSelect={(date) => {
-                  if (date) {
-                    if (view === 'daily') {
-                      setDateRange({ start: date, end: date });
-                    } else {
-                      setDateRange({ start: startOfMonth(date), end: endOfMonth(date) });
-                    }
-                  }
-                }}
+                onSelect={(date) => date && setDateRange(view === 'daily' ? { start: date, end: date } : { start: startOfMonth(date), end: endOfMonth(date) })}
                 initialFocus
               />
             </PopoverContent>
           </Popover>
-          
-          <Button variant="outline" onClick={() => navigateDateRange('next')}>
-            Next
-          </Button>
-          
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline">
-                <Download className="h-4 w-4 mr-2" />
-                Export
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem onClick={() => exportData('csv')}>Export as CSV</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => exportData('excel')}>Export as Excel</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => exportData('pdf')}>Export as PDF</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button variant="outline" onClick={() => navigateDateRange('next')}>Next</Button>
         </div>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Statistics Grid */}
         <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -365,30 +326,30 @@ export function AdminAttendanceDashboard() {
               <div className="text-2xl font-bold text-green-600">{stats.present}</div>
               <div className="flex items-center text-xs text-muted-foreground">
                 <TrendingUp className="h-3 w-3 mr-1 text-green-500" />
-                For selected date
+                On time (Before 9:30 AM)
               </div>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Late</CardTitle>
+              <CardTitle className="text-sm font-medium">Late Today</CardTitle>
               <AlertCircle className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-yellow-600">{stats.late}</div>
-              <p className="text-xs text-muted-foreground">Arrived late</p>
+              <p className="text-xs text-muted-foreground">Arrived after 09:30 AM</p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Absent</CardTitle>
+              <CardTitle className="text-sm font-medium">Absent Today</CardTitle>
               <XCircle className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-red-600">{stats.absent}</div>
-              <p className="text-xs text-muted-foreground">Not checked in</p>
+              <p className="text-xs text-muted-foreground">No check-in detected</p>
             </CardContent>
           </Card>
         </div>
@@ -427,14 +388,13 @@ export function AdminAttendanceDashboard() {
             ) : (
               <div className="text-center py-8 text-gray-500">
                 <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No activity recorded for this date</p>
+                <p className="text-sm">No activity recorded</p>
               </div>
             )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Real-Time Status Cards (Snapshots) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -443,10 +403,9 @@ export function AdminAttendanceDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">{activeEmployees}</div>
-            <p className="text-xs text-muted-foreground">Employees with active session</p>
+            <p className="text-xs text-muted-foreground">Employees working now</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">On Break</CardTitle>
@@ -457,7 +416,6 @@ export function AdminAttendanceDashboard() {
             <p className="text-xs text-muted-foreground">Employees paused</p>
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Idle Time</CardTitle>
@@ -470,31 +428,17 @@ export function AdminAttendanceDashboard() {
         </Card>
       </div>
 
-      {/* Attendance Table */}
       <Card>
         <CardHeader>
           <div className="flex flex-col sm:flex-row justify-between gap-4">
-            <CardTitle>
-              {view === 'daily' 
-                ? `Attendance for ${format(dateRange.start, "EEEE, MMMM dd, yyyy")}`
-                : `Attendance for ${format(dateRange.start, "MMMM yyyy")}`}
-            </CardTitle>
+            <CardTitle>{view === 'daily' ? `Attendance for ${format(dateRange.start, "EEEE, MMMM dd, yyyy")}` : `Attendance for ${format(dateRange.start, "MMMM yyyy")}`}</CardTitle>
             <div className="flex gap-2">
-              <Input
-                placeholder="Search employees..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full sm:w-64"
-              />
+              <Input placeholder="Search employees..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full sm:w-64" />
               <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Dept" />
-                </SelectTrigger>
+                <SelectTrigger className="w-40"><SelectValue placeholder="Dept" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Depts</SelectItem>
-                  {departments.map(dept => (
-                    <SelectItem key={dept} value={dept}>{dept}</SelectItem>
-                  ))}
+                  {departments.map(dept => <SelectItem key={dept} value={dept}>{dept}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -517,10 +461,13 @@ export function AdminAttendanceDashboard() {
             <TableBody>
               {filteredUsers.map(user => {
                 const userRecords = attendanceData.filter(a => a.user_id === user.id);
-                // Daily view: find match. Monthly view: take latest.
+                // In daily view, if no record is found, we assume they are absent
                 const record = view === 'daily' 
                   ? userRecords.find(r => isSameDay(parseISO(r.date), dateRange.start))
                   : userRecords[0]; 
+
+                // If record exists, use its status (which we calculated in loadData). If not, 'absent'.
+                const displayStatus = record ? record.status : 'absent';
                 
                 return (
                   <TableRow key={user.id}>
@@ -530,52 +477,22 @@ export function AdminAttendanceDashboard() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        {getStatusIcon(record?.status || 'absent')}
-                        <Badge className={getStatusColor(record?.status || 'absent')}>
-                          {record?.status ? record.status.replace('-', ' ') : 'Absent'}
+                        {getStatusIcon(displayStatus)}
+                        <Badge className={getStatusColor(displayStatus)}>
+                          {displayStatus === 'late' ? 'Late' : (displayStatus === 'present' ? 'Present' : 'Absent')}
                         </Badge>
                       </div>
                     </TableCell>
-                    <TableCell>
-                      {record?.check_in ? format(new Date(record.check_in), "hh:mm a") : '-'}
-                    </TableCell>
-                    <TableCell>
-                      {record?.check_out ? format(new Date(record.check_out), "hh:mm a") : '-'}
-                    </TableCell>
-                    <TableCell>
-                      {record?.total_hours || '-'}
-                    </TableCell>
+                    <TableCell>{record?.check_in ? format(new Date(record.check_in), "hh:mm a") : '-'}</TableCell>
+                    <TableCell>{record?.check_out ? format(new Date(record.check_out), "hh:mm a") : '-'}</TableCell>
+                    <TableCell>{record?.total_hours || '-'}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
-                        {record?.overtime_hours ? (
-                          <>
-                            <TrendingUp className="h-4 w-4 text-green-500" />
-                            {record.overtime_hours}
-                          </>
-                        ) : '-'}
+                        {record?.overtime_hours ? <><TrendingUp className="h-4 w-4 text-green-500" />{record.overtime_hours}</> : '-'}
                       </div>
                     </TableCell>
-                    <TableCell>
-                      {record?.location_check_in ? (
-                        <div className="flex items-center gap-1 text-xs">
-                          <MapPin className="h-3 w-3 text-blue-500" />
-                          Office
-                        </div>
-                      ) : record?.location_check_in === null ? (
-                        <div className="flex items-center gap-1 text-xs">
-                          <Monitor className="h-3 w-3 text-gray-500" />
-                          Remote
-                        </div>
-                      ) : '-'}
-                    </TableCell>
-                    <TableCell>
-                      {record?.ip_check_in ? (
-                        <div className="flex items-center gap-1 text-xs">
-                          <Wifi className="h-3 w-3 text-green-500" />
-                          {record.ip_check_in.substring(0, 7) + "..."}
-                        </div>
-                      ) : '-'}
-                    </TableCell>
+                    <TableCell>{record?.location_check_in ? <div className="flex items-center gap-1 text-xs"><MapPin className="h-3 w-3 text-blue-500" />Office</div> : record?.location_check_in === null ? <div className="flex items-center gap-1 text-xs"><Monitor className="h-3 w-3 text-gray-500" />Remote</div> : '-'}</TableCell>
+                    <TableCell>{record?.ip_check_in ? <div className="flex items-center gap-1 text-xs"><Wifi className="h-3 w-3 text-green-500" />{record.ip_check_in.substring(0, 7) + "..."}</div> : '-'}</TableCell>
                   </TableRow>
                 );
               })}
