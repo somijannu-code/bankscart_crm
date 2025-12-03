@@ -66,7 +66,7 @@ export default async function AdminDashboard() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight text-gray-900">Dashboard</h1>
         <p className="text-gray-500 mt-2">
-          Overview for your team (Data protected by RLS)
+          Overview for your team 
         </p>
       </div>
 
