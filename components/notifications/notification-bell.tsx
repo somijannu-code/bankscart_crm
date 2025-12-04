@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { Bell } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
@@ -13,16 +13,18 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu"
-import { toast } from "sonner" // Assuming you use Sonner for toasts
+import { toast } from "sonner"
+import { RealtimeChannel } from "@supabase/supabase-js"
 
 export function NotificationBell() {
   const [notifications, setNotifications] = useState<any[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const supabase = createClient()
+  
+  // Use a Ref to track the channel prevents "cleanup" bugs
+  const channelRef = useRef<RealtimeChannel | null>(null)
 
   useEffect(() => {
-    let channel: any;
-
     const setupNotifications = async () => {
       // 1. Get Current User
       const { data: { user } } = await supabase.auth.getUser()
@@ -42,55 +44,64 @@ export function NotificationBell() {
         setUnreadCount(data.length)
       }
 
-      // 3. Setup Real-time Listener
-      channel = supabase
-        .channel('realtime-notifications')
+      // 3. Prevent Duplicate Subscriptions
+      if (channelRef.current) return
+
+      // 4. Setup Real-time Listener with UNIQUE Channel Name
+      const channel = supabase
+        .channel(`realtime:notifications:${user.id}`) // <--- UNIQUE CHANNEL NAME
         .on(
           'postgres_changes',
           {
             event: 'INSERT',
             schema: 'public',
             table: 'notifications',
-            filter: `user_id=eq.${user.id}`, // Listen only for MY notifications
+            filter: `user_id=eq.${user.id}`, // Filter ensures we only get OUR alerts
           },
           (payload) => {
-            console.log("🔔 Realtime Notification Received:", payload)
+            console.log("🔔 New Notification:", payload)
             
-            const newNotif = payload.new
+            const newNotif = payload.new as any
             
-            // Update State immediately
+            // Add to list instantly
             setNotifications((prev) => [newNotif, ...prev])
             setUnreadCount((prev) => prev + 1)
 
-            // Show a Toast Popup (optional but recommended)
+            // Show Toast
             toast.info(newNotif.title, {
               description: newNotif.message,
               duration: 5000,
             })
             
-            // Play a sound (optional)
-            // new Audio('/notification.mp3').play().catch(() => {}) 
+            // Optional: Play Sound
+            // const audio = new Audio('/sounds/notification.mp3')
+            // audio.play().catch(e => console.log("Audio play failed", e))
           }
         )
         .subscribe((status) => {
-          console.log("🔌 Realtime Status:", status)
+           console.log(`🔌 Realtime Connection Status: ${status}`)
         })
+
+      channelRef.current = channel
     }
 
     setupNotifications()
 
     // Cleanup on unmount
     return () => {
-      if (channel) supabase.removeChannel(channel)
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current)
+        channelRef.current = null
+      }
     }
   }, [])
 
   const markAsRead = async (id: string) => {
-    // Optimistic Update (Update UI immediately)
+    // Optimistic Update
     setNotifications((prev) => prev.filter((n) => n.id !== id))
     setUnreadCount((prev) => Math.max(0, prev - 1))
 
-    // Send update to Backend
+    // DB Update
     await supabase.from("notifications").update({ read: true }).eq("id", id)
   }
 
