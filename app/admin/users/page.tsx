@@ -47,7 +47,7 @@ export default async function UsersPage() {
       .from("users")
       .select("id, email, full_name, role, phone, is_active, created_at, manager_id")
       .order("created_at", { ascending: false })
-      .limit(100) 
+      .limit(200) 
     
     if (userError) {
       console.error("Error fetching users:", userError)
