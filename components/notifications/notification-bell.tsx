@@ -21,7 +21,7 @@ export function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0)
   const supabase = createClient()
   
-  // Use a Ref to track the channel prevents "cleanup" bugs
+  // Ref prevents duplicate connections/cleanup bugs
   const channelRef = useRef<RealtimeChannel | null>(null)
 
   useEffect(() => {
@@ -30,7 +30,7 @@ export function NotificationBell() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      // 2. Fetch Initial (Missed) Notifications
+      // 2. Fetch History (Missed Notifications)
       const { data } = await supabase
         .from("notifications")
         .select("*")
@@ -44,50 +44,43 @@ export function NotificationBell() {
         setUnreadCount(data.length)
       }
 
-      // 3. Prevent Duplicate Subscriptions
-      if (channelRef.current) return
+      // 3. Connect Realtime Listener
+      if (!channelRef.current) {
+        const channel = supabase
+          .channel(`realtime:notifications:${user.id}`) // Unique Channel Name
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'notifications',
+              filter: `user_id=eq.${user.id}`, // Listen for MY alerts
+            },
+            (payload) => {
+              console.log("🔔 Notification Received:", payload)
+              
+              const newNotif = payload.new as any
+              
+              // Update UI Instantly
+              setNotifications((prev) => [newNotif, ...prev])
+              setUnreadCount((prev) => prev + 1)
 
-      // 4. Setup Real-time Listener with UNIQUE Channel Name
-      const channel = supabase
-        .channel(`realtime:notifications:${user.id}`) // <--- UNIQUE CHANNEL NAME
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'notifications',
-            filter: `user_id=eq.${user.id}`, // Filter ensures we only get OUR alerts
-          },
-          (payload) => {
-            console.log("🔔 New Notification:", payload)
-            
-            const newNotif = payload.new as any
-            
-            // Add to list instantly
-            setNotifications((prev) => [newNotif, ...prev])
-            setUnreadCount((prev) => prev + 1)
+              // Show Toast Popup
+              toast.info(newNotif.title, {
+                description: newNotif.message,
+                duration: 5000,
+              })
+            }
+          )
+          .subscribe()
 
-            // Show Toast
-            toast.info(newNotif.title, {
-              description: newNotif.message,
-              duration: 5000,
-            })
-            
-            // Optional: Play Sound
-            // const audio = new Audio('/sounds/notification.mp3')
-            // audio.play().catch(e => console.log("Audio play failed", e))
-          }
-        )
-        .subscribe((status) => {
-           console.log(`🔌 Realtime Connection Status: ${status}`)
-        })
-
-      channelRef.current = channel
+        channelRef.current = channel
+      }
     }
 
     setupNotifications()
 
-    // Cleanup on unmount
+    // Cleanup
     return () => {
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current)
@@ -97,11 +90,8 @@ export function NotificationBell() {
   }, [])
 
   const markAsRead = async (id: string) => {
-    // Optimistic Update
     setNotifications((prev) => prev.filter((n) => n.id !== id))
     setUnreadCount((prev) => Math.max(0, prev - 1))
-
-    // DB Update
     await supabase.from("notifications").update({ read: true }).eq("id", id)
   }
 
@@ -134,9 +124,6 @@ export function NotificationBell() {
               >
                 <div className="flex justify-between w-full">
                    <span className="font-semibold text-sm text-blue-600">{notif.title}</span>
-                   <span className="text-[10px] text-gray-400">
-                     {new Date(notif.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                   </span>
                 </div>
                 <span className="text-xs text-gray-600 line-clamp-2">{notif.message}</span>
               </DropdownMenuItem>
