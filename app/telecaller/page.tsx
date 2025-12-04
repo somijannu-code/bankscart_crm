@@ -5,10 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Phone, Users, Calendar, CheckCircle, Clock, TrendingUp, Target, BarChart3, RefreshCw, Plus } from "lucide-react"
 import { TodaysTasks } from "@/components/todays-tasks"
-import { RecentLeads } from "@/components/recent-leads" // Import is kept but component is removed
 import { useRouter } from "next/navigation"
 import { AttendanceWidget } from "@/components/attendance-widget"
 import { NotificationProvider } from "@/components/notification-provider"
+import { NotificationBell } from "@/components/notifications/notification-bell" // <--- IMPORT THIS
 import { QuickActions } from "@/components/quick-actions"
 import { PerformanceMetrics } from "@/components/performance-metrics"
 import { DailyTargetProgress } from "@/components/daily-target-progress"
@@ -57,7 +57,7 @@ export default function TelecallerDashboard() {
           return
         }
 
-        // Get basic telecaller statistics - only from tables that exist
+        // Get basic telecaller statistics
         const [
           myLeadsResponse,
           todaysCallsResponse,
@@ -90,12 +90,8 @@ export default function TelecallerDashboard() {
             .gte("completed_at", new Date().toISOString().split("T")[0]),
         ])
 
-        // Helper function to safely get count
         const getCount = (response: PromiseSettledResult<any>) => {
-          if (response.status === "rejected") {
-            console.warn("Query failed:", response.reason)
-            return 0
-          }
+          if (response.status === "rejected") return 0
           return response.value.count || 0
         }
 
@@ -104,11 +100,9 @@ export default function TelecallerDashboard() {
         const pendingFollowUps = getCount(pendingFollowUpsResponse)
         const completedToday = getCount(completedTodayResponse)
 
-        // Calculate Call Shortage
+        // Calculate metrics
         const callShortage = DAILY_CALL_TARGET - todaysCalls;
         const isTargetMet = callShortage <= 0;
-
-        // Calculate simple metrics (avoid complex queries that might fail)
         const conversionRate = todaysCalls > 0 ? Math.round((completedToday / todaysCalls) * 100) : 0
         const successRate = (completedToday + todaysCalls) > 0 
           ? Math.round((completedToday / (completedToday + pendingFollowUps)) * 100)
@@ -122,12 +116,10 @@ export default function TelecallerDashboard() {
             color: "text-blue-600",
             bgColor: "bg-blue-50",
           },
-          // UPDATED STAT: Today Calls Shortage
           {
             title: "Today Calls Shortage",
             value: callShortage,
             icon: Phone,
-            // Dynamic colors based on target status
             color: isTargetMet ? "text-green-600" : "text-red-600",
             bgColor: isTargetMet ? "bg-green-50" : "bg-red-50",
             format: "callShortage",
@@ -173,11 +165,7 @@ export default function TelecallerDashboard() {
 
       } catch (err) {
         console.error("Dashboard error:", err)
-        setData(prev => ({
-          ...prev,
-          isLoading: false,
-          error: "Failed to load dashboard data"
-        }))
+        setData(prev => ({ ...prev, isLoading: false, error: "Failed to load dashboard data" }))
       }
     }
 
@@ -190,23 +178,17 @@ export default function TelecallerDashboard() {
   }
 
   const handleAddLead = () => {
-    // Navigate to add lead page
     router.push("/leads/new")
   }
 
   const formatValue = (stat: DashboardStats) => {
     if (stat.format === "percentage") return `${stat.value}%`
     if (stat.format === "duration") return `${stat.value}m`
-    
-    // NEW LOGIC for "callShortage"
     if (stat.format === "callShortage") {
       const shortage = Number(stat.value);
-      if (shortage <= 0) {
-        return "0 (Congratulations!)";
-      }
+      if (shortage <= 0) return "0 (Congratulations!)";
       return stat.value.toString();
     }
-    
     return stat.value.toString()
   }
 
@@ -232,9 +214,7 @@ export default function TelecallerDashboard() {
           <p className="text-gray-600 mb-6">
             {data.error || "There was a problem loading your dashboard data."}
           </p>
-          <Button onClick={handleRefresh} size="lg">
-            Try Again
-          </Button>
+          <Button onClick={handleRefresh} size="lg">Try Again</Button>
         </div>
       </div>
     )
@@ -250,6 +230,9 @@ export default function TelecallerDashboard() {
             <p className="text-gray-600 mt-1">Welcome back, {data.user.email?.split('@')[0] || 'Telecaller'}!</p>
           </div>
           <div className="flex items-center gap-3">
+            {/* ADDED NOTIFICATION BELL HERE */}
+            <NotificationBell />
+            
             <Button 
               variant="outline" 
               size="sm" 
@@ -258,16 +241,16 @@ export default function TelecallerDashboard() {
               disabled={data.isLoading}
             >
               <RefreshCw className={`h-4 w-4 ${data.isLoading ? 'animate-spin' : ''}`} />
-              Refresh
+              <span className="hidden sm:inline">Refresh</span>
             </Button>
             <Button size="sm" className="flex items-center gap-2" onClick={handleAddLead}>
               <Plus className="h-4 w-4" />
-              Add Lead
+              <span className="hidden sm:inline">Add Lead</span>
             </Button>
           </div>
         </div>
 
-        {/* Quick Actions - Simplified */}
+        {/* Quick Actions */}
         <ErrorBoundary fallback={<div className="text-center py-4 text-gray-500">Quick actions unavailable</div>}>
           <QuickActions userId={data.user.id} />
         </ErrorBoundary>
@@ -282,7 +265,6 @@ export default function TelecallerDashboard() {
                     <p className="text-xs font-medium text-gray-600 uppercase tracking-wide">
                       {stat.title}
                     </p>
-                    {/* The text color is handled dynamically via stat.color */}
                     <p className={`text-2xl font-bold mt-1 ${stat.color}`}> 
                       {formatValue(stat)}
                     </p>
@@ -302,48 +284,35 @@ export default function TelecallerDashboard() {
             userId={data.user.id}
             conversionRate={typeof data.stats[5]?.value === 'number' ? data.stats[5].value : 0}
             successRate={typeof data.stats[4]?.value === 'number' ? data.stats[4].value : 0}
-            avgCallDuration={5} // Default value
+            avgCallDuration={5} 
           />
         </ErrorBoundary>
 
-        {/* Attendance Widget - Optional */}
+        {/* Attendance Widget */}
         <ErrorBoundary fallback={null}>
           <AttendanceWidget userId={data.user.id} />
         </ErrorBoundary>
 
         {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-1 gap-6"> 
-          {/* Today's Tasks (Now full-width on large screens) */}
+        <div className="grid grid-cols-1 gap-6"> 
           <Card className="border">
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Calendar className="h-5 w-5" />
                 Today's Tasks
               </CardTitle>
-              <Button variant="ghost" size="sm" className="text-xs">
-                View All
-              </Button>
             </CardHeader>
             <CardContent>
               <ErrorBoundary 
-                fallback={
-                  <EmptyState
-                    icon={Calendar}
-                    title="Unable to load tasks"
-                    description="Please try refreshing the page"
-                  />
-                }
+                fallback={<EmptyState icon={Calendar} title="Unable to load tasks" description="Please try refreshing the page" />}
               >
                 <TodaysTasks userId={data.user.id} />
               </ErrorBoundary>
             </CardContent>
           </Card>
-
-          {/* Removed Recent Leads Card */}
-
         </div>
 
-        {/* Daily Target Progress - Only show if targets table exists */}
+        {/* Daily Target Progress */}
         <ErrorBoundary fallback={null}>
           <DailyTargetProgress 
             userId={data.user.id} 
@@ -352,7 +321,6 @@ export default function TelecallerDashboard() {
               daily_completed: 20,
               monthly_target: 10000
             }}
-            // Calculate actual calls from shortage stat
             currentCalls={typeof data.stats[1]?.value === 'number' ? DAILY_CALL_TARGET - data.stats[1].value : 0} 
             currentCompleted={typeof data.stats[3]?.value === 'number' ? data.stats[3].value : 0}
           />
