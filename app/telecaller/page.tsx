@@ -8,7 +8,7 @@ import { TodaysTasks } from "@/components/todays-tasks"
 import { useRouter } from "next/navigation"
 import { AttendanceWidget } from "@/components/attendance-widget"
 import { NotificationProvider } from "@/components/notification-provider"
-import { NotificationBell } from "@/components/notifications/notification-bell" // <--- IMPORT THIS
+import { NotificationBell } from "@/components/notifications/notification-bell" 
 import { QuickActions } from "@/components/quick-actions"
 import { PerformanceMetrics } from "@/components/performance-metrics"
 import { DailyTargetProgress } from "@/components/daily-target-progress"
@@ -230,7 +230,19 @@ export default function TelecallerDashboard() {
             <p className="text-gray-600 mt-1">Welcome back, {data.user.email?.split('@')[0] || 'Telecaller'}!</p>
           </div>
           <div className="flex items-center gap-3">
-            {/* ADDED NOTIFICATION BELL HERE */}
+            {/* ACTION REQUIRED: If NotificationBell is not working, the fix must be inside the 
+              NotificationBell component itself (components/notifications/notification-bell.tsx).
+              
+              The structure inside NotificationBell should be:
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild={false}>
+                  <Button variant="ghost" size="icon" className="pointer-events-none">
+                     <Bell className="h-5 w-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>...</DropdownMenuContent>
+              </DropdownMenu>
+            */}
             <NotificationBell />
             
             <Button 
@@ -284,6 +296,7 @@ export default function TelecallerDashboard() {
             userId={data.user.id}
             conversionRate={typeof data.stats[5]?.value === 'number' ? data.stats[5].value : 0}
             successRate={typeof data.stats[4]?.value === 'number' ? data.stats[4].value : 0}
+            // Note: The avgCallDuration calculation is missing from this file, using a placeholder of 5
             avgCallDuration={5} 
           />
         </ErrorBoundary>
