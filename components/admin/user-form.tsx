@@ -65,18 +65,23 @@ export function UserForm({ initialData, isEditing = false }: UserFormProps) {
 
     try {
       if (isEditing && initialData) {
-        // Update existing user
-        const { error: updateError } = await supabase
-          .from("users")
-          .update({
+        // ✅ NEW: Call the API Route instead of direct Supabase update
+        const response = await fetch(`/api/admin/users/${initialData.id}`, {
+          method: "PATCH", // Using PATCH for updates
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
             full_name: formData.full_name,
             phone: formData.phone,
             role: formData.role,
-            manager_id: formData.manager_id === "none" ? null : formData.manager_id
+            // Ensure we send NULL if "none" is selected, otherwise send the UUID
+            manager_id: formData.manager_id === "none" || formData.manager_id === "" ? null : formData.manager_id
           })
-          .eq("id", initialData.id)
+        })
 
-        if (updateError) throw updateError
+        if (!response.ok) {
+          const data = await response.json()
+          throw new Error(data.error || "Failed to update user")
+        }
         
         alert("User updated successfully")
         router.push("/admin/users")
