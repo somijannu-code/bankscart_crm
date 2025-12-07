@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react"
 import { Bell } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+// Button import removed as we are styling the trigger directly
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +15,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { toast } from "sonner"
 import { RealtimeChannel } from "@supabase/supabase-js"
+
+// Define the styles that mimic Button variant="ghost" size="icon"
+const triggerIconBtnClass = "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-10 w-10 relative"
 
 export function NotificationBell() {
   const [notifications, setNotifications] = useState<any[]>([])
@@ -133,16 +136,18 @@ export function NotificationBell() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-5 w-5" />
-          {unreadCount > 0 && (
-            <Badge className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center rounded-full p-0 bg-red-500 text-white text-[10px]">
-              {unreadCount}
-            </Badge>
-          )}
-        </Button>
+      {/* FIX: Removed asChild and Button component. 
+         Used native DropdownMenuTrigger with custom classes to mimic the Ghost Icon Button.
+      */}
+      <DropdownMenuTrigger className={triggerIconBtnClass}>
+        <Bell className="h-5 w-5" />
+        {unreadCount > 0 && (
+          <Badge className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center rounded-full p-0 bg-red-500 text-white text-[10px]">
+            {unreadCount}
+          </Badge>
+        )}
       </DropdownMenuTrigger>
+      
       <DropdownMenuContent align="end" className="w-80">
         <DropdownMenuLabel>Notifications</DropdownMenuLabel>
         <DropdownMenuSeparator />
