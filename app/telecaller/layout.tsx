@@ -2,6 +2,7 @@ import type React from "react"
 import { AuthGuard } from "@/components/auth-guard"
 import { TelecallerSidebar } from "@/components/telecaller-sidebar"
 import { CallTrackingProvider } from "@/context/call-tracking-context"
+import { PushSubscriber } from "@/components/push-subscriber" // <--- ADD THIS IMPORT
 
 export default function TelecallerLayout({
   children,
@@ -10,6 +11,7 @@ export default function TelecallerLayout({
 }) {
   return (
     <AuthGuard requiredRole="telecaller">
+      <PushSubscriber /> {/* <--- ADD COMPONENT HERE */}
       <CallTrackingProvider>
         <div className="flex h-screen bg-gray-50">
           <TelecallerSidebar />
