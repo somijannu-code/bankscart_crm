@@ -3,6 +3,7 @@ import { AuthGuard } from "@/components/auth-guard"
 import { AdminSidebar } from "@/components/admin-sidebar"
 import { TopHeader } from "@/components/top-header"
 import { CallTrackingProvider } from "@/context/call-tracking-context"
+import { PushSubscriber } from "@/components/push-subscriber" // <--- ADD THIS IMPORT
 
 export default function AdminLayout({
   children,
@@ -11,6 +12,7 @@ export default function AdminLayout({
 }) {
   return (
     <AuthGuard requiredRole="admin">
+      <PushSubscriber /> {/* <--- ADD COMPONENT HERE */}
       <CallTrackingProvider>
         <div className="flex h-screen bg-gray-50">
           <AdminSidebar />
