@@ -202,7 +202,7 @@ async function generateAndSendReport(
 
   // 4. Send Email
   await resend.emails.send({
-    from: 'Bankscart CRM <onboarding@resend.dev>', 
+    from: 'Bankscart CRM <reports@crm.bankscart.com>', 
     to: recipient.email,
     subject: `📊 ${emailSubject} - ${dateDisplay}`,
     html: `
