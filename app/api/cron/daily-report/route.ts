@@ -9,14 +9,27 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-export async function GET(request: Request) {
-  // 2. Security Check (Prevent strangers from triggering this url)
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return new NextResponse('Unauthorized', { status: 401 })
-  }
+export const dynamic = 'force-dynamic' // Crucial for Cron Jobs to not be cached
 
+export async function GET(request: Request) {
   try {
+    // 2. SECURITY CHECK (Updated for Browser Testing)
+    // We allow access IF:
+    // A. The request has the correct Bearer Token (Vercel sends this)
+    // B. OR the request has a ?key= query parameter (For you to test manually)
+    
+    const authHeader = request.headers.get('authorization')
+    const { searchParams } = new URL(request.url)
+    const queryKey = searchParams.get('key')
+    const secret = process.env.CRON_SECRET
+
+    const isValidHeader = authHeader === `Bearer ${secret}`
+    const isValidQuery = queryKey === secret
+
+    if (!isValidHeader && !isValidQuery) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     console.log("⏳ Starting Daily Report Job...")
 
     // 3. Define Time Range (Yesterday 00:00 to 23:59)
@@ -30,7 +43,6 @@ export async function GET(request: Request) {
     // PART A: SEND REPORTS TO TEAM LEADERS (Direct Reports Only)
     // ====================================================
     
-    // Fetch all Team Leaders
     const { data: teamLeaders } = await supabase
       .from('users')
       .select('id, email, full_name, tenant_id')
@@ -49,7 +61,6 @@ export async function GET(request: Request) {
 
         if (!teamMembers || teamMembers.length === 0) continue
 
-        // Generate and Send the Email
         await generateAndSendReport(tl, teamMembers, startOfDay, endOfDay, dateStr, 'Team Performance Report')
         emailsSent++
       }
@@ -59,7 +70,6 @@ export async function GET(request: Request) {
     // PART B: SEND REPORTS TO TENANT ADMINS (Whole Company)
     // ====================================================
 
-    // Fetch all Tenant Admins
     const { data: tenantAdmins } = await supabase
       .from('users')
       .select('id, email, full_name, tenant_id')
@@ -68,16 +78,15 @@ export async function GET(request: Request) {
 
     if (tenantAdmins) {
       for (const admin of tenantAdmins) {
-        // Find EVERYONE in their tenant (excluding themselves maybe)
+        // Find EVERYONE in their tenant (excluding themselves)
         const { data: allStaff } = await supabase
           .from('users')
           .select('id, full_name')
           .eq('tenant_id', admin.tenant_id)
-          .in('role', ['telecaller', 'team_leader']) // Report on staff only
+          .in('role', ['telecaller', 'team_leader']) 
 
         if (!allStaff || allStaff.length === 0) continue
 
-        // Generate and Send the Email
         await generateAndSendReport(admin, allStaff, startOfDay, endOfDay, dateStr, 'Full Company Daily Report')
         emailsSent++
       }
@@ -107,13 +116,11 @@ async function generateAndSendReport(
   // 1. Fetch Call Logs for these users for Yesterday
   const { data: calls } = await supabase
     .from('call_logs')
-    .select('user_id, duration, call_status, call_type')
+    .select('user_id, duration, call_status')
     .in('user_id', subjectIds)
     .gte('created_at', startTime)
     .lte('created_at', endTime)
 
-  // If no calls made by anyone, maybe skip email? Or send "Zero Activity" report.
-  // We will send it anyway so managers know nothing happened.
   const callList = calls || []
 
   // 2. Aggregate Stats
@@ -124,14 +131,14 @@ async function generateAndSendReport(
   // Per User Breakdown
   const userStats: Record<string, { name: string, total: number, connected: number, duration: number }> = {}
   
-  // Initialize with 0 for everyone
+  // Initialize with 0
   subjects.forEach(s => {
     userStats[s.id] = { name: s.full_name, total: 0, connected: 0, duration: 0 }
   })
 
   // Fill real data
   callList.forEach(call => {
-    if (!userStats[call.user_id]) return // Should not happen
+    if (!userStats[call.user_id]) return 
     
     const stats = userStats[call.user_id]
     stats.total++
@@ -147,7 +154,7 @@ async function generateAndSendReport(
 
   // 3. Generate HTML Table
   const tableRows = Object.values(userStats)
-    .sort((a, b) => b.total - a.total) // Sort by highest activity
+    .sort((a, b) => b.total - a.total)
     .map(stat => `
       <tr style="border-bottom: 1px solid #eee;">
         <td style="padding: 10px;">${stat.name}</td>
@@ -158,8 +165,10 @@ async function generateAndSendReport(
     `).join('')
 
   // 4. Send Email
+  // IMPORTANT: Use 'onboarding@resend.dev' if you haven't verified your own domain yet.
+  // Once you verify 'crm.bankscart.com' in Resend, change the 'from' address.
   await resend.emails.send({
-    from: 'Bankscart CRM <reports@yourdomain.com>', // MUST verify domain in Resend
+    from: 'Bankscart CRM <onboarding@resend.dev>', 
     to: recipient.email,
     subject: `📊 ${emailSubject} - ${dateDisplay}`,
     html: `
