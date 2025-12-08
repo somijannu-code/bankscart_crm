@@ -2,22 +2,19 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { Resend } from 'resend'
 
-// 1. Init Clients (Use Service Role to bypass RLS for background jobs)
+// 1. Init Clients (Use Service Role to bypass RLS)
 const resend = new Resend(process.env.RESEND_API_KEY)
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-export const dynamic = 'force-dynamic' // Crucial for Cron Jobs to not be cached
+// Force dynamic to prevent caching the date
+export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
   try {
-    // 2. SECURITY CHECK (Updated for Browser Testing)
-    // We allow access IF:
-    // A. The request has the correct Bearer Token (Vercel sends this)
-    // B. OR the request has a ?key= query parameter (For you to test manually)
-    
+    // 2. SECURITY CHECK
     const authHeader = request.headers.get('authorization')
     const { searchParams } = new URL(request.url)
     const queryKey = searchParams.get('key')
@@ -35,9 +32,15 @@ export async function GET(request: Request) {
     // 3. Define Time Range (Yesterday 00:00 to 23:59)
     const yesterday = new Date()
     yesterday.setDate(yesterday.getDate() - 1)
+    
+    // Format dates to ISO strings for Supabase comparison
     const dateStr = yesterday.toISOString().split('T')[0]
     const startOfDay = `${dateStr}T00:00:00.000Z`
     const endOfDay = `${dateStr}T23:59:59.999Z`
+
+    console.log(`📅 Generating reports for: ${dateStr}`)
+
+    let emailsSent = 0
 
     // ====================================================
     // PART A: SEND REPORTS TO TEAM LEADERS (Direct Reports Only)
@@ -48,8 +51,6 @@ export async function GET(request: Request) {
       .select('id, email, full_name, tenant_id')
       .eq('role', 'team_leader')
       .eq('is_active', true)
-
-    let emailsSent = 0
 
     if (teamLeaders) {
       for (const tl of teamLeaders) {
@@ -92,6 +93,40 @@ export async function GET(request: Request) {
       }
     }
 
+    // ====================================================
+    // PART C: SEND REPORTS TO SUPER ADMINS (Global / All Tenants)
+    // ====================================================
+
+    const { data: superAdmins } = await supabase
+      .from('users')
+      .select('id, email, full_name')
+      .in('role', ['super_admin', 'owner']) // Check for both roles
+      .eq('is_active', true)
+
+    if (superAdmins && superAdmins.length > 0) {
+      // Fetch ALL Staff Globally (Telecallers and Team Leaders from ALL tenants)
+      const { data: globalStaff } = await supabase
+        .from('users')
+        .select('id, full_name')
+        .in('role', ['telecaller', 'team_leader'])
+        .eq('is_active', true)
+
+      if (globalStaff && globalStaff.length > 0) {
+        for (const superAdmin of superAdmins) {
+          // Send the Global Report
+          await generateAndSendReport(
+            superAdmin, 
+            globalStaff, 
+            startOfDay, 
+            endOfDay, 
+            dateStr, 
+            'Global System Daily Report'
+          )
+          emailsSent++
+        }
+      }
+    }
+
     return NextResponse.json({ success: true, emails_sent: emailsSent })
 
   } catch (error: any) {
@@ -101,7 +136,7 @@ export async function GET(request: Request) {
 }
 
 // ====================================================
-// HELPER: DATA AGGREGATION & EMAIL SENDING
+// HELPER: LOGIC MATCHING "TelecallerPerformance.tsx"
 // ====================================================
 async function generateAndSendReport(
   recipient: any, 
@@ -113,10 +148,10 @@ async function generateAndSendReport(
 ) {
   const subjectIds = subjects.map(s => s.id)
 
-  // 1. Fetch Call Logs for these users for Yesterday
+  // 1. Fetch Call Logs using CORRECT columns (duration_seconds)
   const { data: calls } = await supabase
     .from('call_logs')
-    .select('user_id, duration, call_status')
+    .select('user_id, duration_seconds, call_status') 
     .in('user_id', subjectIds)
     .gte('created_at', startTime)
     .lte('created_at', endTime)
@@ -141,34 +176,41 @@ async function generateAndSendReport(
     if (!userStats[call.user_id]) return 
     
     const stats = userStats[call.user_id]
+    const duration = call.duration_seconds || 0 
+    
+    // Update Individual Stats
     stats.total++
-    stats.duration += (call.duration || 0)
+    stats.duration += duration
+    
+    // Update Grand Totals
     totalCalls++
-    totalDuration += (call.duration || 0)
+    totalDuration += duration
 
-    if (call.call_status === 'connected' || call.call_status === 'completed') {
+    // LOGIC: Connected if duration > 0 (Matches your frontend)
+    if (duration > 0) {
       stats.connected++
       connectedCalls++
     }
   })
 
+  // Helper for duration formatting
+  const formatMins = (seconds: number) => Math.round(seconds / 60)
+
   // 3. Generate HTML Table
   const tableRows = Object.values(userStats)
-    .sort((a, b) => b.total - a.total)
+    .sort((a, b) => b.total - a.total) // Sort by highest activity
     .map(stat => `
       <tr style="border-bottom: 1px solid #eee;">
         <td style="padding: 10px;">${stat.name}</td>
         <td style="padding: 10px; text-align: center;">${stat.total}</td>
         <td style="padding: 10px; text-align: center;">${stat.connected}</td>
-        <td style="padding: 10px; text-align: right;">${Math.round(stat.duration / 60)} mins</td>
+        <td style="padding: 10px; text-align: right;">${formatMins(stat.duration)} mins</td>
       </tr>
     `).join('')
 
   // 4. Send Email
-  // IMPORTANT: Use 'onboarding@resend.dev' if you haven't verified your own domain yet.
-  // Once you verify 'crm.bankscart.com' in Resend, change the 'from' address.
   await resend.emails.send({
-    from: 'Bankscart CRM <reports@crm.bankscart.com>', 
+    from: 'Bankscart CRM <reports@crm.bankscart.com>', // Update this once you verify your domain
     to: recipient.email,
     subject: `📊 ${emailSubject} - ${dateDisplay}`,
     html: `
@@ -181,16 +223,16 @@ async function generateAndSendReport(
           <ul style="list-style: none; padding: 0; margin: 0;">
             <li style="margin-bottom: 5px;">📞 <strong>Total Calls:</strong> ${totalCalls}</li>
             <li style="margin-bottom: 5px;">✅ <strong>Connected:</strong> ${connectedCalls}</li>
-            <li style="margin-bottom: 5px;">⏱ <strong>Total Talk Time:</strong> ${Math.round(totalDuration / 60)} mins</li>
+            <li style="margin-bottom: 5px;">⏱ <strong>Total Talk Time:</strong> ${formatMins(totalDuration)} mins</li>
           </ul>
         </div>
 
-        <table style="width: 100%; border-collapse: collapse;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
           <thead>
             <tr style="background: #f1f5f9; text-align: left;">
               <th style="padding: 10px;">Telecaller</th>
-              <th style="padding: 10px; text-align: center;">Total Calls</th>
-              <th style="padding: 10px; text-align: center;">Connected</th>
+              <th style="padding: 10px; text-align: center;">Calls</th>
+              <th style="padding: 10px; text-align: center;">Conn.</th>
               <th style="padding: 10px; text-align: right;">Duration</th>
             </tr>
           </thead>
