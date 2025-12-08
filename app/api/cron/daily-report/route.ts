@@ -168,7 +168,7 @@ async function generateAndSendReport(
   // IMPORTANT: Use 'onboarding@resend.dev' if you haven't verified your own domain yet.
   // Once you verify 'crm.bankscart.com' in Resend, change the 'from' address.
   await resend.emails.send({
-    from: 'Bankscart CRM <reports@bankscart.com>', 
+    from: 'Bankscart CRM <reports@crm.bankscart.com>', 
     to: recipient.email,
     subject: `📊 ${emailSubject} - ${dateDisplay}`,
     html: `
