@@ -264,7 +264,7 @@ async function generateAndSendPivotReport(
 
   // 8. Construct Email HTML
   await resend.emails.send({
-    from: 'Bankscart CRM <onboarding@resend.dev>', // Verify your domain to change this
+    from: 'Bankscart CRM <reports@crm.bankscart.com>', // Verify your domain to change this
     to: recipient.email,
     subject: `📊 ${emailSubject} - ${dateDisplay}`,
     html: `
