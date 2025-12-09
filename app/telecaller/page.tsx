@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Phone, Users, Calendar, CheckCircle, Clock, TrendingUp, Target, BarChart3, RefreshCw, Plus } from "lucide-react"
+import { Phone, Users, Calendar, CheckCircle, Clock, TrendingUp, Target, BarChart3, RefreshCw, Plus, Trophy, Rocket } from "lucide-react"
 import { TodaysTasks } from "@/components/todays-tasks"
 import { useRouter } from "next/navigation"
 import { AttendanceWidget } from "@/components/attendance-widget"
@@ -16,6 +16,7 @@ import { ErrorBoundary } from "@/components/error-boundary"
 import { LoadingSpinner } from "@/components/loading-spinner"
 import { EmptyState } from "@/components/empty-state"
 import { useEffect, useState } from "react"
+import { Progress } from "@/components/ui/progress" // Ensure you have this component or use standard HTML
 
 interface DashboardStats {
   title: string
@@ -31,6 +32,9 @@ interface DashboardData {
   user: any
   isLoading: boolean
   error: string | null
+  // New Disbursement Stats
+  monthlyTarget: number
+  achievedAmount: number
 }
 
 export default function TelecallerDashboard() {
@@ -39,7 +43,9 @@ export default function TelecallerDashboard() {
     stats: [],
     user: null,
     isLoading: true,
-    error: null
+    error: null,
+    monthlyTarget: 0,
+    achievedAmount: 0
   })
 
   // Fixed daily call target
@@ -57,12 +63,19 @@ export default function TelecallerDashboard() {
           return
         }
 
-        // Get basic telecaller statistics
+        // 1. Calculate Date Ranges (Current Month)
+        const now = new Date();
+        const startOfDay = now.toISOString().split("T")[0];
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
+        // 2. Parallel Data Fetching
         const [
           myLeadsResponse,
           todaysCallsResponse,
           pendingFollowUpsResponse,
           completedTodayResponse,
+          userProfileResponse,
+          disbursedLeadsResponse
         ] = await Promise.allSettled([
           // My Leads
           supabase.from("leads").select("*", { count: "exact", head: true }).eq("assigned_to", user.id),
@@ -72,7 +85,7 @@ export default function TelecallerDashboard() {
             .from("call_logs")
             .select("*", { count: "exact", head: true })
             .eq("user_id", user.id)
-            .gte("created_at", new Date().toISOString().split("T")[0]),
+            .gte("created_at", startOfDay),
           
           // Pending Follow-ups
           supabase
@@ -87,7 +100,19 @@ export default function TelecallerDashboard() {
             .select("*", { count: "exact", head: true })
             .eq("user_id", user.id)
             .eq("status", "completed")
-            .gte("completed_at", new Date().toISOString().split("T")[0]),
+            .gte("completed_at", startOfDay),
+
+          // User Profile (For Target)
+          supabase.from("users").select("monthly_target").eq("id", user.id).single(),
+
+          // Disbursed Leads (For Achievement) - Assuming 'Disbursed' is the status string
+          // Note: Adjust column 'disbursed_amount' if your schema uses 'loan_amount' or similar
+          supabase
+            .from("leads")
+            .select("disbursed_amount")
+            .eq("assigned_to", user.id)
+            .eq("status", "DISBURSED") // Ensure this matches your DB status exactly (case-sensitive)
+            .gte("updated_at", startOfMonth)
         ])
 
         const getCount = (response: PromiseSettledResult<any>) => {
@@ -99,6 +124,17 @@ export default function TelecallerDashboard() {
         const todaysCalls = getCount(todaysCallsResponse)
         const pendingFollowUps = getCount(pendingFollowUpsResponse)
         const completedToday = getCount(completedTodayResponse)
+
+        // Process Target & Achievement
+        let monthlyTarget = 2000000; // Default 20L
+        if (userProfileResponse.status === 'fulfilled' && userProfileResponse.value.data) {
+             monthlyTarget = userProfileResponse.value.data.monthly_target || 2000000;
+        }
+
+        let achievedAmount = 0;
+        if (disbursedLeadsResponse.status === 'fulfilled' && disbursedLeadsResponse.value.data) {
+            achievedAmount = disbursedLeadsResponse.value.data.reduce((sum: number, lead: any) => sum + (lead.disbursed_amount || 0), 0);
+        }
 
         // Calculate metrics
         const callShortage = DAILY_CALL_TARGET - todaysCalls;
@@ -160,7 +196,9 @@ export default function TelecallerDashboard() {
           stats,
           user,
           isLoading: false,
-          error: null
+          error: null,
+          monthlyTarget,
+          achievedAmount
         })
 
       } catch (err) {
@@ -191,6 +229,27 @@ export default function TelecallerDashboard() {
     }
     return stat.value.toString()
   }
+
+  const formatCurrency = (val: number) => {
+    return new Intl.NumberFormat('en-IN', {
+        style: 'currency',
+        currency: 'INR',
+        maximumFractionDigits: 0
+    }).format(val);
+  }
+
+  // --- MOTIVATIONAL LOGIC ---
+  const getMotivationalQuote = (achieved: number, target: number) => {
+    const percentage = (achieved / target) * 100;
+    if (percentage >= 100) return "🚀 LEGENDARY! You've smashed your monthly target! Everything now is a bonus.";
+    if (percentage >= 90) return "🔥 SO CLOSE! Just one big push to cross the finish line!";
+    if (percentage >= 75) return "💪 Amazing momentum! You're in the home stretch.";
+    if (percentage >= 50) return "⭐ Halfway there! Keep the energy high.";
+    if (percentage >= 25) return "📈 Good start! Focus on converting those warm leads.";
+    return "🌱 Every giant leap starts with a small step. Let's get those numbers up!";
+  }
+
+  const progressPercentage = Math.min(100, Math.max(0, (data.achievedAmount / data.monthlyTarget) * 100));
 
   if (data.isLoading) {
     return (
@@ -230,19 +289,6 @@ export default function TelecallerDashboard() {
             <p className="text-gray-600 mt-1">Welcome back, {data.user.email?.split('@')[0] || 'Telecaller'}!</p>
           </div>
           <div className="flex items-center gap-3">
-            {/* ACTION REQUIRED: If NotificationBell is not working, the fix must be inside the 
-              NotificationBell component itself (components/notifications/notification-bell.tsx).
-              
-              The structure inside NotificationBell should be:
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild={false}>
-                  <Button variant="ghost" size="icon" className="pointer-events-none">
-                     <Bell className="h-5 w-5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>...</DropdownMenuContent>
-              </DropdownMenu>
-            */}
             <NotificationBell />
             
             <Button 
@@ -266,6 +312,42 @@ export default function TelecallerDashboard() {
         <ErrorBoundary fallback={<div className="text-center py-4 text-gray-500">Quick actions unavailable</div>}>
           <QuickActions userId={data.user.id} />
         </ErrorBoundary>
+
+        {/* --- NEW: DISBURSEMENT TARGET PROGRESS --- */}
+        <Card className="border-2 border-indigo-100 bg-gradient-to-r from-indigo-50 to-white overflow-hidden relative">
+          <div className="absolute top-0 right-0 p-4 opacity-10">
+            <Trophy className="h-32 w-32 text-indigo-600" />
+          </div>
+          <CardHeader className="pb-2">
+             <div className="flex justify-between items-center z-10 relative">
+               <CardTitle className="text-lg font-bold text-indigo-900 flex items-center gap-2">
+                 <Rocket className="h-5 w-5 text-indigo-600" />
+                 Monthly Disbursement Target
+               </CardTitle>
+               <span className="text-sm font-semibold text-indigo-600 bg-indigo-100 px-3 py-1 rounded-full">
+                 {progressPercentage.toFixed(1)}% Achieved
+               </span>
+             </div>
+          </CardHeader>
+          <CardContent className="z-10 relative">
+            <div className="flex justify-between text-sm mb-2 font-medium text-gray-600">
+               <span>Achieved: <span className="text-gray-900 font-bold text-lg">{formatCurrency(data.achievedAmount)}</span></span>
+               <span>Target: <span className="text-gray-900 font-bold text-lg">{formatCurrency(data.monthlyTarget)}</span></span>
+            </div>
+            
+            {/* Progress Bar Container */}
+            <div className="h-4 w-full bg-indigo-100 rounded-full overflow-hidden mb-3">
+               <div 
+                 className="h-full bg-gradient-to-r from-indigo-500 to-purple-600 transition-all duration-1000 ease-out"
+                 style={{ width: `${progressPercentage}%` }}
+               />
+            </div>
+
+            <p className="text-sm text-indigo-700 italic font-medium flex items-center gap-2">
+               💡 {getMotivationalQuote(data.achievedAmount, data.monthlyTarget)}
+            </p>
+          </CardContent>
+        </Card>
 
         {/* Stats Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
@@ -296,7 +378,6 @@ export default function TelecallerDashboard() {
             userId={data.user.id}
             conversionRate={typeof data.stats[5]?.value === 'number' ? data.stats[5].value : 0}
             successRate={typeof data.stats[4]?.value === 'number' ? data.stats[4].value : 0}
-            // Note: The avgCallDuration calculation is missing from this file, using a placeholder of 5
             avgCallDuration={5} 
           />
         </ErrorBoundary>
@@ -325,7 +406,7 @@ export default function TelecallerDashboard() {
           </Card>
         </div>
 
-        {/* Daily Target Progress */}
+        {/* Daily Call Target Progress */}
         <ErrorBoundary fallback={null}>
           <DailyTargetProgress 
             userId={data.user.id} 
