@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, Search, PlusCircle, CheckCircle } from "lucide-react"
+import { Loader2, Search, PlusCircle, CheckCircle, CalendarIcon } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 
 interface DisbursementModalProps {
@@ -35,6 +35,9 @@ export function DisbursementModal({ onSuccess }: DisbursementModalProps) {
         disbursed_amount: "",
         bank_name: "",
         assigned_to: "", // Telecaller ID
+        application_number: "",
+        disbursed_date: new Date().toISOString().split('T')[0], // Default to today
+        location: "" // Maps to 'city'
     })
 
     // Fetch Telecallers for the dropdown
@@ -63,6 +66,9 @@ export function DisbursementModal({ onSuccess }: DisbursementModalProps) {
             disbursed_amount: "",
             bank_name: "",
             assigned_to: "",
+            application_number: "",
+            disbursed_date: new Date().toISOString().split('T')[0],
+            location: ""
         })
     }
 
@@ -84,14 +90,21 @@ export function DisbursementModal({ onSuccess }: DisbursementModalProps) {
 
         if (data) {
             setIsLeadFound(true)
+            
+            // Format existing date if available, else today
+            const existingDate = data.disbursed_at ? new Date(data.disbursed_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+
             setFormData({
                 id: data.id,
                 name: data.name || "",
                 phone: data.phone,
                 loan_amount: data.loan_amount || "",
-                disbursed_amount: data.disbursed_amount || "", // Might be empty if not yet disbursed
+                disbursed_amount: data.disbursed_amount || "", 
                 bank_name: data.bank_name || "",
                 assigned_to: data.assigned_to || "",
+                application_number: data.application_number || "",
+                disbursed_date: existingDate,
+                location: data.city || "" 
             })
             toast({ title: "Lead Found", description: "Details fetched from database.", className: "bg-green-50" })
         } else {
@@ -116,8 +129,10 @@ export function DisbursementModal({ onSuccess }: DisbursementModalProps) {
                 disbursed_amount: Number(formData.disbursed_amount),
                 bank_name: formData.bank_name,
                 assigned_to: formData.assigned_to,
-                status: 'DISBURSED', // CRITICAL: Update status
-                disbursed_at: new Date().toISOString(), // Timestamp
+                status: 'DISBURSED', 
+                disbursed_at: new Date(formData.disbursed_date).toISOString(), // Use selected date
+                application_number: formData.application_number,
+                city: formData.location // Saving location to 'city' column
             }
 
             let error;
@@ -155,7 +170,7 @@ export function DisbursementModal({ onSuccess }: DisbursementModalProps) {
                     Create Disbursement
                 </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[500px]">
+            <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>Record Disbursement</DialogTitle>
                 </DialogHeader>
@@ -194,7 +209,7 @@ export function DisbursementModal({ onSuccess }: DisbursementModalProps) {
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
-                                    <Label htmlFor="name">Customer Name</Label>
+                                    <Label htmlFor="name">Customer Name *</Label>
                                     <Input 
                                         id="name" 
                                         required 
@@ -212,26 +227,63 @@ export function DisbursementModal({ onSuccess }: DisbursementModalProps) {
                                 </div>
                             </div>
 
-                            <div className="space-y-2">
-                                <Label htmlFor="bank">Bank Selection</Label>
-                                <Select 
-                                    value={formData.bank_name} 
-                                    onValueChange={(val) => setFormData({...formData, bank_name: val})}
-                                    required
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select Bank" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="ICICI Bank">ICICI Bank</SelectItem>
-                                        <SelectItem value="HDFC Bank">HDFC Bank</SelectItem>
-                                        <SelectItem value="IDFC Bank">IDFC Bank</SelectItem>
-                                        <SelectItem value="Axis Bank">Axis Bank</SelectItem>
-                                        <SelectItem value="Finnable">Finnable</SelectItem>
-                                        <SelectItem value="Incred">Incred</SelectItem>
-                                        <SelectItem value="Other">Other</SelectItem>
-                                    </SelectContent>
-                                </Select>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="app_no">Application Number *</Label>
+                                    <Input 
+                                        id="app_no" 
+                                        required
+                                        placeholder="APP-12345"
+                                        value={formData.application_number}
+                                        onChange={(e) => setFormData({...formData, application_number: e.target.value})}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="location">Location *</Label>
+                                    <Input 
+                                        id="location" 
+                                        required
+                                        placeholder="City"
+                                        value={formData.location}
+                                        onChange={(e) => setFormData({...formData, location: e.target.value})}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="bank">Bank Selection *</Label>
+                                    <Select 
+                                        value={formData.bank_name} 
+                                        onValueChange={(val) => setFormData({...formData, bank_name: val})}
+                                        required
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select Bank" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="ICICI Bank">ICICI Bank</SelectItem>
+                                            <SelectItem value="HDFC Bank">HDFC Bank</SelectItem>
+                                            <SelectItem value="IDFC Bank">IDFC Bank</SelectItem>
+                                            <SelectItem value="Axis Bank">Axis Bank</SelectItem>
+                                            <SelectItem value="Finnable">Finnable</SelectItem>
+                                            <SelectItem value="Incred">Incred</SelectItem>
+                                            <SelectItem value="Other">Other</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="date">Disbursement Date *</Label>
+                                    <div className="relative">
+                                        <Input 
+                                            id="date" 
+                                            type="date"
+                                            required
+                                            value={formData.disbursed_date}
+                                            onChange={(e) => setFormData({...formData, disbursed_date: e.target.value})}
+                                        />
+                                    </div>
+                                </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
@@ -273,11 +325,6 @@ export function DisbursementModal({ onSuccess }: DisbursementModalProps) {
                                         ))}
                                     </SelectContent>
                                 </Select>
-                                {isLeadFound && (
-                                    <p className="text-[10px] text-gray-500">
-                                        * Pre-selected based on existing assignment. Change only if necessary.
-                                    </p>
-                                )}
                             </div>
 
                             <div className="flex justify-end gap-2 pt-2">
