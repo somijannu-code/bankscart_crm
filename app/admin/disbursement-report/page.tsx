@@ -7,7 +7,6 @@ import { Loader2, DollarSign, BarChart3, TrendingUp, Filter, Users, Calendar } f
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/components/ui/use-toast"
-// IMPORT THE NEW MODAL
 import { DisbursementModal } from "@/components/admin/disbursement-modal"
 
 // --- TYPES ---
@@ -15,18 +14,15 @@ interface LeadDisbursement {
     id: string;
     assigned_to: string; 
     disbursed_amount: number;
-    disbursed_at: string; 
+    disbursed_at: string; // ISO String
+    application_number: string;
+    name: string; // Customer Name
+    bank_name: string;
+    city: string; // Location
 }
 
 interface UserMap {
     [id: string]: string; 
-}
-
-interface MonthlyDisbursement {
-    telecallerId: string;
-    telecallerName: string;
-    monthKey: string; 
-    totalAmount: number;
 }
 
 // --- UTILITIES ---
@@ -38,11 +34,16 @@ const formatCurrency = (value: number) => {
     }).format(value);
 };
 
-const getMonthName = (monthKey: string) => {
-    if (!monthKey || monthKey.length !== 7) return "Invalid Date";
-    const [year, month] = monthKey.split('-');
-    const date = new Date(Number(year), Number(month) - 1, 1);
-    return date.toLocaleString('en-US', { year: 'numeric', month: 'long' });
+const formatDate = (dateString: string) => {
+    if(!dateString) return "-";
+    return new Date(dateString).toLocaleDateString('en-IN', {
+        year: 'numeric', month: 'short', day: 'numeric'
+    });
+};
+
+const getMonthName = (dateString: string) => {
+    if(!dateString) return "-";
+    return new Date(dateString).toLocaleString('en-US', { month: 'long' });
 };
 
 // --- MAIN COMPONENT ---
@@ -57,14 +58,13 @@ export default function TelecallerDisbursementReport() {
     
     // Data State
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
     const [disbursements, setDisbursements] = useState<LeadDisbursement[]>([]);
     const [userMap, setUserMap] = useState<UserMap>({});
     
     // Refresh Trigger
     const [refreshKey, setRefreshKey] = useState(0);
 
-    // 1. Fetch Users
+    // 1. Fetch Users (Telecallers)
     const fetchUsers = useCallback(async () => {
         const { data, error } = await supabase
             .from('users')
@@ -83,24 +83,23 @@ export default function TelecallerDisbursementReport() {
         setUserMap(map);
     }, [supabase]);
 
-    // 2. Fetch Leads (Disbursements)
+    // 2. Fetch Leads (Transactions)
     const fetchLeads = useCallback(async () => {
         setLoading(true);
-        setError(null);
         
         const startOfYear = `${selectedYear}-01-01T00:00:00.000Z`;
         const endOfYear = `${Number(selectedYear) + 1}-01-01T00:00:00.000Z`;
 
         const { data, error } = await supabase
             .from('leads')
-            .select('id, assigned_to, disbursed_amount, disbursed_at')
+            .select('id, assigned_to, disbursed_amount, disbursed_at, application_number, name, bank_name, city')
             .eq('status', 'DISBURSED')
             .gte('disbursed_at', startOfYear)
-            .lt('disbursed_at', endOfYear);
+            .lt('disbursed_at', endOfYear)
+            .order('disbursed_at', { ascending: false }); // Newest first
 
         if (error) {
             console.error('Error fetching leads:', error);
-            setError(`Failed to load data.`);
             setLoading(false);
             return;
         }
@@ -112,51 +111,38 @@ export default function TelecallerDisbursementReport() {
     // Initial Load & Refresh
     useEffect(() => {
         fetchUsers().then(() => fetchLeads());
-    }, [fetchUsers, fetchLeads, refreshKey]); // dependency on refreshKey allows re-fetching
+    }, [fetchUsers, fetchLeads, refreshKey]);
 
-    // --- AGGREGATION LOGIC ---
-    const { aggregatedData, grandTotal, uniqueMonths } = useMemo(() => {
-        const aggregates: { [key: string]: MonthlyDisbursement } = {};
+    // --- AGGREGATION & FILTERING ---
+    const { filteredData, grandTotal, uniqueMonths } = useMemo(() => {
         const monthsSet = new Set<string>();
         let total = 0;
 
+        // 1. Calculate Months & Grand Total based on Year
         disbursements.forEach(d => {
-            if (!d.disbursed_at || !d.assigned_to) return;
-
-            const monthKey = d.disbursed_at.substring(0, 7); // YYYY-MM
-            monthsSet.add(monthKey);
-            
-            const key = `${d.assigned_to}-${monthKey}`;
-
-            if (!aggregates[key]) {
-                aggregates[key] = {
-                    telecallerId: d.assigned_to,
-                    telecallerName: userMap[d.assigned_to] || 'Unknown',
-                    monthKey: monthKey,
-                    totalAmount: 0,
-                };
+            if (d.disbursed_at) {
+                const monthKey = d.disbursed_at.substring(0, 7); // YYYY-MM
+                monthsSet.add(monthKey);
             }
-            aggregates[key].totalAmount += d.disbursed_amount || 0;
-            total += d.disbursed_amount || 0;
+        });
+        
+        // 2. Filter by Month
+        const filtered = disbursements.filter(d => {
+            if (selectedMonth === 'all') return true;
+            return d.disbursed_at && d.disbursed_at.startsWith(selectedMonth);
         });
 
-        const sortedData = Object.values(aggregates).sort((a, b) => {
-            if (a.monthKey !== b.monthKey) return a.monthKey.localeCompare(b.monthKey);
-            return a.telecallerName.localeCompare(b.telecallerName);
+        // 3. Calculate Total for filtered data
+        filtered.forEach(d => {
+             total += d.disbursed_amount || 0;
         });
 
         return {
-            aggregatedData: sortedData,
+            filteredData: filtered,
             grandTotal: total,
-            uniqueMonths: Array.from(monthsSet).sort()
+            uniqueMonths: Array.from(monthsSet).sort().reverse() // Newest months first
         };
-    }, [disbursements, userMap]);
-
-    // Filter Logic
-    const filteredData = useMemo(() => {
-        if (selectedMonth === 'all') return aggregatedData;
-        return aggregatedData.filter(d => d.monthKey === selectedMonth);
-    }, [aggregatedData, selectedMonth]);
+    }, [disbursements, selectedMonth]);
 
     const availableYears = useMemo(() => {
         const years = [];
@@ -169,10 +155,9 @@ export default function TelecallerDisbursementReport() {
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
                     <DollarSign className="h-7 w-7 text-green-600" />
-                    Telecaller Disbursement Report
+                    Disbursement Report
                 </h1>
                 
-                {/* NEW CREATE BUTTON COMPONENT */}
                 <DisbursementModal onSuccess={() => setRefreshKey(prev => prev + 1)} />
             </div>
 
@@ -182,7 +167,7 @@ export default function TelecallerDisbursementReport() {
                     <div className="md:col-span-1 border-r md:border-r-2 border-green-200 pr-6">
                         <p className="text-sm font-medium text-gray-600 flex items-center gap-1">
                             <TrendingUp className="h-4 w-4 text-green-600" />
-                            Grand Total ({selectedYear})
+                            Total Disbursed ({selectedYear})
                         </p>
                         <p className="text-4xl font-extrabold text-green-700 mt-2 break-words">
                             {loading ? <Loader2 className="h-8 w-8 animate-spin" /> : formatCurrency(grandTotal)}
@@ -203,13 +188,17 @@ export default function TelecallerDisbursementReport() {
                         </div>
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-gray-700 flex items-center gap-1">
-                                <Filter className="h-4 w-4" /> Month
+                                <Filter className="h-4 w-4" /> Filter Month
                             </label>
                             <Select value={selectedMonth} onValueChange={setSelectedMonth} disabled={loading || uniqueMonths.length === 0}>
                                 <SelectTrigger><SelectValue placeholder="All Months" /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">All Months</SelectItem>
-                                    {uniqueMonths.map(m => <SelectItem key={m} value={m}>{getMonthName(m)}</SelectItem>)}
+                                    {uniqueMonths.map(m => {
+                                        const [y, mon] = m.split('-');
+                                        const date = new Date(Number(y), Number(mon)-1, 1);
+                                        return <SelectItem key={m} value={m}>{date.toLocaleString('default', { month: 'long' })}</SelectItem>
+                                    })}
                                 </SelectContent>
                             </Select>
                         </div>
@@ -222,39 +211,48 @@ export default function TelecallerDisbursementReport() {
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-xl">
                         <BarChart3 className="h-5 w-5 text-gray-700" />
-                        Monthly Performance Breakdown
+                        Transactions List
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
                     {loading ? (
                         <div className="p-10 text-center text-gray-500">
                             <Loader2 className="h-8 w-8 animate-spin mx-auto mb-3 text-indigo-500" />
-                            Loading data...
+                            Loading transactions...
                         </div>
                     ) : filteredData.length === 0 ? (
                         <div className="p-10 text-center text-gray-500">
                             <p className="text-lg font-semibold">No Data Found</p>
-                            <p className="text-sm">No disbursements recorded for this period.</p>
                         </div>
                     ) : (
                         <div className="overflow-x-auto">
                             <Table>
                                 <TableHeader className="bg-gray-50">
                                     <TableRow>
-                                        <TableHead className="w-[60px] text-gray-600">S.No</TableHead>
-                                        <TableHead className="text-gray-600">Telecaller Name</TableHead>
-                                        <TableHead className="text-gray-600">Month</TableHead>
-                                        <TableHead className="text-right text-gray-600">Disbursed Amount</TableHead>
+                                        <TableHead className="w-[60px]">S.No</TableHead>
+                                        <TableHead>App Number</TableHead>
+                                        <TableHead>Telecaller Name</TableHead>
+                                        <TableHead>Customer Name</TableHead>
+                                        <TableHead>Disbursement Date</TableHead>
+                                        <TableHead>Month</TableHead>
+                                        <TableHead>Bank Name</TableHead>
+                                        <TableHead className="text-right">Disbursed Amount</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {filteredData.map((item, index) => (
-                                        <TableRow key={item.telecallerId + item.monthKey} className="hover:bg-green-50">
-                                            <TableCell className="font-medium text-gray-500">{index + 1}</TableCell>
-                                            <TableCell className="font-semibold text-gray-800">{item.telecallerName}</TableCell>
-                                            <TableCell className="text-sm text-gray-600">{getMonthName(item.monthKey)}</TableCell>
+                                        <TableRow key={item.id} className="hover:bg-gray-50">
+                                            <TableCell className="text-gray-500">{index + 1}</TableCell>
+                                            <TableCell className="font-medium">{item.application_number || '-'}</TableCell>
+                                            <TableCell className="font-semibold text-blue-700">
+                                                {userMap[item.assigned_to] || 'Unknown'}
+                                            </TableCell>
+                                            <TableCell>{item.name}</TableCell>
+                                            <TableCell>{formatDate(item.disbursed_at)}</TableCell>
+                                            <TableCell className="text-gray-600">{getMonthName(item.disbursed_at)}</TableCell>
+                                            <TableCell>{item.bank_name || '-'}</TableCell>
                                             <TableCell className="text-right font-bold text-green-700">
-                                                {formatCurrency(item.totalAmount)}
+                                                {formatCurrency(item.disbursed_amount)}
                                             </TableCell>
                                         </TableRow>
                                     ))}
