@@ -104,7 +104,7 @@ export function TelecallerTicker() {
       <style jsx>{`
         .animate-marquee {
           display: inline-block;
-          /* Increased to 50s for slower speed */
+          /* Increased to 40s for slower speed */
           animation: marquee 50s linear infinite; 
         }
         @keyframes marquee {
