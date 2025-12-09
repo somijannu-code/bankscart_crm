@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Trophy, Sparkles } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
-import { motion, AnimatePresence } from "framer-motion" // Assuming you use framer-motion, or we can use standard CSS
 
 // Helper for currency formatting
 const formatCurrency = (amount: number) => 
@@ -21,9 +20,10 @@ export function DailyWelcomeModal() {
   const supabase = createClient()
   const { toast } = useToast()
 
+  // --- UPDATED USE EFFECT ---
   useEffect(() => {
     const checkAndInit = async () => {
-      // 1. Check LocalStorage
+      // 1. Check LocalStorage to see if user already saw this today
       const today = new Date().toISOString().split('T')[0]
       const seenKey = `seen_welcome_${today}`
       const hasSeen = localStorage.getItem(seenKey)
@@ -40,7 +40,7 @@ export function DailyWelcomeModal() {
       if (data) {
         setTopPerformer(data) // { name: "Name", amount: 10000 }
       } else {
-        // Fallback if no sales yet this month
+        // Fallback if no sales yet this month or error
         setTopPerformer({ name: "No one yet", amount: 0 })
       }
 
@@ -51,6 +51,7 @@ export function DailyWelcomeModal() {
 
     checkAndInit()
   }, [])
+  // --------------------------
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
