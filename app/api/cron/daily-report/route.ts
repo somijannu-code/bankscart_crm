@@ -262,7 +262,7 @@ async function generateAndSendDetailedReport(
     `).join('')
 
   // 6. Send Email
-  await .emails.send({
+  await resend.emails.send({
     from: 'Bankscart CRM <reports@crm.bankscart.com>', // Update after domain verification
     to: recipient.email,
     subject: `📊 ${emailSubject} - ${dateDisplay}`,
