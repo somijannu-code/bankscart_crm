@@ -23,47 +23,25 @@ export function DailyWelcomeModal() {
 
   useEffect(() => {
     const checkAndInit = async () => {
-      // 1. Check LocalStorage (Key format: "seen_welcome_YYYY-MM-DD")
+      // 1. Check LocalStorage
       const today = new Date().toISOString().split('T')[0]
       const seenKey = `seen_welcome_${today}`
       const hasSeen = localStorage.getItem(seenKey)
 
       if (hasSeen) {
         setLoading(false)
-        return // Stop here, don't show modal
+        return
       }
 
-      // 2. Fetch Top Performer (This Month)
-      const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
-      
-      // We need to fetch disbursed leads and aggregate them manually 
-      // (Since RLS might restrict viewing all leads, we rely on a publicly visible 'users' stat or similar. 
-      // Ideally, you have a helper function or view for this. 
-      // For now, let's try fetching from leads if policy permits, or fallback to a mock/system user)
-      
-      const { data: leads } = await supabase
-        .from('leads')
-        .select('assigned_to, disbursed_amount, users!leads_assigned_to_fkey(full_name)')
-        .eq('status', 'DISBURSED')
-        .gte('updated_at', startOfMonth)
-        .not('disbursed_amount', 'is', null)
+      // 2. Fetch Top Performer using the Secure RPC Function
+      // This bypasses RLS so every telecaller can see who the winner is
+      const { data, error } = await supabase.rpc('get_top_performer')
 
-      if (leads && leads.length > 0) {
-        // Aggregate totals by user
-        const stats: Record<string, { name: string, total: number }> = {}
-        
-        leads.forEach((l: any) => {
-          const name = l.users?.full_name || 'Unknown'
-          const amount = l.disbursed_amount || 0
-          if (!stats[name]) stats[name] = { name, total: 0 }
-          stats[name].total += amount
-        })
-
-        // Find max
-        const winner = Object.values(stats).sort((a, b) => b.total - a.total)[0]
-        if (winner) {
-          setTopPerformer({ name: winner.name, amount: winner.total })
-        }
+      if (data) {
+        setTopPerformer(data) // { name: "Name", amount: 10000 }
+      } else {
+        // Fallback if no sales yet this month
+        setTopPerformer({ name: "No one yet", amount: 0 })
       }
 
       // 3. Open Modal
