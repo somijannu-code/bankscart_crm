@@ -185,6 +185,13 @@ export function DisbursementModal({ onSuccess }: DisbursementModalProps) {
                                 placeholder="9876543210" 
                                 value={phoneSearch}
                                 onChange={(e) => setPhoneSearch(e.target.value)}
+                                // ADDED: Handle Enter Key Press
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        e.preventDefault(); // Stop form submission if inside a form
+                                        handleSearch();
+                                    }
+                                }}
                             />
                         </div>
                         <Button onClick={handleSearch} disabled={searchLoading} variant="secondary">
