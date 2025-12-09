@@ -204,7 +204,7 @@ async function sendCoachingEmail({
   }
 
   await resend.emails.send({
-    from: 'Bankscart CRM <onboarding@resend.dev>',
+    from: 'Bankscart CRM <reports@crm.bankscart.com>',
     to: recipient.email,
     subject: `🎯 Your Performance Report - ${dateStr}`,
     html: `
