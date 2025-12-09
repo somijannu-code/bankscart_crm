@@ -27,7 +27,7 @@ export default function TelecallerLayout({
               4. z-50: Ensures it sits on top of everything.
               5. pointer-events-none: Ensures the empty transparent areas don't block clicking on the page below.
             */}
-            <div className="absolute top-4 w-full flex justify-center z-50 bg-transparent pointer-events-none">
+            <div className="absolute top-10 w-full flex justify-center z-50 bg-transparent pointer-events-none">
                {/* Inner wrapper sets the width and re-enables clicks. 
                  You can adjust max-w-4xl to make it wider or narrower.
                */}
