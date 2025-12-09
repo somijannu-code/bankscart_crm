@@ -225,7 +225,10 @@ export function DisbursementModal({ onSuccess }: DisbursementModalProps) {
                                     <SelectContent>
                                         <SelectItem value="ICICI Bank">ICICI Bank</SelectItem>
                                         <SelectItem value="HDFC Bank">HDFC Bank</SelectItem>
-                                        <SelectItem value="Fi Money">Fi Money</SelectItem>
+                                        <SelectItem value="IDFC Bank">IDFC Bank</SelectItem>
+                                        <SelectItem value="Axis Bank">Axis Bank</SelectItem>
+                                        <SelectItem value="Finnable">Finnable</SelectItem>
+                                        <SelectItem value="Incred">Incred</SelectItem>
                                         <SelectItem value="Other">Other</SelectItem>
                                     </SelectContent>
                                 </Select>
