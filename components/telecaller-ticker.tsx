@@ -35,7 +35,7 @@ export function TelecallerTicker() {
         .from('leads')
         .select('disbursed_amount, loan_amount')
         .eq('assigned_to', user.id)
-        .eq('status', 'DISBURSED') // Ensure status matches your DB text exactly
+        .eq('status', 'DISBURSED')
         .gte('updated_at', startOfMonth)
         .lte('updated_at', endOfMonth)
 
@@ -62,36 +62,54 @@ export function TelecallerTicker() {
   }, [])
 
   return (
-    <div className={`w-full overflow-hidden whitespace-nowrap py-2 ${isTargetAchieved ? 'bg-green-600' : 'bg-blue-600'}`}>
-      <div className="inline-block animate-marquee">
-        <div className="flex items-center gap-4 text-white font-semibold text-sm md:text-base">
-          {/* We repeat the message twice to create a smooth infinite loop effect if needed, 
-              but for a simple marquee, one block with animation is sufficient */}
+    <div className="w-full overflow-hidden whitespace-nowrap py-3 bg-transparent flex items-center">
+      <div className="inline-block animate-marquee w-full">
+        <div className="flex items-center gap-4 text-gray-800 font-medium text-sm md:text-base">
+          
+          {/* Main Message */}
           <span className="flex items-center gap-2">
-            {isTargetAchieved ? <Award className="h-4 w-4 text-yellow-300" /> : <TrendingUp className="h-4 w-4 text-yellow-300" />}
+            {isTargetAchieved ? 
+              <Award className="h-5 w-5 text-green-600" /> : 
+              <TrendingUp className="h-5 w-5 text-blue-600" />
+            }
             {message}
           </span>
-          {/* Duplicate for spacing in the loop */}
-          <span className="mx-8 text-blue-300">|</span> 
-          <span className="flex items-center gap-2 opacity-90">
+
+          {/* Spacer */}
+          <span className="mx-16 text-gray-300">|</span> 
+          
+          {/* Duplicate 1 */}
+          <span className="flex items-center gap-2">
+             {isTargetAchieved ? 
+              <Award className="h-5 w-5 text-green-600" /> : 
+              <TrendingUp className="h-5 w-5 text-blue-600" />
+            }
              {message}
           </span>
-          <span className="mx-8 text-blue-300">|</span> 
-          <span className="flex items-center gap-2 opacity-80">
+
+          {/* Spacer */}
+          <span className="mx-16 text-gray-300">|</span> 
+
+          {/* Duplicate 2 */}
+          <span className="flex items-center gap-2">
+             {isTargetAchieved ? 
+              <Award className="h-5 w-5 text-green-600" /> : 
+              <TrendingUp className="h-5 w-5 text-blue-600" />
+            }
              {message}
           </span>
         </div>
       </div>
       
-      {/* CSS Animation embedded directly for simplicity */}
       <style jsx>{`
         .animate-marquee {
           display: inline-block;
-          animation: marquee 25s linear infinite;
+          /* Increased to 50s for slower speed */
+          animation: marquee 50s linear infinite; 
         }
         @keyframes marquee {
-          0% { transform: translateX(100%); } /* Starts from right */
-          100% { transform: translateX(-100%); } /* Exits to left */
+          0% { transform: translateX(100%); }
+          100% { transform: translateX(-100%); }
         }
       `}</style>
     </div>
