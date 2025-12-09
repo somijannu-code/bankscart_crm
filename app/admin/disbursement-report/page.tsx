@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Loader2, DollarSign, BarChart3, TrendingUp, Filter, Users, Calendar } from "lucide-react"
+import { Loader2, DollarSign, BarChart3, TrendingUp, Filter, Calendar } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/components/ui/use-toast"
@@ -96,17 +96,25 @@ export default function TelecallerDisbursementReport() {
             .eq('status', 'DISBURSED')
             .gte('disbursed_at', startOfYear)
             .lt('disbursed_at', endOfYear)
-            .order('disbursed_at', { ascending: false }); // Newest first
+            .order('disbursed_at', { ascending: false })
+            .limit(5000); // FIXED: Increased limit from default 1000 to 5000 to prevent data cutoff
 
         if (error) {
             console.error('Error fetching leads:', error);
+            toast({ title: "Error", description: "Failed to fetch transactions", variant: "destructive" });
             setLoading(false);
             return;
         }
 
-        setDisbursements((data || []) as LeadDisbursement[]);
+        // Ensure disbursed_amount is a number
+        const safeData = (data || []).map(d => ({
+            ...d,
+            disbursed_amount: Number(d.disbursed_amount) || 0
+        }));
+
+        setDisbursements(safeData as LeadDisbursement[]);
         setLoading(false);
-    }, [supabase, selectedYear]);
+    }, [supabase, selectedYear, toast]);
 
     // Initial Load & Refresh
     useEffect(() => {
@@ -114,11 +122,11 @@ export default function TelecallerDisbursementReport() {
     }, [fetchUsers, fetchLeads, refreshKey]);
 
     // --- AGGREGATION & FILTERING ---
-    const { filteredData, grandTotal, uniqueMonths } = useMemo(() => {
+    const { filteredData, grandTotal, uniqueMonths, displayLabel } = useMemo(() => {
         const monthsSet = new Set<string>();
         let total = 0;
 
-        // 1. Calculate Months & Grand Total based on Year
+        // 1. Identify all available months in data
         disbursements.forEach(d => {
             if (d.disbursed_at) {
                 const monthKey = d.disbursed_at.substring(0, 7); // YYYY-MM
@@ -126,23 +134,32 @@ export default function TelecallerDisbursementReport() {
             }
         });
         
-        // 2. Filter by Month
+        // 2. Filter data
         const filtered = disbursements.filter(d => {
             if (selectedMonth === 'all') return true;
             return d.disbursed_at && d.disbursed_at.startsWith(selectedMonth);
         });
 
-        // 3. Calculate Total for filtered data
+        // 3. Calculate Total
         filtered.forEach(d => {
-             total += d.disbursed_amount || 0;
+             total += d.disbursed_amount;
         });
+
+        // 4. Generate Dynamic Label (e.g. "Total (2025)" vs "Total (February)")
+        let label = `Total Disbursed (${selectedYear})`;
+        if (selectedMonth !== 'all') {
+            const [y, m] = selectedMonth.split('-');
+            const date = new Date(Number(y), Number(m)-1, 1);
+            label = `Total Disbursed (${date.toLocaleString('default', { month: 'long' })})`;
+        }
 
         return {
             filteredData: filtered,
             grandTotal: total,
-            uniqueMonths: Array.from(monthsSet).sort().reverse() // Newest months first
+            uniqueMonths: Array.from(monthsSet).sort().reverse(),
+            displayLabel: label
         };
-    }, [disbursements, selectedMonth]);
+    }, [disbursements, selectedMonth, selectedYear]);
 
     const availableYears = useMemo(() => {
         const years = [];
@@ -158,6 +175,7 @@ export default function TelecallerDisbursementReport() {
                     Disbursement Report
                 </h1>
                 
+                {/* NEW COMPONENT for Adding Disbursements */}
                 <DisbursementModal onSuccess={() => setRefreshKey(prev => prev + 1)} />
             </div>
 
@@ -167,7 +185,7 @@ export default function TelecallerDisbursementReport() {
                     <div className="md:col-span-1 border-r md:border-r-2 border-green-200 pr-6">
                         <p className="text-sm font-medium text-gray-600 flex items-center gap-1">
                             <TrendingUp className="h-4 w-4 text-green-600" />
-                            Total Disbursed ({selectedYear})
+                            {displayLabel}
                         </p>
                         <p className="text-4xl font-extrabold text-green-700 mt-2 break-words">
                             {loading ? <Loader2 className="h-8 w-8 animate-spin" /> : formatCurrency(grandTotal)}
@@ -211,7 +229,7 @@ export default function TelecallerDisbursementReport() {
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-xl">
                         <BarChart3 className="h-5 w-5 text-gray-700" />
-                        Transactions List
+                        Transactions List ({filteredData.length})
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
@@ -223,11 +241,12 @@ export default function TelecallerDisbursementReport() {
                     ) : filteredData.length === 0 ? (
                         <div className="p-10 text-center text-gray-500">
                             <p className="text-lg font-semibold">No Data Found</p>
+                            <p className="text-sm text-gray-500">No disbursements found for the selected period.</p>
                         </div>
                     ) : (
-                        <div className="overflow-x-auto">
+                        <div className="overflow-x-auto max-h-[600px]">
                             <Table>
-                                <TableHeader className="bg-gray-50">
+                                <TableHeader className="bg-gray-50 sticky top-0 z-10">
                                     <TableRow>
                                         <TableHead className="w-[60px]">S.No</TableHead>
                                         <TableHead>App Number</TableHead>
