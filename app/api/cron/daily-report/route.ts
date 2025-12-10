@@ -190,7 +190,7 @@ export async function GET(request: Request) {
         const adminHTML = generateAdminHTML(volumeSorted, dateStr)
         
         for (const admin of admins) {
-          await .emails.send({
+          await resend.emails.send({
             from: 'Bankscart CRM <reports@crm.bankscart.com>', // Verify Domain!
             to: admin.email,
             subject: `📊 Global Daily Report - ${dateStr}`,
@@ -314,7 +314,7 @@ async function sendTelecallerReport({ recipient, stats, rank, totalStaff, topPer
   `
 
   await resend.emails.send({
-    from: 'Bankscart CRM <reports@crm.bankscart.com>', // UPDATE THIS
+    from: 'Bankscart CRM <onboarding@resend.dev>', // UPDATE THIS
     to: recipient.email,
     subject: `🎯 Performance Coach - ${dateStr}`,
     html: html
