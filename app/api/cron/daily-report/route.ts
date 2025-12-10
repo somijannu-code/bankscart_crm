@@ -191,7 +191,7 @@ export async function GET(request: Request) {
         
         for (const admin of admins) {
           await .emails.send({
-            from: 'Bankscart CRM <reports@yourdomain.com>', // Verify Domain!
+            from: 'Bankscart CRM <reports@crm.bankscart.com>', // Verify Domain!
             to: admin.email,
             subject: `📊 Global Daily Report - ${dateStr}`,
             html: adminHTML
