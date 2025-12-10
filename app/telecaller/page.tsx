@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Phone, Users, Calendar, CheckCircle, Clock, TrendingUp, Target, BarChart3, RefreshCw, Plus, Trophy, Rocket } from "lucide-react"
+import { Phone, Users, Calendar, CheckCircle, Clock, TrendingUp, Rocket, BarChart3, RefreshCw, Plus } from "lucide-react"
 import { TodaysTasks } from "@/components/todays-tasks"
 import { useRouter } from "next/navigation"
 import { AttendanceWidget } from "@/components/attendance-widget"
@@ -16,7 +16,6 @@ import { ErrorBoundary } from "@/components/error-boundary"
 import { LoadingSpinner } from "@/components/loading-spinner"
 import { EmptyState } from "@/components/empty-state"
 import { useEffect, useState } from "react"
-import { Progress } from "@/components/ui/progress" // Ensure you have this component or use standard HTML
 
 interface DashboardStats {
   title: string
@@ -32,7 +31,6 @@ interface DashboardData {
   user: any
   isLoading: boolean
   error: string | null
-  // New Disbursement Stats
   monthlyTarget: number
   achievedAmount: number
 }
@@ -105,14 +103,17 @@ export default function TelecallerDashboard() {
           // User Profile (For Target)
           supabase.from("users").select("monthly_target").eq("id", user.id).single(),
 
-          // Disbursed Leads (For Achievement) - Assuming 'Disbursed' is the status string
-          // Note: Adjust column 'disbursed_amount' if your schema uses 'loan_amount' or similar
+          // --- FIX APPLIED HERE ---
+          // 1. Use .ilike() for case-insensitive status check
+          // 2. Use 'disbursed_at' OR 'updated_at' fallback
           supabase
             .from("leads")
             .select("disbursed_amount")
             .eq("assigned_to", user.id)
-            .eq("status", "DISBURSED") // Ensure this matches your DB status exactly (case-sensitive)
-            .gte("updated_at", startOfMonth)
+            .ilike("status", "disbursed") // Matches 'Disbursed', 'DISBURSED', 'disbursed'
+            // We use 'gte' on disbursed_at. If your old data doesn't have disbursed_at, 
+            // you might temporarily change this back to 'updated_at', but disbursed_at is accurate.
+            .gte("disbursed_at", startOfMonth)
         ])
 
         const getCount = (response: PromiseSettledResult<any>) => {
@@ -133,7 +134,10 @@ export default function TelecallerDashboard() {
 
         let achievedAmount = 0;
         if (disbursedLeadsResponse.status === 'fulfilled' && disbursedLeadsResponse.value.data) {
-            achievedAmount = disbursedLeadsResponse.value.data.reduce((sum: number, lead: any) => sum + (lead.disbursed_amount || 0), 0);
+            // FIX: Ensure we treat amount as Number explicitly
+            achievedAmount = disbursedLeadsResponse.value.data.reduce((sum: number, lead: any) => {
+              return sum + Number(lead.disbursed_amount || 0);
+            }, 0);
         }
 
         // Calculate metrics
@@ -313,7 +317,7 @@ export default function TelecallerDashboard() {
           <QuickActions userId={data.user.id} />
         </ErrorBoundary>
 
-        {/* --- NEW: DISBURSEMENT TARGET PROGRESS --- */}
+        {/* --- TARGET CARD --- */}
         <Card className="border-2 border-indigo-100 bg-gradient-to-r from-indigo-50 to-white overflow-hidden relative">
           <div className="absolute top-0 right-0 p-4 opacity-10">
             <Trophy className="h-32 w-32 text-indigo-600" />
@@ -335,7 +339,6 @@ export default function TelecallerDashboard() {
                <span>Target: <span className="text-gray-900 font-bold text-lg">{formatCurrency(data.monthlyTarget)}</span></span>
             </div>
             
-            {/* Progress Bar Container */}
             <div className="h-4 w-full bg-indigo-100 rounded-full overflow-hidden mb-3">
                <div 
                  className="h-full bg-gradient-to-r from-indigo-500 to-purple-600 transition-all duration-1000 ease-out"
