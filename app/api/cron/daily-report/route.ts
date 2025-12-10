@@ -256,7 +256,7 @@ async function sendCoachingEmail({ recipient, stats, rank, daysRemaining, topPer
     const statusMsg = isTargetHit ? "✅ Target Hit" : "⚠️ Volume Low"
 
     await resend.emails.send({
-        from: 'Bankscart CRM <onboarding@resend.dev>',
+        from: 'Bankscart CRM <reports@crm.bankscart.com>',
         to: recipient.email,
         subject: `🎯 Performance Coach - ${dateStr}`,
         html: `
