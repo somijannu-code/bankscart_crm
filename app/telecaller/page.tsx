@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Phone, Users, Calendar, CheckCircle, Clock, TrendingUp, Rocket, BarChart3, RefreshCw, Plus } from "lucide-react"
+import { Phone, Users, Calendar, CheckCircle, Clock, TrendingUp, Rocket, BarChart3, RefreshCw, Plus, Trophy } from "lucide-react"
 import { TodaysTasks } from "@/components/todays-tasks"
 import { useRouter } from "next/navigation"
 import { AttendanceWidget } from "@/components/attendance-widget"
