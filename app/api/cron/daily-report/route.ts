@@ -24,17 +24,20 @@ const formatCurrency = (amount: number) =>
 
 export async function GET(request: Request) {
   try {
-    // 1. SECURITY CHECK
+    // 1. SECURITY & TEST MODE CHECK
     const authHeader = request.headers.get('authorization')
     const { searchParams } = new URL(request.url)
     const queryKey = searchParams.get('key')
+    const testEmail = searchParams.get('test_email') // <--- NEW PARAMETER
     const secret = process.env.CRON_SECRET
 
+    // Allow access if Header is correct OR if Query Key is correct
     if ((authHeader !== `Bearer ${secret}`) && (queryKey !== secret)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    console.log("⏳ Starting Daily Report Job...")
+    const isTestMode = !!testEmail
+    console.log(isTestMode ? `🧪 Starting TEST MODE (Sending to ${testEmail})...` : "⏳ Starting Daily Report Job...")
 
     // 2. TIME CALCULATIONS
     const today = new Date()
@@ -60,9 +63,9 @@ export async function GET(request: Request) {
       .select('id, email, full_name, role, tenant_id, monthly_target')
       .eq('is_active', true)
 
-    if (!allUsers) return NextResponse.json({ message: "No users found" })
+    if (!allUsers || allUsers.length === 0) return NextResponse.json({ message: "No users found" })
 
-    // Group by Tenant (To keep data isolated)
+    // Group by Tenant
     const usersByTenant: Record<string, any[]> = {}
     allUsers.forEach(u => {
       if (!usersByTenant[u.tenant_id]) usersByTenant[u.tenant_id] = []
@@ -70,12 +73,17 @@ export async function GET(request: Request) {
     })
 
     // ============================================================
-    // PROCESS EACH TENANT SEPARATELY
+    // PROCESS TENANTS
     // ============================================================
-    for (const tenantId of Object.keys(usersByTenant)) {
+    const tenantIds = Object.keys(usersByTenant)
+    
+    // IF TEST MODE: Only process the first tenant found
+    const tenantsToProcess = isTestMode ? [tenantIds[0]] : tenantIds
+
+    for (const tenantId of tenantsToProcess) {
+      if (!tenantId) continue
       const tenantUsers = usersByTenant[tenantId]
       
-      // Identify Roles
       const telecallers = tenantUsers.filter(u => u.role === 'telecaller')
       const admins = tenantUsers.filter(u => ['tenant_admin', 'team_leader', 'super_admin', 'owner'].includes(u.role))
       
@@ -83,9 +91,6 @@ export async function GET(request: Request) {
       if (staffIds.length === 0) continue
 
       // A. FETCH RAW DATA
-      // -----------------
-      
-      // 1. Call Logs (Yesterday)
       const { data: calls } = await supabase
         .from('call_logs')
         .select('user_id, duration_seconds, call_status')
@@ -93,7 +98,6 @@ export async function GET(request: Request) {
         .gte('created_at', startOfYesterday)
         .lte('created_at', endOfYesterday)
 
-      // 2. Leads Updated Yesterday (For Status Counts like "Login", "Interested")
       const { data: leadUpdates } = await supabase
         .from('leads')
         .select('assigned_to, status')
@@ -101,20 +105,17 @@ export async function GET(request: Request) {
         .gte('updated_at', startOfYesterday)
         .lte('updated_at', endOfYesterday)
 
-      // 3. Revenue (Month to Date)
       const { data: revenueLeads } = await supabase
         .from('leads')
         .select('assigned_to, disbursed_amount, loan_amount')
         .in('assigned_to', staffIds)
         .gte('updated_at', startOfMonth)
         .lte('updated_at', endOfMonth)
-        .eq('status', 'Disbursed') // Or whatever your disbursed status string is
+        .eq('status', 'Disbursed')
 
       // B. AGGREGATE STATS
-      // -----------------
       const statsMap: Record<string, any> = {}
 
-      // Init Map
       telecallers.forEach(u => {
         statsMap[u.id] = {
           user: u,
@@ -124,7 +125,6 @@ export async function GET(request: Request) {
         }
       })
 
-      // Fill Calls
       calls?.forEach(c => {
         if(statsMap[c.user_id]) {
           statsMap[c.user_id].count++
@@ -132,7 +132,6 @@ export async function GET(request: Request) {
         }
       })
 
-      // Fill Statuses
       leadUpdates?.forEach(l => {
         if(!statsMap[l.assigned_to]) return
         const s = statsMap[l.assigned_to]
@@ -147,29 +146,26 @@ export async function GET(request: Request) {
         else if (status === 'Disbursed') s.disbursedCount++
       })
 
-      // Fill Revenue
       revenueLeads?.forEach(l => {
         if(statsMap[l.assigned_to]) {
           statsMap[l.assigned_to].revenueAchieved += (l.disbursed_amount || l.loan_amount || 0)
         }
       })
 
-      // Convert to Array & Sort
       const statsArray = Object.values(statsMap)
-      
-      // Revenue Leaderboard (For Ranking)
       const revenueSorted = [...statsArray].sort((a:any, b:any) => b.revenueAchieved - a.revenueAchieved)
-      const topRevenuePerformer = revenueSorted[0]
-
-      // Volume Leaderboard (For Admin Table)
       const volumeSorted = [...statsArray].sort((a:any, b:any) => b.count - a.count)
-
+      const topRevenuePerformer = revenueSorted[0]
 
       // C. SEND EMAILS
       // --------------
 
-      // 1. Send "Performance Coach" to Telecallers
-      for (const stat of statsArray) {
+      // 1. Send "Performance Coach" (TELECALLER REPORT)
+      // IF TEST MODE: Only send for the 1st Telecaller in list
+      const telecallersToSend = isTestMode ? [revenueSorted[0]] : revenueSorted
+
+      for (const stat of telecallersToSend) {
+        if (!stat) continue
         const rank = revenueSorted.findIndex((s:any) => s.user.id === stat.user.id) + 1
         
         await sendTelecallerReport({
@@ -179,31 +175,40 @@ export async function GET(request: Request) {
           totalStaff: revenueSorted.length,
           topPerformer: topRevenuePerformer,
           daysRemaining,
-          dateStr
+          dateStr,
+          testEmail // Pass the override email
         })
         emailsSent++
-        await delay(200) // Prevent Rate Limit
+        if (!isTestMode) await delay(200) 
       }
 
-      // 2. Send "Global Report" to Admins
-      if (admins.length > 0) {
+      // 2. Send "Global Report" (ADMIN REPORT)
+      // IF TEST MODE: Only send 1 email to the tester
+      const adminsToSend = isTestMode ? [{ email: testEmail }] : admins
+
+      if (adminsToSend.length > 0) {
         const adminHTML = generateAdminHTML(volumeSorted, dateStr)
         
-        for (const admin of admins) {
+        for (const admin of adminsToSend) {
           await resend.emails.send({
-            from: 'Bankscart CRM <reports@crm.bankscart.com>', // Verify Domain!
-            to: admin.email,
-            subject: `📊 Global Daily Report - ${dateStr}`,
+            from: 'Bankscart CRM <reports@crm.bankscart.com>', // UPDATE DOMAIN
+            to: isTestMode ? testEmail! : admin.email,
+            subject: `📊 Global Daily Report - ${dateStr} ${isTestMode ? '(TEST)' : ''}`,
             html: adminHTML
           })
           emailsSent++
-          await delay(200)
+          if (!isTestMode) await delay(200)
+          
+          // In test mode, only send 1 admin report total
+          if (isTestMode) break 
         }
       }
+      
+      // In test mode, stop after processing one tenant
+      if (isTestMode) break
+    }
 
-    } // End Tenant Loop
-
-    return NextResponse.json({ success: true, emails_sent: emailsSent })
+    return NextResponse.json({ success: true, emails_sent: emailsSent, mode: isTestMode ? 'TEST' : 'LIVE' })
 
   } catch (error: any) {
     console.error("❌ Cron Job Failed:", error)
@@ -215,20 +220,19 @@ export async function GET(request: Request) {
 // ==================================================================
 // TEMPLATE 1: TELECALLER COACHING REPORT
 // ==================================================================
-async function sendTelecallerReport({ recipient, stats, rank, totalStaff, topPerformer, daysRemaining, dateStr }: any) {
+async function sendTelecallerReport({ recipient, stats, rank, totalStaff, topPerformer, daysRemaining, dateStr, testEmail }: any) {
   
-  // Logic needed for Coach's Analysis
-  const target = recipient.monthly_target || 3000000
+  const target = recipient.monthly_target || 2000000
   const gap = Math.max(0, target - stats.revenueAchieved)
   const dailyRequired = gap / daysRemaining
   
-  // Rank Color Logic
-  let rankColor = '#f97316' // Default Orange
+  // Rank Colors
+  let rankColor = '#f97316' 
   let rankMsg = "You're doing okay, keep pushing."
   if (rank === 1) { rankColor = '#22c55e'; rankMsg = "You are the CHAMPION! 🏆"; }
   else if (rank > (totalStaff * 0.66)) { rankColor = '#ef4444'; rankMsg = "You are in the danger zone."; }
 
-  // Coach Analysis Box Logic
+  // Coach Analysis
   let coachBox = ''
   if (stats.count < TARGET_DAILY_CALLS) {
     coachBox = `
@@ -251,7 +255,6 @@ async function sendTelecallerReport({ recipient, stats, rank, totalStaff, topPer
       </div>`
   }
 
-  // Progress Bar Width
   const progressPercent = Math.min(100, (stats.revenueAchieved / target) * 100)
 
   const html = `
@@ -263,7 +266,6 @@ async function sendTelecallerReport({ recipient, stats, rank, totalStaff, topPer
         </div>
 
         <div style="padding: 20px;">
-          
           <div style="text-align: center; margin-bottom: 20px;">
             <h1 style="margin: 0; font-size: 42px; color: ${rankColor};">#${rank}</h1>
             <p style="margin: 0; font-weight: bold; color: ${rankColor};">${rankMsg}</p>
@@ -286,7 +288,6 @@ async function sendTelecallerReport({ recipient, stats, rank, totalStaff, topPer
           </div>
 
           <h3 style="font-size: 14px; text-transform: uppercase; color: #999; margin-bottom: 10px;">🛡️ Coach's Analysis</h3>
-          
           ${coachBox}
 
           <div style="margin-top: 30px;">
@@ -308,26 +309,24 @@ async function sendTelecallerReport({ recipient, stats, rank, totalStaff, topPer
             <p>Top Performer Today: <strong>${topPerformer.user.full_name}</strong> (${formatCurrency(topPerformer.revenueAchieved)})</p>
             Keep pushing! 🚀
           </div>
-
         </div>
       </div>
   `
 
   await resend.emails.send({
-    from: 'Bankscart CRM <onboarding@resend.dev>', // UPDATE THIS
-    to: recipient.email,
-    subject: `🎯 Performance Coach - ${dateStr}`,
+    from: 'Bankscart CRM <reports@crm.bankscart.com>', 
+    to: testEmail || recipient.email, // USE TEST EMAIL IF AVAILABLE
+    subject: `🎯 Performance Coach - ${dateStr} ${testEmail ? '(TEST)' : ''}`,
     html: html
   })
 }
 
 
 // ==================================================================
-// TEMPLATE 2: ADMIN GLOBAL REPORT (Pivot Table)
+// TEMPLATE 2: ADMIN GLOBAL REPORT
 // ==================================================================
 function generateAdminHTML(sortedStats: any[], dateStr: string) {
   
-  // 1. Calculate Grand Totals
   const total = { count: 0, nr: 0, callback: 0, interested: 0, login: 0, notEligible: 0, notInterested: 0, disbursed: 0, duration: 0 }
   
   sortedStats.forEach(s => {
@@ -342,16 +341,14 @@ function generateAdminHTML(sortedStats: any[], dateStr: string) {
     total.duration += s.duration
   })
 
-  // 2. Generate Rows
   const rowsHTML = sortedStats.map((s, index) => {
     const totalUsers = sortedStats.length
     
-    // Color Logic for Count Column
     let countStyle = 'padding: 8px; font-weight: bold;'
-    if (s.count === 0) countStyle += 'background-color: #fee2e2; color: #991b1b;' // Red
-    else if (index < totalUsers / 3) countStyle += 'background-color: #dcfce7; color: #166534;' // Green
-    else if (index < (totalUsers * 2) / 3) countStyle += 'background-color: #ffedd5; color: #9a3412;' // Orange
-    else countStyle += 'background-color: #fee2e2; color: #991b1b;' // Red
+    if (s.count === 0) countStyle += 'background-color: #fee2e2; color: #991b1b;' 
+    else if (index < totalUsers / 3) countStyle += 'background-color: #dcfce7; color: #166534;' 
+    else if (index < (totalUsers * 2) / 3) countStyle += 'background-color: #ffedd5; color: #9a3412;' 
+    else countStyle += 'background-color: #fee2e2; color: #991b1b;' 
 
     return `
     <tr style="border-bottom: 1px solid #eee; text-align: center; color: #333;">
@@ -378,10 +375,10 @@ function generateAdminHTML(sortedStats: any[], dateStr: string) {
             <tr style="background-color: #1e3a8a; color: white; text-align: center;">
               <th style="padding: 10px; text-align: left;">User</th>
               <th style="padding: 10px;">Count</th>
-              <th style="padding: 10px;" title="NR, Busy, RNR, Switched Off">NR/RNR</th>
+              <th style="padding: 10px;">NR/RNR</th>
               <th style="padding: 10px;">Callback</th>
-              <th style="padding: 10px;" title="Interested + Docs Pending">Inter.</th>
-              <th style="padding: 10px;" title="Login + Sent to Login">Logged</th>
+              <th style="padding: 10px;">Inter.</th>
+              <th style="padding: 10px;">Logged</th>
               <th style="padding: 10px;">Not Elg.</th>
               <th style="padding: 10px;">Not Int.</th>
               <th style="padding: 10px;">Disb.</th>
@@ -389,7 +386,6 @@ function generateAdminHTML(sortedStats: any[], dateStr: string) {
             </tr>
           </thead>
           <tbody>
-            
             <tr style="background-color: #e0f2fe; font-weight: bold; text-align: center; border-bottom: 2px solid #1e40af;">
               <td style="padding: 10px; text-align: left;">All (Total)</td>
               <td style="padding: 10px;">${total.count}</td>
@@ -402,14 +398,12 @@ function generateAdminHTML(sortedStats: any[], dateStr: string) {
               <td style="padding: 10px;">${total.disbursed}</td>
               <td style="padding: 10px;">${(total.duration / 60).toFixed(1)} m</td>
             </tr>
-  
             ${rowsHTML}
-
           </tbody>
         </table>
         
         <div style="margin-top: 15px; font-size: 11px;">
-           <span style="display:inline-block; width: 10px; height: 10px; background: #dcfce7; border: 1px solid #166534; margin-right: 5px;"></span> High Activity
+           <span style="display:inline-block; width: 10px; height: 10px; background: #dcfce7; border: 1px solid #166534; margin-right: 5px;"></span> High
            <span style="display:inline-block; width: 10px; height: 10px; background: #ffedd5; border: 1px solid #9a3412; margin-right: 5px; margin-left: 10px;"></span> Medium
            <span style="display:inline-block; width: 10px; height: 10px; background: #fee2e2; border: 1px solid #991b1b; margin-right: 5px; margin-left: 10px;"></span> Low
         </div>
