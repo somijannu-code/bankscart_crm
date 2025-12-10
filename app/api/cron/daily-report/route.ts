@@ -137,7 +137,7 @@ export async function GET(request: Request) {
         const goldenHour = Object.keys(hourMap).reduce((a, b) => hourMap[Number(a)] > hourMap[Number(b)] ? a : b, "N/A")
 
         // E. Revenue Progress
-        const userWins = leads?.filter(l => l.assigned_to === user.id && l.status === 'Disbursed') || []
+        const userWins = leads?.filter(l => l.assigned_to === user.id && l.status === 'DISBURSED') || []
         const achievedAmount = userWins.reduce((sum, l) => sum + (l.disbursed_amount || l.loan_amount || 0), 0)
 
         return {
