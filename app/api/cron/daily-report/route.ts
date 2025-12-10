@@ -11,12 +11,16 @@ const supabase = createClient(
 
 export const dynamic = 'force-dynamic'
 
-// Targets for Coaching
+// TARGETS
 const TARGET_DAILY_CALLS = 350
 const TARGET_DAILY_LOGINS = 3
 
-// Helper: Rate Limit Delay (Prevent email spam blocks)
+// HELPER: Pause execution to prevent email rate limits
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+// HELPER: Currency Formatter
+const formatCurrency = (amount: number) => 
+  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount)
 
 export async function GET(request: Request) {
   try {
@@ -30,18 +34,19 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    console.log("⏳ Starting Master Daily Report Job...")
+    console.log("⏳ Starting Daily Report Job...")
 
     // 2. TIME CALCULATIONS
     const today = new Date()
     const yesterday = new Date()
     yesterday.setDate(yesterday.getDate() - 1)
     
-    const dateStr = yesterday.toISOString().split('T')[0]
+    // Dates
+    const dateStr = yesterday.toISOString().split('T')[0] // YYYY-MM-DD
     const startOfYesterday = `${dateStr}T00:00:00.000Z`
     const endOfYesterday = `${dateStr}T23:59:59.999Z`
 
-    // Monthly Range (For Targets)
+    // Monthly Range (For Revenue Targets)
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString()
     const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString()
     const totalDaysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
@@ -49,116 +54,154 @@ export async function GET(request: Request) {
 
     let emailsSent = 0
 
-    // ====================================================
-    // PART 1: SEND COACHING REPORTS TO TELECALLERS
-    // ====================================================
-    console.log("👉 Processing Telecaller Coaching Reports...")
-    
-    const { data: telecallers } = await supabase
+    // 3. FETCH ALL ACTIVE USERS
+    const { data: allUsers } = await supabase
       .from('users')
-      .select('id, email, full_name, tenant_id, monthly_target')
-      .eq('role', 'telecaller')
+      .select('id, email, full_name, role, tenant_id, monthly_target')
       .eq('is_active', true)
 
-    if (telecallers && telecallers.length > 0) {
-      // Group by Tenant for Leaderboard Logic
-      const staffByTenant: Record<string, any[]> = {}
-      telecallers.forEach(t => {
-        if (!staffByTenant[t.tenant_id]) staffByTenant[t.tenant_id] = []
-        staffByTenant[t.tenant_id].push(t)
+    if (!allUsers) return NextResponse.json({ message: "No users found" })
+
+    // Group by Tenant (To keep data isolated)
+    const usersByTenant: Record<string, any[]> = {}
+    allUsers.forEach(u => {
+      if (!usersByTenant[u.tenant_id]) usersByTenant[u.tenant_id] = []
+      usersByTenant[u.tenant_id].push(u)
+    })
+
+    // ============================================================
+    // PROCESS EACH TENANT SEPARATELY
+    // ============================================================
+    for (const tenantId of Object.keys(usersByTenant)) {
+      const tenantUsers = usersByTenant[tenantId]
+      
+      // Identify Roles
+      const telecallers = tenantUsers.filter(u => u.role === 'telecaller')
+      const admins = tenantUsers.filter(u => ['tenant_admin', 'team_leader', 'super_admin', 'owner'].includes(u.role))
+      
+      const staffIds = telecallers.map(u => u.id)
+      if (staffIds.length === 0) continue
+
+      // A. FETCH RAW DATA
+      // -----------------
+      
+      // 1. Call Logs (Yesterday)
+      const { data: calls } = await supabase
+        .from('call_logs')
+        .select('user_id, duration_seconds, call_status')
+        .in('user_id', staffIds)
+        .gte('created_at', startOfYesterday)
+        .lte('created_at', endOfYesterday)
+
+      // 2. Leads Updated Yesterday (For Status Counts like "Login", "Interested")
+      const { data: leadUpdates } = await supabase
+        .from('leads')
+        .select('assigned_to, status')
+        .in('assigned_to', staffIds)
+        .gte('updated_at', startOfYesterday)
+        .lte('updated_at', endOfYesterday)
+
+      // 3. Revenue (Month to Date)
+      const { data: revenueLeads } = await supabase
+        .from('leads')
+        .select('assigned_to, disbursed_amount, loan_amount')
+        .in('assigned_to', staffIds)
+        .gte('updated_at', startOfMonth)
+        .lte('updated_at', endOfMonth)
+        .eq('status', 'Disbursed') // Or whatever your disbursed status string is
+
+      // B. AGGREGATE STATS
+      // -----------------
+      const statsMap: Record<string, any> = {}
+
+      // Init Map
+      telecallers.forEach(u => {
+        statsMap[u.id] = {
+          user: u,
+          count: 0, duration: 0, nr: 0, callback: 0, interested: 0, 
+          login: 0, notEligible: 0, notInterested: 0, disbursedCount: 0,
+          revenueAchieved: 0
+        }
       })
 
-      for (const tenantId of Object.keys(staffByTenant)) {
-        const staff = staffByTenant[tenantId]
-        const staffIds = staff.map(s => s.id)
+      // Fill Calls
+      calls?.forEach(c => {
+        if(statsMap[c.user_id]) {
+          statsMap[c.user_id].count++
+          statsMap[c.user_id].duration += (c.duration_seconds || 0)
+        }
+      })
 
-        // Fetch Stats
-        const { data: calls } = await supabase.from('call_logs')
-          .select('user_id, duration_seconds').in('user_id', staffIds)
-          .gte('created_at', startOfYesterday).lte('created_at', endOfYesterday)
+      // Fill Statuses
+      leadUpdates?.forEach(l => {
+        if(!statsMap[l.assigned_to]) return
+        const s = statsMap[l.assigned_to]
+        const status = l.status
         
-        const { data: leads } = await supabase.from('leads')
-          .select('assigned_to, status, disbursed_amount, loan_amount')
-          .in('assigned_to', staffIds).gte('updated_at', startOfMonth).lte('updated_at', endOfMonth)
+        if (status === 'follow_up') s.callback++
+        else if (['Interested', 'Documents_Sent'].includes(status)) s.interested++
+        else if (['Login', 'Sent to Login'].includes(status)) s.login++
+        else if (status === 'not_eligible') s.notEligible++
+        else if (status === 'Not_Interested') s.notInterested++
+        else if (['nr', 'Busy', 'RNR', 'Switched Off'].includes(status)) s.nr++
+        else if (status === 'Disbursed') s.disbursedCount++
+      })
 
-        // Build Leaderboard
-        const leaderboard = staff.map(user => {
-            const userCalls = calls?.filter(c => c.user_id === user.id) || []
-            const userWins = leads?.filter(l => l.assigned_to === user.id && l.status === 'Disbursed') || []
-            const achievedAmount = userWins.reduce((sum, l) => sum + (l.disbursed_amount || l.loan_amount || 0), 0)
-            
-            return {
-                ...user,
-                dailyCount: userCalls.length,
-                achievedAmount,
-                gap: Math.max(0, (user.monthly_target || 2000000) - achievedAmount)
-            }
-        }).sort((a, b) => b.achievedAmount - a.achievedAmount) // Sort by Revenue
+      // Fill Revenue
+      revenueLeads?.forEach(l => {
+        if(statsMap[l.assigned_to]) {
+          statsMap[l.assigned_to].revenueAchieved += (l.disbursed_amount || l.loan_amount || 0)
+        }
+      })
 
-        const topPerformer = leaderboard[0]
+      // Convert to Array & Sort
+      const statsArray = Object.values(statsMap)
+      
+      // Revenue Leaderboard (For Ranking)
+      const revenueSorted = [...statsArray].sort((a:any, b:any) => b.revenueAchieved - a.revenueAchieved)
+      const topRevenuePerformer = revenueSorted[0]
 
-        // Send Email to Each Telecaller
-        for (const user of leaderboard) {
-            const rank = leaderboard.findIndex(u => u.id === user.id) + 1
-            await sendCoachingEmail({ 
-                recipient: user, stats: user, rank, totalStaff: leaderboard.length, 
-                daysRemaining, topPerformer, dateStr, targets: { calls: TARGET_DAILY_CALLS } 
-            })
-            emailsSent++
-            await delay(200) // Rate limit
+      // Volume Leaderboard (For Admin Table)
+      const volumeSorted = [...statsArray].sort((a:any, b:any) => b.count - a.count)
+
+
+      // C. SEND EMAILS
+      // --------------
+
+      // 1. Send "Performance Coach" to Telecallers
+      for (const stat of statsArray) {
+        const rank = revenueSorted.findIndex((s:any) => s.user.id === stat.user.id) + 1
+        
+        await sendTelecallerReport({
+          recipient: stat.user,
+          stats: stat,
+          rank,
+          totalStaff: revenueSorted.length,
+          topPerformer: topRevenuePerformer,
+          daysRemaining,
+          dateStr
+        })
+        emailsSent++
+        await delay(200) // Prevent Rate Limit
+      }
+
+      // 2. Send "Global Report" to Admins
+      if (admins.length > 0) {
+        const adminHTML = generateAdminHTML(volumeSorted, dateStr)
+        
+        for (const admin of admins) {
+          await resend.emails.send({
+            from: 'Bankscart CRM <reports@yourdomain.com>', // Verify Domain!
+            to: admin.email,
+            subject: `📊 Global Daily Report - ${dateStr}`,
+            html: adminHTML
+          })
+          emailsSent++
+          await delay(200)
         }
       }
-    }
 
-    // ====================================================
-    // PART 2: SEND AGGREGATED REPORTS TO MANAGERS
-    // ====================================================
-    console.log("👉 Processing Manager Reports...")
-
-    // A. Team Leaders
-    const { data: teamLeaders } = await supabase.from('users').select('*').eq('role', 'team_leader').eq('is_active', true)
-    
-    if (teamLeaders) {
-        for (const tl of teamLeaders) {
-            const { data: team } = await supabase.from('users').select('id, full_name').eq('manager_id', tl.id)
-            if (team && team.length > 0) {
-                await generateAndSendPivotReport(tl, team, startOfYesterday, endOfYesterday, dateStr, 'Team Daily Report')
-                emailsSent++
-                await delay(200)
-            }
-        }
-    }
-
-    // B. Tenant Admins
-    const { data: tenantAdmins } = await supabase.from('users').select('*').eq('role', 'tenant_admin').eq('is_active', true)
-
-    if (tenantAdmins) {
-        for (const admin of tenantAdmins) {
-            const { data: allStaff } = await supabase.from('users').select('id, full_name')
-                .eq('tenant_id', admin.tenant_id).in('role', ['telecaller', 'team_leader'])
-            
-            if (allStaff && allStaff.length > 0) {
-                await generateAndSendPivotReport(admin, allStaff, startOfYesterday, endOfYesterday, dateStr, 'Company Daily Report')
-                emailsSent++
-                await delay(200)
-            }
-        }
-    }
-
-    // C. Super Admins
-    const { data: superAdmins } = await supabase.from('users').select('*').in('role', ['super_admin', 'owner']).eq('is_active', true)
-
-    if (superAdmins && superAdmins.length > 0) {
-        const { data: globalStaff } = await supabase.from('users').select('id, full_name').in('role', ['telecaller', 'team_leader']).eq('is_active', true)
-        
-        if (globalStaff && globalStaff.length > 0) {
-            for (const sa of superAdmins) {
-                await generateAndSendPivotReport(sa, globalStaff, startOfYesterday, endOfYesterday, dateStr, 'Global Daily Report')
-                emailsSent++
-                await delay(200)
-            }
-        }
-    }
+    } // End Tenant Loop
 
     return NextResponse.json({ success: true, emails_sent: emailsSent })
 
@@ -168,114 +211,208 @@ export async function GET(request: Request) {
   }
 }
 
-// ====================================================
-// HELPER 1: MANAGER REPORT (PIVOT TABLE)
-// ====================================================
-async function generateAndSendPivotReport(recipient: any, subjects: any[], startTime: string, endTime: string, dateDisplay: string, emailSubject: string) {
-    const subjectIds = subjects.map(s => s.id)
 
-    // Fetch Call Stats
-    const { data: calls } = await supabase.from('call_logs')
-        .select('user_id, duration_seconds').in('user_id', subjectIds)
-        .gte('created_at', startTime).lte('created_at', endTime)
+// ==================================================================
+// TEMPLATE 1: TELECALLER COACHING REPORT
+// ==================================================================
+async function sendTelecallerReport({ recipient, stats, rank, totalStaff, topPerformer, daysRemaining, dateStr }: any) {
+  
+  // Logic needed for Coach's Analysis
+  const target = recipient.monthly_target || 3000000
+  const gap = Math.max(0, target - stats.revenueAchieved)
+  const dailyRequired = gap / daysRemaining
+  
+  // Rank Color Logic
+  let rankColor = '#f97316' // Default Orange
+  let rankMsg = "You're doing okay, keep pushing."
+  if (rank === 1) { rankColor = '#22c55e'; rankMsg = "You are the CHAMPION! 🏆"; }
+  else if (rank > (totalStaff * 0.66)) { rankColor = '#ef4444'; rankMsg = "You are in the danger zone."; }
 
-    // Fetch Lead Updates
-    const { data: leads } = await supabase.from('leads')
-        .select('assigned_to, status').in('assigned_to', subjectIds)
-        .gte('updated_at', startTime).lte('updated_at', endTime)
+  // Coach Analysis Box Logic
+  let coachBox = ''
+  if (stats.count < TARGET_DAILY_CALLS) {
+    coachBox = `
+      <div style="border-left: 4px solid #ef4444; background: #fef2f2; padding: 10px; margin-bottom: 10px;">
+        <strong style="color: #991b1b;">⚠️ Volume Alert:</strong> 
+        You made <strong>${stats.count}</strong> calls yesterday. The target is <strong>${TARGET_DAILY_CALLS}</strong>. 
+        High volume is the first step to success.
+      </div>`
+  } else if (stats.login < TARGET_DAILY_LOGINS) {
+    coachBox = `
+      <div style="border-left: 4px solid #f97316; background: #fff7ed; padding: 10px; margin-bottom: 10px;">
+        <strong style="color: #9a3412;">⚠️ Conversion Alert:</strong> 
+        Good volume (${stats.count}), but only <strong>${stats.login}</strong> logins. Focus on closing today.
+      </div>`
+  } else {
+    coachBox = `
+      <div style="border-left: 4px solid #22c55e; background: #f0fdf4; padding: 10px; margin-bottom: 10px;">
+        <strong style="color: #166534;">✅ Excellent Work:</strong> 
+        You hit your targets! Keep this momentum going.
+      </div>`
+  }
 
-    // Init Stats
-    const statsMap: any = {}
-    subjects.forEach(s => {
-        statsMap[s.id] = { name: s.full_name, count: 0, duration: 0, nr: 0, interested: 0, login: 0, disbursed: 0 }
-    })
+  // Progress Bar Width
+  const progressPercent = Math.min(100, (stats.revenueAchieved / target) * 100)
 
-    // Fill Data
-    calls?.forEach(c => {
-        if(statsMap[c.user_id]) {
-            statsMap[c.user_id].count++
-            statsMap[c.user_id].duration += (c.duration_seconds || 0)
-        }
-    })
-
-    leads?.forEach(l => {
-        if(!statsMap[l.assigned_to]) return
-        const s = l.status
-        const u = statsMap[l.assigned_to]
+  const html = `
+      <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; background: #fff; border: 1px solid #eee; border-radius: 8px;">
         
-        if(['Interested','Documents_Sent'].includes(s)) u.interested++
-        else if(['Login'].includes(s)) u.login++
-        else if(['Disbursed'].includes(s)) u.disbursed++
-        else if(['nr','Busy','RNR'].includes(s)) u.nr++
-    })
+        <div style="text-align: center; background: #1e3a8a; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+          <h2 style="margin: 0;">Daily Performance Coach</h2>
+          <p style="margin: 5px 0 0; opacity: 0.8;">${dateStr}</p>
+        </div>
 
-    // Sort High to Low
-    const sorted = Object.values(statsMap).sort((a: any, b: any) => b.count - a.count)
+        <div style="padding: 20px;">
+          
+          <div style="text-align: center; margin-bottom: 20px;">
+            <h1 style="margin: 0; font-size: 42px; color: ${rankColor};">#${rank}</h1>
+            <p style="margin: 0; font-weight: bold; color: ${rankColor};">${rankMsg}</p>
+            <p style="font-size: 12px; color: #999;">Center Rank (Revenue)</p>
+          </div>
 
-    // HTML Generation
-    const rows = sorted.map((stat: any) => `
-        <tr style="border-bottom:1px solid #eee; text-align:center;">
-            <td style="padding:8px; text-align:left;">${stat.name}</td>
-            <td style="padding:8px; font-weight:bold;">${stat.count}</td>
-            <td style="padding:8px;">${stat.nr}</td>
-            <td style="padding:8px; color:#b91c1c;">${stat.interested}</td>
-            <td style="padding:8px; color:#1e40af;">${stat.login}</td>
-            <td style="padding:8px; color:#15803d; font-weight:bold;">${stat.disbursed}</td>
-            <td style="padding:8px;">${(stat.duration/60).toFixed(0)}m</td>
-        </tr>
-    `).join('')
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; text-align: center;">
+              <p style="font-size: 11px; color: #666; margin: 0;">Calls (Target: ${TARGET_DAILY_CALLS})</p>
+              <p style="font-size: 20px; font-weight: bold; margin: 5px 0; color: ${stats.count >= TARGET_DAILY_CALLS ? '#22c55e' : '#ef4444'}">
+                ${stats.count}
+              </p>
+            </div>
+            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; text-align: center;">
+              <p style="font-size: 11px; color: #666; margin: 0;">Logins (Target: ${TARGET_DAILY_LOGINS})</p>
+              <p style="font-size: 20px; font-weight: bold; margin: 5px 0; color: ${stats.login >= TARGET_DAILY_LOGINS ? '#22c55e' : '#ef4444'}">
+                ${stats.login}
+              </p>
+            </div>
+          </div>
 
-    await resend.emails.send({
-        from: 'Bankscart CRM <onboarding@resend.dev>',
-        to: recipient.email,
-        subject: `📊 ${emailSubject} - ${dateDisplay}`,
-        html: `
-        <div style="font-family:sans-serif; color:#333;">
-            <h2 style="color:#1e3a8a;">${emailSubject}</h2>
-            <table style="width:100%; border-collapse:collapse; font-size:13px;">
-                <tr style="background:#1e3a8a; color:white;">
-                    <th style="padding:8px; text-align:left;">User</th>
-                    <th>Calls</th> <th>NR</th> <th>Int.</th> <th>Login</th> <th>Disb.</th> <th>Dur.</th>
-                </tr>
-                ${rows}
-            </table>
-        </div>`
-    })
-}
+          <h3 style="font-size: 14px; text-transform: uppercase; color: #999; margin-bottom: 10px;">🛡️ Coach's Analysis</h3>
+          
+          ${coachBox}
 
-// ====================================================
-// HELPER 2: TELECALLER REPORT (COACHING)
-// ====================================================
-async function sendCoachingEmail({ recipient, stats, rank, daysRemaining, topPerformer, dateStr, targets }: any) {
-    const formatCurrency = (val: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val)
-    
-    // Coaching Logic
-    const dailyRequired = stats.gap / daysRemaining
-    const isTargetHit = stats.dailyCount >= targets.calls
-    const statusColor = isTargetHit ? '#166534' : '#991b1b' // Green or Red
-    const statusMsg = isTargetHit ? "✅ Target Hit" : "⚠️ Volume Low"
-
-    await resend.emails.send({
-        from: 'Bankscart CRM <reports@crm.bankscart.com>',
-        to: recipient.email,
-        subject: `🎯 Performance Coach - ${dateStr}`,
-        html: `
-        <div style="font-family:sans-serif; color:#333; max-width:600px; margin:0 auto; border:1px solid #eee; padding:20px;">
-            <div style="text-align:center;">
-                <h1 style="color:#1e3a8a; margin:0;">#${rank}</h1>
-                <p style="color:#666; font-size:12px;">Center Rank</p>
+          <div style="margin-top: 30px;">
+            <h3 style="font-size: 14px; text-transform: uppercase; color: #999; margin-bottom: 10px;">💰 Revenue Target</h3>
+            <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px;">
+              <span>Achieved: ${formatCurrency(stats.revenueAchieved)}</span>
+              <span>Target: ${formatCurrency(target)}</span>
+            </div>
+            <div style="width: 100%; background: #e2e8f0; height: 12px; border-radius: 6px; overflow: hidden;">
+              <div style="width: ${progressPercent}%; background: #2563eb; height: 100%;"></div>
             </div>
             
-            <div style="background:#f8fafc; padding:15px; margin:15px 0; border-radius:8px; text-align:center;">
-                <p style="margin:0; font-size:12px; color:#666;">Calls Yesterday (Target: ${targets.calls})</p>
-                <h2 style="margin:5px 0; color:${statusColor};">${stats.dailyCount} <span style="font-size:14px; font-weight:normal;">(${statusMsg})</span></h2>
+            <div style="background: #eff6ff; padding: 10px; margin-top: 10px; border-radius: 5px; font-size: 13px; color: #1e40af;">
+               To hit your target, you need <strong>${formatCurrency(dailyRequired)}</strong> in disbursement <strong>every day</strong> for the remaining ${daysRemaining} days.
             </div>
+          </div>
 
-            <div style="background:#eff6ff; padding:15px; border-radius:8px; font-size:13px;">
-                <p><strong>💰 Revenue Goal:</strong> ${formatCurrency(stats.achievedAmount)} / ${formatCurrency(stats.monthly_target)}</p>
-                <p>To hit target, you need <strong>${formatCurrency(dailyRequired)}</strong> disbursement daily for ${daysRemaining} days.</p>
-                <p style="margin-top:10px; font-size:11px; color:#666;">Top Performer: ${topPerformer.full_name} (${formatCurrency(topPerformer.achievedAmount)})</p>
-            </div>
-        </div>`
-    })
+          <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #999; text-align: center;">
+            <p>Top Performer Today: <strong>${topPerformer.user.full_name}</strong> (${formatCurrency(topPerformer.revenueAchieved)})</p>
+            Keep pushing! 🚀
+          </div>
+
+        </div>
+      </div>
+  `
+
+  await resend.emails.send({
+    from: 'Bankscart CRM <onboarding@resend.dev>', // UPDATE THIS
+    to: recipient.email,
+    subject: `🎯 Performance Coach - ${dateStr}`,
+    html: html
+  })
+}
+
+
+// ==================================================================
+// TEMPLATE 2: ADMIN GLOBAL REPORT (Pivot Table)
+// ==================================================================
+function generateAdminHTML(sortedStats: any[], dateStr: string) {
+  
+  // 1. Calculate Grand Totals
+  const total = { count: 0, nr: 0, callback: 0, interested: 0, login: 0, notEligible: 0, notInterested: 0, disbursed: 0, duration: 0 }
+  
+  sortedStats.forEach(s => {
+    total.count += s.count
+    total.nr += s.nr
+    total.callback += s.callback
+    total.interested += s.interested
+    total.login += s.login
+    total.notEligible += s.notEligible
+    total.notInterested += s.notInterested
+    total.disbursed += s.disbursedCount
+    total.duration += s.duration
+  })
+
+  // 2. Generate Rows
+  const rowsHTML = sortedStats.map((s, index) => {
+    const totalUsers = sortedStats.length
+    
+    // Color Logic for Count Column
+    let countStyle = 'padding: 8px; font-weight: bold;'
+    if (s.count === 0) countStyle += 'background-color: #fee2e2; color: #991b1b;' // Red
+    else if (index < totalUsers / 3) countStyle += 'background-color: #dcfce7; color: #166534;' // Green
+    else if (index < (totalUsers * 2) / 3) countStyle += 'background-color: #ffedd5; color: #9a3412;' // Orange
+    else countStyle += 'background-color: #fee2e2; color: #991b1b;' // Red
+
+    return `
+    <tr style="border-bottom: 1px solid #eee; text-align: center; color: #333;">
+      <td style="padding: 8px; text-align: left; font-weight: 500;">${s.user.full_name}</td>
+      <td style="${countStyle}">${s.count}</td>
+      <td style="padding: 8px;">${s.nr}</td>
+      <td style="padding: 8px;">${s.callback}</td>
+      <td style="padding: 8px;">${s.interested}</td>
+      <td style="padding: 8px;">${s.login}</td>
+      <td style="padding: 8px;">${s.notEligible}</td>
+      <td style="padding: 8px;">${s.notInterested}</td>
+      <td style="padding: 8px;">${s.disbursedCount}</td>
+      <td style="padding: 8px;">${(s.duration / 60).toFixed(1)} m</td>
+    </tr>`
+  }).join('')
+
+  return `
+      <div style="font-family: Arial, sans-serif; font-size: 12px; color: #333; overflow-x: auto;">
+        <h2 style="color: #1e3a8a;">Global Daily Report (${dateStr})</h2>
+        <p>Sorted by call volume (High to Low).</p>
+        
+        <table style="width: 100%; border-collapse: collapse; min-width: 800px;">
+          <thead>
+            <tr style="background-color: #1e3a8a; color: white; text-align: center;">
+              <th style="padding: 10px; text-align: left;">User</th>
+              <th style="padding: 10px;">Count</th>
+              <th style="padding: 10px;" title="NR, Busy, RNR, Switched Off">NR/RNR</th>
+              <th style="padding: 10px;">Callback</th>
+              <th style="padding: 10px;" title="Interested + Docs Pending">Inter.</th>
+              <th style="padding: 10px;" title="Login + Sent to Login">Logged</th>
+              <th style="padding: 10px;">Not Elg.</th>
+              <th style="padding: 10px;">Not Int.</th>
+              <th style="padding: 10px;">Disb.</th>
+              <th style="padding: 10px;">Dur.</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr style="background-color: #e0f2fe; font-weight: bold; text-align: center; border-bottom: 2px solid #1e40af;">
+              <td style="padding: 10px; text-align: left;">All (Total)</td>
+              <td style="padding: 10px;">${total.count}</td>
+              <td style="padding: 10px;">${total.nr}</td>
+              <td style="padding: 10px;">${total.callback}</td>
+              <td style="padding: 10px;">${total.interested}</td>
+              <td style="padding: 10px;">${total.login}</td>
+              <td style="padding: 10px;">${total.notEligible}</td>
+              <td style="padding: 10px;">${total.notInterested}</td>
+              <td style="padding: 10px;">${total.disbursed}</td>
+              <td style="padding: 10px;">${(total.duration / 60).toFixed(1)} m</td>
+            </tr>
+  
+            ${rowsHTML}
+
+          </tbody>
+        </table>
+        
+        <div style="margin-top: 15px; font-size: 11px;">
+           <span style="display:inline-block; width: 10px; height: 10px; background: #dcfce7; border: 1px solid #166534; margin-right: 5px;"></span> High Activity
+           <span style="display:inline-block; width: 10px; height: 10px; background: #ffedd5; border: 1px solid #9a3412; margin-right: 5px; margin-left: 10px;"></span> Medium
+           <span style="display:inline-block; width: 10px; height: 10px; background: #fee2e2; border: 1px solid #991b1b; margin-right: 5px; margin-left: 10px;"></span> Low
+        </div>
+      </div>
+  `
 }
