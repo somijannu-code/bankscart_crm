@@ -14,6 +14,9 @@ export const dynamic = 'force-dynamic'
 const TARGET_DAILY_CALLS = 350
 const TARGET_DAILY_LOGINS = 3
 
+// HELPER: Rate Limit Delay (500ms = 2 emails per second max)
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
 export async function GET(request: Request) {
   try {
     // 1. SECURITY CHECK
@@ -103,8 +106,6 @@ export async function GET(request: Request) {
         const dailyCount = yesterdayCalls.length
         
         // B. Logins (Yesterday)
-        // Check "Login" status in leads updated yesterday
-        // Note: We need to fetch yesterday's lead updates separately or filter from the monthly batch
         const yesterdayLeads = leads?.filter(l => 
           l.assigned_to === user.id && 
           l.updated_at >= startOfYesterday && 
@@ -128,8 +129,7 @@ export async function GET(request: Request) {
         const hourMap: Record<number, number> = {}
         yesterdayCalls.forEach(c => {
           if (c.call_status === 'connected' || c.duration_seconds > 0) {
-            const hour = new Date(c.created_at).getUTCHours() // Adjust for timezone if needed
-            // Ideally convert UTC to IST (UTC+5.5) roughly
+            const hour = new Date(c.created_at).getUTCHours()
             const istHour = (hour + 5) % 24 // Simplified IST conversion
             hourMap[istHour] = (hourMap[istHour] || 0) + 1
           }
@@ -155,7 +155,7 @@ export async function GET(request: Request) {
       leaderboard.sort((a, b) => b.achievedAmount - a.achievedAmount)
       const topPerformer = leaderboard[0]
 
-      // 5. Send Emails
+      // 5. Send Emails with INTERVAL (Rate Limit Protection)
       for (const user of leaderboard) {
         const rank = leaderboard.findIndex(u => u.id === user.id) + 1
         
@@ -169,7 +169,11 @@ export async function GET(request: Request) {
           dateStr,
           targets: { calls: TARGET_DAILY_CALLS, logins: TARGET_DAILY_LOGINS }
         })
+        
         emailsSent++
+        
+        // PAUSE for 500ms between emails to respect Resend's 2 req/sec limit
+        await delay(500)
       }
     }
 
@@ -202,28 +206,23 @@ async function sendCoachingEmail({
     ? `<div style="background: #fef08a; color: #854d0e; padding: 5px 10px; border-radius: 15px; font-size: 12px; display: inline-block; font-weight: bold; margin-bottom: 10px;">🔥 ${stats.streakCount} Day Streak!</div>` 
     : ''
 
-  // 2. COACHING ANALYSIS (The "AI" Coach)
+  // 2. COACHING ANALYSIS
   let coachingAdvice = ''
   
-  // A. CALL VOLUME CHECK
   if (stats.dailyCount < targets.calls) {
     coachingAdvice += `
       <div style="border-left: 4px solid #ef4444; background: #fef2f2; padding: 10px; margin-bottom: 10px;">
         <strong style="color: #991b1b;">⚠️ Volume Alert:</strong> 
         You made <strong>${stats.dailyCount}</strong> calls yesterday. The target is <strong>${targets.calls}</strong>. 
-        High volume is the first step to success.
       </div>`
   } 
-  // B. CONVERSION CHECK (High Volume / Low Login)
   else if (stats.dailyCount >= targets.calls && stats.dailyLogins < targets.logins) {
     coachingAdvice += `
       <div style="border-left: 4px solid #f97316; background: #fff7ed; padding: 10px; margin-bottom: 10px;">
         <strong style="color: #9a3412;">⚠️ Quality Check:</strong> 
-        Great hustle on calls (${stats.dailyCount}), but you only got <strong>${stats.dailyLogins}</strong> logins (Target: ${targets.logins}). 
-        Focus on your pitch script today.
+        Great hustle on calls (${stats.dailyCount}), but only <strong>${stats.dailyLogins}</strong> logins (Target: ${targets.logins}). 
       </div>`
   }
-  // C. GOOD JOB
   else {
     coachingAdvice += `
       <div style="border-left: 4px solid #22c55e; background: #f0fdf4; padding: 10px; margin-bottom: 10px;">
@@ -232,19 +231,11 @@ async function sendCoachingEmail({
       </div>`
   }
 
-  // D. GOLDEN HOUR
-  if (stats.goldenHour !== "No Data") {
-    coachingAdvice += `
-      <div style="background: #f0f9ff; padding: 10px; border-radius: 5px; font-size: 13px; color: #0369a1; margin-top: 5px;">
-        💡 <strong>Golden Hour:</strong> Your calls connected best between <strong>${stats.goldenHour}</strong> yesterday. Try to maximize dialing during this time today!
-      </div>`
-  }
-
   // 3. TARGET RUN RATE
   const dailyRequired = stats.gap / daysRemaining
 
   await resend.emails.send({
-    from: 'Bankscart CRM <reports@crm.bankscart.com>',
+    from: 'Bankscart CRM <onboarding@resend.dev>', // Change to your domain after verifying
     to: recipient.email,
     subject: `🎯 Performance Coach - ${dateStr}`,
     html: `
@@ -256,7 +247,6 @@ async function sendCoachingEmail({
         </div>
 
         <div style="padding: 20px;">
-          
           <div style="text-align: center; margin-bottom: 20px;">
             ${streakBadge}
             <h1 style="margin: 0; font-size: 42px; color: ${rankColor};">#${rank}</h1>
@@ -298,7 +288,7 @@ async function sendCoachingEmail({
           </div>
 
           <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #999; text-align: center;">
-            <p>Top Performer Today: <strong>${topPerformer.full_name}</strong> (${formatCurrency(topPerformer.achievedAmount)})</p>
+            <p>Top Performer: <strong>${topPerformer.full_name}</strong> (${formatCurrency(topPerformer.achievedAmount)})</p>
             Keep pushing! 🚀
           </div>
 
