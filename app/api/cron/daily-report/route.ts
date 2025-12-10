@@ -235,7 +235,7 @@ async function sendCoachingEmail({
   const dailyRequired = stats.gap / daysRemaining
 
   await resend.emails.send({
-    from: 'Bankscart CRM <onboarding@resend.dev>', // Change to your domain after verifying
+    from: 'Bankscart CRM <reports@crm.bankscart.com>', // Change to your domain after verifying
     to: recipient.email,
     subject: `🎯 Performance Coach - ${dateStr}`,
     html: `
