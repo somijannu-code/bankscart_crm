@@ -7,6 +7,7 @@ import { Loader2, DollarSign, BarChart3, TrendingUp, Filter, Calendar } from "lu
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/components/ui/use-toast"
+// IMPORT YOUR NEW MODAL
 import { DisbursementModal } from "@/components/admin/disbursement-modal"
 
 // --- TYPES ---
@@ -64,12 +65,12 @@ export default function TelecallerDisbursementReport() {
     // Refresh Trigger
     const [refreshKey, setRefreshKey] = useState(0);
 
-    // 1. Fetch Users (Telecallers)
+    // 1. Fetch Users (Telecallers) to map IDs to Names
     const fetchUsers = useCallback(async () => {
         const { data, error } = await supabase
             .from('users')
             .select('id, full_name')
-            .eq('role', 'telecaller'); 
+            .in('role', ['telecaller', 'team_leader']); // Fetch anyone who might have sales
 
         if (error) {
             console.error('Error fetching users:', error);
@@ -97,7 +98,7 @@ export default function TelecallerDisbursementReport() {
             .gte('disbursed_at', startOfYear)
             .lt('disbursed_at', endOfYear)
             .order('disbursed_at', { ascending: false })
-            .limit(5000); // FIXED: Increased limit from default 1000 to 5000 to prevent data cutoff
+            .limit(5000); // Increased limit to prevent data cutoff
 
         if (error) {
             console.error('Error fetching leads:', error);
@@ -116,7 +117,7 @@ export default function TelecallerDisbursementReport() {
         setLoading(false);
     }, [supabase, selectedYear, toast]);
 
-    // Initial Load & Refresh
+    // Initial Load & Refresh Logic
     useEffect(() => {
         fetchUsers().then(() => fetchLeads());
     }, [fetchUsers, fetchLeads, refreshKey]);
@@ -134,13 +135,13 @@ export default function TelecallerDisbursementReport() {
             }
         });
         
-        // 2. Filter data
+        // 2. Filter data based on selection
         const filtered = disbursements.filter(d => {
             if (selectedMonth === 'all') return true;
             return d.disbursed_at && d.disbursed_at.startsWith(selectedMonth);
         });
 
-        // 3. Calculate Total
+        // 3. Calculate Total for filtered view
         filtered.forEach(d => {
              total += d.disbursed_amount;
         });
@@ -180,9 +181,9 @@ export default function TelecallerDisbursementReport() {
             </div>
 
             {/* Summary Card */}
-            <Card className="shadow-lg">
+            <Card className="shadow-lg bg-white">
                 <CardContent className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-                    <div className="md:col-span-1 border-r md:border-r-2 border-green-200 pr-6">
+                    <div className="md:col-span-1 border-r md:border-r-2 border-green-100 pr-6">
                         <p className="text-sm font-medium text-gray-600 flex items-center gap-1">
                             <TrendingUp className="h-4 w-4 text-green-600" />
                             {displayLabel}
@@ -194,8 +195,8 @@ export default function TelecallerDisbursementReport() {
 
                     <div className="md:col-span-2 grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                            <label className="text-sm font-medium text-gray-700 flex items-center gap-1">
-                                <Calendar className="h-4 w-4" /> Year
+                            <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1">
+                                <Calendar className="h-3 w-3" /> Year
                             </label>
                             <Select value={selectedYear} onValueChange={setSelectedYear} disabled={loading}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -205,8 +206,8 @@ export default function TelecallerDisbursementReport() {
                             </Select>
                         </div>
                         <div className="space-y-2">
-                            <label className="text-sm font-medium text-gray-700 flex items-center gap-1">
-                                <Filter className="h-4 w-4" /> Filter Month
+                            <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1">
+                                <Filter className="h-3 w-3" /> Filter Month
                             </label>
                             <Select value={selectedMonth} onValueChange={setSelectedMonth} disabled={loading || uniqueMonths.length === 0}>
                                 <SelectTrigger><SelectValue placeholder="All Months" /></SelectTrigger>
@@ -225,7 +226,7 @@ export default function TelecallerDisbursementReport() {
             </Card>
 
             {/* Results Table */}
-            <Card className="shadow-lg">
+            <Card className="shadow-lg border-t-4 border-t-green-600">
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-xl">
                         <BarChart3 className="h-5 w-5 text-gray-700" />
@@ -246,31 +247,35 @@ export default function TelecallerDisbursementReport() {
                     ) : (
                         <div className="overflow-x-auto max-h-[600px]">
                             <Table>
-                                <TableHeader className="bg-gray-50 sticky top-0 z-10">
+                                <TableHeader className="bg-gray-50 sticky top-0 z-10 shadow-sm">
                                     <TableRow>
-                                        <TableHead className="w-[60px]">S.No</TableHead>
-                                        <TableHead>App Number</TableHead>
-                                        <TableHead>Telecaller Name</TableHead>
-                                        <TableHead>Customer Name</TableHead>
-                                        <TableHead>Disbursement Date</TableHead>
-                                        <TableHead>Month</TableHead>
-                                        <TableHead>Bank Name</TableHead>
-                                        <TableHead className="text-right">Disbursed Amount</TableHead>
+                                        <TableHead className="w-[50px] font-bold text-gray-700">#</TableHead>
+                                        <TableHead className="font-bold text-gray-700">App No.</TableHead>
+                                        <TableHead className="font-bold text-gray-700">Telecaller</TableHead>
+                                        <TableHead className="font-bold text-gray-700">Customer</TableHead>
+                                        <TableHead className="font-bold text-gray-700">Disbursed Date</TableHead>
+                                        <TableHead className="font-bold text-gray-700">Month</TableHead>
+                                        <TableHead className="font-bold text-gray-700">Bank</TableHead>
+                                        <TableHead className="text-right font-bold text-gray-700">Amount</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {filteredData.map((item, index) => (
-                                        <TableRow key={item.id} className="hover:bg-gray-50">
-                                            <TableCell className="text-gray-500">{index + 1}</TableCell>
-                                            <TableCell className="font-medium">{item.application_number || '-'}</TableCell>
+                                        <TableRow key={item.id} className="hover:bg-green-50 transition-colors">
+                                            <TableCell className="text-gray-500 text-xs">{index + 1}</TableCell>
+                                            <TableCell className="font-medium text-xs font-mono">{item.application_number || '-'}</TableCell>
                                             <TableCell className="font-semibold text-blue-700">
                                                 {userMap[item.assigned_to] || 'Unknown'}
                                             </TableCell>
-                                            <TableCell>{item.name}</TableCell>
+                                            <TableCell className="font-medium">{item.name}</TableCell>
                                             <TableCell>{formatDate(item.disbursed_at)}</TableCell>
-                                            <TableCell className="text-gray-600">{getMonthName(item.disbursed_at)}</TableCell>
-                                            <TableCell>{item.bank_name || '-'}</TableCell>
-                                            <TableCell className="text-right font-bold text-green-700">
+                                            <TableCell className="text-gray-500 text-sm">{getMonthName(item.disbursed_at)}</TableCell>
+                                            <TableCell>
+                                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                                    {item.bank_name || 'N/A'}
+                                                </span>
+                                            </TableCell>
+                                            <TableCell className="text-right font-bold text-green-700 text-base">
                                                 {formatCurrency(item.disbursed_amount)}
                                             </TableCell>
                                         </TableRow>
