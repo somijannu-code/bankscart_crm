@@ -108,7 +108,7 @@ export async function GET(request: Request) {
         .in('assigned_to', staffIds)
         .gte('updated_at', startOfMonth)
         .lte('updated_at', endOfMonth)
-        .eq('status', 'Disbursed') // Or whatever your disbursed status string is
+        .eq('status', 'DISBURSED') // Or whatever your disbursed status string is
 
       // B. AGGREGATE STATS
       // -----------------
@@ -144,7 +144,7 @@ export async function GET(request: Request) {
         else if (status === 'not_eligible') s.notEligible++
         else if (status === 'Not_Interested') s.notInterested++
         else if (['nr', 'Busy', 'RNR', 'Switched Off'].includes(status)) s.nr++
-        else if (status === 'Disbursed') s.disbursedCount++
+        else if (status === 'DISBURSED') s.disbursedCount++
       })
 
       // Fill Revenue
