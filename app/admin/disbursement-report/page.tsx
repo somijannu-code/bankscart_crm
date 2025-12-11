@@ -3,11 +3,23 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Loader2, DollarSign, BarChart3, TrendingUp, Filter, Calendar } from "lucide-react"
+import { Loader2, DollarSign, BarChart3, TrendingUp, Filter, Calendar, Trash2, MapPin } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
-// IMPORT YOUR NEW MODAL
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+
+// IMPORT YOUR MODAL COMPONENT
 import { DisbursementModal } from "@/components/admin/disbursement-modal"
 
 // --- TYPES ---
@@ -62,6 +74,10 @@ export default function TelecallerDisbursementReport() {
     const [disbursements, setDisbursements] = useState<LeadDisbursement[]>([]);
     const [userMap, setUserMap] = useState<UserMap>({});
     
+    // Delete State
+    const [deleteId, setDeleteId] = useState<string | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
+    
     // Refresh Trigger
     const [refreshKey, setRefreshKey] = useState(0);
 
@@ -70,7 +86,7 @@ export default function TelecallerDisbursementReport() {
         const { data, error } = await supabase
             .from('users')
             .select('id, full_name')
-            .in('role', ['telecaller', 'team_leader']); // Fetch anyone who might have sales
+            .in('role', ['telecaller', 'team_leader']); 
 
         if (error) {
             console.error('Error fetching users:', error);
@@ -98,7 +114,7 @@ export default function TelecallerDisbursementReport() {
             .gte('disbursed_at', startOfYear)
             .lt('disbursed_at', endOfYear)
             .order('disbursed_at', { ascending: false })
-            .limit(5000); // Increased limit to prevent data cutoff
+            .limit(5000); 
 
         if (error) {
             console.error('Error fetching leads:', error);
@@ -107,7 +123,6 @@ export default function TelecallerDisbursementReport() {
             return;
         }
 
-        // Ensure disbursed_amount is a number
         const safeData = (data || []).map(d => ({
             ...d,
             disbursed_amount: Number(d.disbursed_amount) || 0
@@ -122,12 +137,41 @@ export default function TelecallerDisbursementReport() {
         fetchUsers().then(() => fetchLeads());
     }, [fetchUsers, fetchLeads, refreshKey]);
 
+    // 3. Delete Handler
+    const handleDelete = async () => {
+        if (!deleteId) return;
+        setIsDeleting(true);
+
+        try {
+            // We don't actually delete the lead, we just reset its status so it disappears from this report
+            // OR you can use .delete() if you want to remove the record entirely.
+            // Option A: Soft Delete (Reset Status) - Safer
+            const { error } = await supabase
+                .from('leads')
+                .update({ 
+                    status: 'Interested', // Revert to previous status
+                    disbursed_amount: null,
+                    disbursed_at: null 
+                })
+                .eq('id', deleteId);
+
+            if (error) throw error;
+
+            toast({ title: "Deleted", description: "Transaction removed successfully." });
+            setRefreshKey(prev => prev + 1); // Refresh Data
+        } catch (error: any) {
+            toast({ title: "Error", description: error.message, variant: "destructive" });
+        } finally {
+            setIsDeleting(false);
+            setDeleteId(null);
+        }
+    };
+
     // --- AGGREGATION & FILTERING ---
     const { filteredData, grandTotal, uniqueMonths, displayLabel } = useMemo(() => {
         const monthsSet = new Set<string>();
         let total = 0;
 
-        // 1. Identify all available months in data
         disbursements.forEach(d => {
             if (d.disbursed_at) {
                 const monthKey = d.disbursed_at.substring(0, 7); // YYYY-MM
@@ -135,18 +179,13 @@ export default function TelecallerDisbursementReport() {
             }
         });
         
-        // 2. Filter data based on selection
         const filtered = disbursements.filter(d => {
             if (selectedMonth === 'all') return true;
             return d.disbursed_at && d.disbursed_at.startsWith(selectedMonth);
         });
 
-        // 3. Calculate Total for filtered view
-        filtered.forEach(d => {
-             total += d.disbursed_amount;
-        });
+        filtered.forEach(d => { total += d.disbursed_amount; });
 
-        // 4. Generate Dynamic Label (e.g. "Total (2025)" vs "Total (February)")
         let label = `Total Disbursed (${selectedYear})`;
         if (selectedMonth !== 'all') {
             const [y, m] = selectedMonth.split('-');
@@ -181,7 +220,7 @@ export default function TelecallerDisbursementReport() {
             </div>
 
             {/* Summary Card */}
-            <Card className="shadow-lg bg-white">
+            <Card className="shadow-lg bg-white border-l-4 border-l-green-600">
                 <CardContent className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
                     <div className="md:col-span-1 border-r md:border-r-2 border-green-100 pr-6">
                         <p className="text-sm font-medium text-gray-600 flex items-center gap-1">
@@ -226,7 +265,7 @@ export default function TelecallerDisbursementReport() {
             </Card>
 
             {/* Results Table */}
-            <Card className="shadow-lg border-t-4 border-t-green-600">
+            <Card className="shadow-lg">
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-xl">
                         <BarChart3 className="h-5 w-5 text-gray-700" />
@@ -254,9 +293,9 @@ export default function TelecallerDisbursementReport() {
                                         <TableHead className="font-bold text-gray-700">Telecaller</TableHead>
                                         <TableHead className="font-bold text-gray-700">Customer</TableHead>
                                         <TableHead className="font-bold text-gray-700">Disbursed Date</TableHead>
-                                        <TableHead className="font-bold text-gray-700">Month</TableHead>
                                         <TableHead className="font-bold text-gray-700">Bank</TableHead>
                                         <TableHead className="text-right font-bold text-gray-700">Amount</TableHead>
+                                        <TableHead className="w-[50px] text-center">Action</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -267,16 +306,34 @@ export default function TelecallerDisbursementReport() {
                                             <TableCell className="font-semibold text-blue-700">
                                                 {userMap[item.assigned_to] || 'Unknown'}
                                             </TableCell>
-                                            <TableCell className="font-medium">{item.name}</TableCell>
-                                            <TableCell>{formatDate(item.disbursed_at)}</TableCell>
-                                            <TableCell className="text-gray-500 text-sm">{getMonthName(item.disbursed_at)}</TableCell>
                                             <TableCell>
-                                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                                <div className="flex flex-col">
+                                                    <span className="font-medium">{item.name}</span>
+                                                    {item.city && (
+                                                        <span className="text-[10px] text-gray-500 flex items-center gap-1">
+                                                            <MapPin className="h-3 w-3" /> {item.city}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </TableCell>
+                                            <TableCell>{formatDate(item.disbursed_at)}</TableCell>
+                                            <TableCell>
+                                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 border border-gray-200">
                                                     {item.bank_name || 'N/A'}
                                                 </span>
                                             </TableCell>
                                             <TableCell className="text-right font-bold text-green-700 text-base">
                                                 {formatCurrency(item.disbursed_amount)}
+                                            </TableCell>
+                                            <TableCell className="text-center">
+                                                <Button 
+                                                    variant="ghost" 
+                                                    size="sm" 
+                                                    className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                    onClick={() => setDeleteId(item.id)}
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
                                             </TableCell>
                                         </TableRow>
                                     ))}
@@ -286,6 +343,28 @@ export default function TelecallerDisbursementReport() {
                     )}
                 </CardContent>
             </Card>
+
+            {/* DELETE CONFIRMATION DIALOG */}
+            <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This will remove the disbursement record. This action can be undone by re-adding the disbursement.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction 
+                            onClick={handleDelete} 
+                            disabled={isDeleting}
+                            className="bg-red-600 hover:bg-red-700"
+                        >
+                            {isDeleting ? "Deleting..." : "Delete"}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     )
 }
