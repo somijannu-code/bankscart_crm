@@ -1,11 +1,11 @@
 import { createClient } from "@/lib/supabase/server"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Users, Filter, BarChart3 } from "lucide-react"
+import { Users, Filter, BarChart3, TrendingUp, CheckCircle, Clock, AlertCircle, LogIn } from "lucide-react"
 import { TelecallerLeadsTable } from "@/components/telecaller-leads-table"
 import { TelecallerLeadFilters } from "@/components/telecaller-lead-filters"
 import { redirect } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { LeadStatsCards } from "@/components/lead-stats-cards"
+import Link from "next/link"
 
 interface SearchParams {
   status?: string
@@ -53,7 +53,7 @@ export default async function TelecallerLeadsPage({
     )
   }
 
-  // Date range filter (example implementation)
+  // Date range filter
   if (searchParams.date_range) {
     const today = new Date()
     let startDate = new Date()
@@ -78,11 +78,11 @@ export default async function TelecallerLeadsPage({
   // Calculate lead statistics
   const leadStats = {
     total: leads?.length || 0,
-    new: leads?.filter(lead => lead.status === 'new').length || 0,
-    contacted: leads?.filter(lead => lead.status === 'contacted').length || 0,
-    qualified: leads?.filter(lead => lead.status === 'qualified').length || 0,
-    converted: leads?.filter(lead => lead.status === 'converted').length || 0,
-    highPriority: leads?.filter(lead => lead.priority === 'high').length || 0,
+    new: leads?.filter(lead => ['New Lead', 'new'].includes(lead.status)).length || 0,
+    contacted: leads?.filter(lead => ['Contacted', 'contacted'].includes(lead.status)).length || 0,
+    // Count both "Login" and "Login Done" as Logins
+    logins: leads?.filter(lead => ['Login', 'Login Done', 'login'].includes(lead.status)).length || 0,
+    converted: leads?.filter(lead => ['Disbursed', 'converted'].includes(lead.status)).length || 0,
   }
 
   return (
@@ -99,8 +99,60 @@ export default async function TelecallerLeadsPage({
         </Button>
       </div>
 
-      {/* Lead Statistics Dashboard */}
-      <LeadStatsCards stats={leadStats} />
+      {/* Stats Cards - Replaced generic component with inline cards for custom click behavior */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        
+        {/* Total Leads */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Leads</CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{leadStats.total}</div>
+            <p className="text-xs text-muted-foreground">Assigned to you</p>
+          </CardContent>
+        </Card>
+
+        {/* New / Pending */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">New Leads</CardTitle>
+            <Clock className="h-4 w-4 text-blue-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{leadStats.new}</div>
+            <p className="text-xs text-muted-foreground">Requires action</p>
+          </CardContent>
+        </Card>
+
+        {/* Contacted */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Contacted</CardTitle>
+            <TrendingUp className="h-4 w-4 text-green-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{leadStats.contacted}</div>
+            <p className="text-xs text-muted-foreground">In progress</p>
+          </CardContent>
+        </Card>
+
+        {/* CLICKABLE LOGINS CARD */}
+        <Link href="/telecaller/logins" className="block transition-transform hover:scale-105">
+          <Card className="bg-indigo-50 border-indigo-200 cursor-pointer hover:shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-bold text-indigo-700">Logins Done</CardTitle>
+              <LogIn className="h-4 w-4 text-indigo-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-indigo-900">{leadStats.logins}</div>
+              <p className="text-xs text-indigo-600 font-medium">Click to view details →</p>
+            </CardContent>
+          </Card>
+        </Link>
+
+      </div>
 
       {/* Enhanced Filters Section */}
       <Card>
