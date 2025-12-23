@@ -93,10 +93,12 @@ export default function UsersPage() {
       }
 
       // B. Fetch Users List
+      // UPDATE: Added .order("is_active", { ascending: false }) to show active users first
       const { data: userData, error: userError } = await supabase
         .from("users")
         .select("id, email, full_name, role, phone, is_active, created_at, manager_id")
-        .order("created_at", { ascending: false })
+        .order("is_active", { ascending: false }) // <--- Key Change: Active users first (true > false)
+        .order("created_at", { ascending: false }) // Then newest first
         .limit(100)
 
       if (userError) throw userError
