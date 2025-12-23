@@ -54,11 +54,6 @@ const formatDate = (dateString: string) => {
     });
 };
 
-const getMonthName = (dateString: string) => {
-    if(!dateString) return "-";
-    return new Date(dateString).toLocaleString('en-US', { month: 'long' });
-};
-
 // --- MAIN COMPONENT ---
 export default function TelecallerDisbursementReport() {
     const supabase = createClient();
@@ -81,7 +76,7 @@ export default function TelecallerDisbursementReport() {
     // Refresh Trigger
     const [refreshKey, setRefreshKey] = useState(0);
 
-    // 1. Fetch Users (Telecallers) to map IDs to Names
+    // 1. Fetch Users (Telecallers)
     const fetchUsers = useCallback(async () => {
         const { data, error } = await supabase
             .from('users')
@@ -110,7 +105,7 @@ export default function TelecallerDisbursementReport() {
         const { data, error } = await supabase
             .from('leads')
             .select('id, assigned_to, disbursed_amount, disbursed_at, application_number, name, bank_name, city')
-            .eq('status', 'DISBURSED')
+            .eq('status', 'DISBURSED') // Only fetch if status is DISBURSED
             .gte('disbursed_at', startOfYear)
             .lt('disbursed_at', endOfYear)
             .order('disbursed_at', { ascending: false })
@@ -132,20 +127,56 @@ export default function TelecallerDisbursementReport() {
         setLoading(false);
     }, [supabase, selectedYear, toast]);
 
-    // Initial Load & Refresh Logic
+    // 3. INITIAL LOAD & REAL-TIME SUBSCRIPTION
     useEffect(() => {
+        // Initial Fetch
         fetchUsers().then(() => fetchLeads());
-    }, [fetchUsers, fetchLeads, refreshKey]);
 
-    // 3. Delete Handler
+        // --- REAL-TIME LISTENER START ---
+        const channel = supabase
+            .channel('disbursement-updates')
+            .on(
+                'postgres_changes',
+                {
+                    event: '*', // Listen to INSERT and UPDATE
+                    schema: 'public',
+                    table: 'leads'
+                },
+                (payload) => {
+                    const newData = payload.new as any;
+                    
+                    // Logic: Only refresh if the lead is 'DISBURSED' or if a 'DISBURSED' lead was changed
+                    if (newData.status === 'DISBURSED' || (payload.old as any)?.status === 'DISBURSED') {
+                        console.log("⚡ Real-time update detected:", payload);
+                        
+                        // Add a small delay to ensure DB write is fully committed before re-fetching
+                        setTimeout(() => {
+                            fetchLeads();
+                            toast({
+                                title: "New Update",
+                                description: "Disbursement data refreshed automatically.",
+                                className: "bg-blue-50 text-blue-700 border-blue-200"
+                            });
+                        }, 500);
+                    }
+                }
+            )
+            .subscribe();
+
+        // Cleanup listener on unmount
+        return () => {
+            supabase.removeChannel(channel);
+        };
+        // --- REAL-TIME LISTENER END ---
+
+    }, [fetchUsers, fetchLeads, refreshKey, supabase, toast]);
+
+    // 4. Delete Handler
     const handleDelete = async () => {
         if (!deleteId) return;
         setIsDeleting(true);
 
         try {
-            // We don't actually delete the lead, we just reset its status so it disappears from this report
-            // OR you can use .delete() if you want to remove the record entirely.
-            // Option A: Soft Delete (Reset Status) - Safer
             const { error } = await supabase
                 .from('leads')
                 .update({ 
@@ -158,7 +189,7 @@ export default function TelecallerDisbursementReport() {
             if (error) throw error;
 
             toast({ title: "Deleted", description: "Transaction removed successfully." });
-            setRefreshKey(prev => prev + 1); // Refresh Data
+            setRefreshKey(prev => prev + 1); 
         } catch (error: any) {
             toast({ title: "Error", description: error.message, variant: "destructive" });
         } finally {
@@ -174,7 +205,7 @@ export default function TelecallerDisbursementReport() {
 
         disbursements.forEach(d => {
             if (d.disbursed_at) {
-                const monthKey = d.disbursed_at.substring(0, 7); // YYYY-MM
+                const monthKey = d.disbursed_at.substring(0, 7); 
                 monthsSet.add(monthKey);
             }
         });
@@ -215,7 +246,6 @@ export default function TelecallerDisbursementReport() {
                     Disbursement Report
                 </h1>
                 
-                {/* NEW COMPONENT for Adding Disbursements */}
                 <DisbursementModal onSuccess={() => setRefreshKey(prev => prev + 1)} />
             </div>
 
