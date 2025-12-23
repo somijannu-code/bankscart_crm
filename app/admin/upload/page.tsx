@@ -13,7 +13,7 @@ import { Progress } from "@/components/ui/progress"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { 
   Upload, CheckCircle, AlertCircle, Download, 
-  Zap, ArrowRight, History, PieChart 
+  Zap, ArrowRight, History, PieChart, UserCheck 
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
@@ -57,6 +57,7 @@ const shuffleArray = <T,>(array: T[]): T[] => {
 };
 
 const cleanPhoneNumber = (phone: string) => {
+  if (!phone) return "";
   const cleaned = phone.replace(/\D/g, '');
   if (cleaned.length > 10 && cleaned.startsWith('91')) {
     return cleaned.substring(2);
@@ -190,9 +191,10 @@ export default function UploadPage() {
     setFailedRows([])
     setAssignmentSummary({}) // Reset summary
     
-    // 1. Parse ALL Data
+    // 1. Parse Data
     const lines = rawFileContent.split("\n").filter(line => line.trim()).slice(1)
-    const allRows = lines.map((line, idx) => {
+    
+    const parsedRows = lines.map((line, idx) => {
         const values = line.split(",").map(v => v.trim())
         const row: any = {}
         Object.entries(columnMapping).forEach(([dbKey, csvHeader]) => {
@@ -206,13 +208,35 @@ export default function UploadPage() {
         return { ...row, _originalIndex: idx + 2 } 
     })
 
+    // 2. INTERNAL DEDUPLICATION (File Level)
+    // Remove duplicates within the CSV itself before processing
+    const uniqueRows: any[] = []
+    const seenPhonesInFile = new Set<string>()
+    let internalDuplicates = 0
+
+    parsedRows.forEach(row => {
+        if (row.phone) {
+            if (seenPhonesInFile.has(row.phone)) {
+                // Duplicate found in file -> Skip
+                internalDuplicates++
+            } else {
+                seenPhonesInFile.add(row.phone)
+                uniqueRows.push(row)
+            }
+        } else {
+            // Keep rows without phone (validation will fail later if required)
+            uniqueRows.push(row)
+        }
+    })
+
+    const allRows = uniqueRows
     const BATCH_SIZE = 50
     let successCount = 0
-    let skipCount = 0
+    let dbSkipCount = 0
     let failCount = 0
     const errors: any[] = []
 
-    // 2. Prepare Auto-Assign List
+    // 3. Prepare Auto-Assign List
     let distributionList: string[] = []
     if (autoDistribute) {
         const today = new Date().toISOString().split('T')[0]
@@ -220,7 +244,7 @@ export default function UploadPage() {
         if (activeUsers) distributionList = shuffleArray(activeUsers.map(u => u.user_id))
     }
 
-    // 3. Batch Process
+    // 4. Batch Process
     for (let i = 0; i < allRows.length; i += BATCH_SIZE) {
         const batch = allRows.slice(i, i + BATCH_SIZE)
         const leadsToInsert: any[] = []
@@ -232,8 +256,8 @@ export default function UploadPage() {
 
             batch.forEach(row => {
                 if (existingPhones.has(row.phone)) {
-                    skipCount++
-                    errors.push({ ...row, error: "Duplicate Phone Number" })
+                    dbSkipCount++
+                    errors.push({ ...row, error: "Duplicate Phone Number (Database)" })
                 } else {
                     leadsToInsert.push(row)
                 }
@@ -243,17 +267,19 @@ export default function UploadPage() {
         }
 
         if (leadsToInsert.length > 0) {
-            const currentBatchAssignments: Record<string, number> = {} // Track this batch's assignments
+            const currentBatchAssignments: Record<string, number> = {} // Track assignments for this batch
 
             const finalLeads = leadsToInsert.map((lead, idx) => {
                  let assigneeId = null
+                 
+                 // Assignment Logic
                  if (autoDistribute && distributionList.length > 0) {
                      assigneeId = distributionList[(successCount + idx) % distributionList.length]
                  } else if (selectedTelecaller && selectedTelecaller !== "unassigned") {
                      assigneeId = selectedTelecaller
                  }
 
-                 // Track Assignment
+                 // Track Assignment for Report
                  if (assigneeId) {
                     currentBatchAssignments[assigneeId] = (currentBatchAssignments[assigneeId] || 0) + 1
                  }
@@ -265,9 +291,12 @@ export default function UploadPage() {
                     assigned_to: assigneeId,
                     assigned_by: currentUserId,
                     assigned_at: assigneeId ? new Date().toISOString() : null,
+                    // Basic defaults
                     email: lead.email || null,
                     company: lead.company || null,
-                    priority: 'medium'
+                    priority: 'medium',
+                    status: 'new',
+                    created_at: new Date().toISOString()
                  }
             })
 
@@ -279,7 +308,7 @@ export default function UploadPage() {
             } else {
                 successCount += leadsToInsert.length
                 
-                // Update Global Assignment Summary
+                // Update Global Assignment Summary State
                 setAssignmentSummary(prev => {
                     const next = { ...prev }
                     Object.entries(currentBatchAssignments).forEach(([id, count]) => {
@@ -295,18 +324,19 @@ export default function UploadPage() {
     }
 
     setUploadStats({
-        total: allRows.length,
+        total: lines.length, // Total original rows
         success: successCount,
-        skipped: skipCount,
+        skipped: dbSkipCount + internalDuplicates, // Total skipped (File + DB duplicates)
         failed: failCount
     })
     setFailedRows(errors)
     setIsUploading(false)
     setStep(4)
-    // Optional: Auto open the dialog
-    // if (autoDistribute || (selectedTelecaller && selectedTelecaller !== 'unassigned')) {
-    //     setShowSummaryDialog(true)
-    // }
+    
+    // Auto open the dialog if assignments happened
+    if (autoDistribute || (selectedTelecaller && selectedTelecaller !== 'unassigned')) {
+        setShowSummaryDialog(true)
+    }
   }
 
   // --- Handlers: Step 4 (Results) ---
