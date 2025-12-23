@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Download } from "lucide-react"
+import { Switch } from "@/components/ui/switch" // Added Switch import
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Download, Zap, Users } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
 
@@ -18,12 +19,24 @@ interface Telecaller {
   email: string
 }
 
+// Helper for shuffling array (Fisher-Yates)
+const shuffleArray = <T,>(array: T[]): T[] => {
+  const newArray = [...array];
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+  return newArray;
+};
+
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [telecallers, setTelecallers] = useState<Telecaller[]>([])
   const [selectedTelecaller, setSelectedTelecaller] = useState<string | null>(null)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [autoDistribute, setAutoDistribute] = useState(false) // New State
+  const [activeCount, setActiveCount] = useState<number>(0) // To show how many are online
   const [uploadResult, setUploadResult] = useState<{
     success: number
     errors: Array<{ row: number; error: string }>
@@ -34,6 +47,7 @@ export default function UploadPage() {
   useEffect(() => {
     fetchTelecallers()
     getCurrentUser()
+    checkActiveTelecallersCount()
   }, [])
 
   const fetchTelecallers = async () => {
@@ -65,6 +79,18 @@ export default function UploadPage() {
     } catch (error) {
       console.error("Error getting current user:", error)
     }
+  }
+
+  // Check how many are online right now for UI feedback
+  const checkActiveTelecallersCount = async () => {
+    const today = new Date().toISOString().split('T')[0]
+    const { count } = await supabase
+      .from("attendance")
+      .select("user_id", { count: 'exact', head: true })
+      .eq("date", today)
+      .not("check_in", "is", null)
+    
+    if (count !== null) setActiveCount(count)
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -123,18 +149,56 @@ export default function UploadPage() {
     setUploadResult(null)
 
     try {
+      let distributionList: string[] = [];
+
+      // Logic for Auto Distribution
+      if (autoDistribute) {
+        const today = new Date().toISOString().split('T')[0]
+        
+        // 1. Get Checked In Users
+        const { data: attendanceData, error: attendanceError } = await supabase
+          .from("attendance")
+          .select("user_id")
+          .eq("date", today)
+          .not("check_in", "is", null)
+        
+        if (attendanceError) throw attendanceError;
+
+        if (!attendanceData || attendanceData.length === 0) {
+            alert("No telecallers are currently checked in today. Cannot auto-distribute.");
+            setIsUploading(false);
+            return;
+        }
+
+        const activeUserIds = attendanceData.map(a => a.user_id);
+
+        // 2. Shuffle them (Shuffled Round Robin)
+        distributionList = shuffleArray(activeUserIds);
+      }
+
       const text = await file.text()
       const leads = parseCSV(text)
 
       const errors: Array<{ row: number; error: string }> = []
       const validLeads = []
 
-      // Validate each lead
+      // Validate and Prepare each lead
       leads.forEach((lead, index) => {
-        const leadErrors = validateLead(lead, index + 2) // +2 because of header and 0-based index
+        const leadErrors = validateLead(lead, index + 2) 
         if (leadErrors.length > 0) {
           errors.push(...leadErrors.map((error) => ({ row: index + 2, error })))
         } else {
+          
+          // Determine Assignment
+          let assigneeId = null;
+
+          if (autoDistribute && distributionList.length > 0) {
+            // Round Robin Logic: Use modulo to cycle through shuffled list
+            assigneeId = distributionList[validLeads.length % distributionList.length];
+          } else if (selectedTelecaller && selectedTelecaller !== "unassigned") {
+            assigneeId = selectedTelecaller;
+          }
+
           validLeads.push({
             name: lead.name,
             email: lead.email || null,
@@ -149,9 +213,9 @@ export default function UploadPage() {
             country: lead.country || null,
             zip_code: lead.zip_code || null,
             notes: lead.notes || null,
-            assigned_to: selectedTelecaller || null,
+            assigned_to: assigneeId,
             assigned_by: currentUserId || null,
-            assigned_at: selectedTelecaller ? new Date().toISOString() : null,
+            assigned_at: assigneeId ? new Date().toISOString() : null,
           })
         }
       })
@@ -225,31 +289,62 @@ Jane Smith,jane@example.com,+1987654321,Tech Inc,Director,referral,medium,456 Oa
               Upload CSV File
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-6">
             <div>
               <Label htmlFor="csv-file">Select CSV File</Label>
               <Input id="csv-file" type="file" accept=".csv" onChange={handleFileChange} className="mt-2" />
               <p className="text-sm text-gray-600 mt-1">Only CSV files are supported. Maximum file size: 10MB</p>
             </div>
 
-            <div>
-              <Label htmlFor="telecaller">Assign to Telecaller (Optional)</Label>
-              <Select value={selectedTelecaller || ""} onValueChange={(value) => setSelectedTelecaller(value || null)}>
-                <SelectTrigger className="mt-2">
-                  <SelectValue placeholder="Select a telecaller" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="unassigned">None (Unassigned)</SelectItem>
-                  {telecallers.map((telecaller) => (
-                    <SelectItem key={telecaller.id} value={telecaller.id}>
-                      {telecaller.full_name} ({telecaller.email})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-sm text-gray-600 mt-1">
-                All leads will be automatically assigned to the selected telecaller
-              </p>
+            <div className="space-y-4 border p-4 rounded-md bg-slate-50">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-base flex items-center gap-2">
+                    <Zap className="h-4 w-4 text-yellow-500 fill-yellow-500" />
+                    Auto-Distribute Leads
+                  </Label>
+                  <p className="text-sm text-gray-500">
+                    Shuffled Round-Robin to {activeCount} Checked-In Agents
+                  </p>
+                </div>
+                <Switch 
+                  checked={autoDistribute} 
+                  onCheckedChange={(checked) => {
+                    setAutoDistribute(checked);
+                    if (checked) setSelectedTelecaller(null);
+                  }} 
+                />
+              </div>
+
+              {!autoDistribute && (
+                <div className="pt-2 border-t">
+                  <Label htmlFor="telecaller">Or Assign Manually</Label>
+                  <Select 
+                    value={selectedTelecaller || ""} 
+                    onValueChange={(value) => setSelectedTelecaller(value || null)}
+                    disabled={autoDistribute}
+                  >
+                    <SelectTrigger className="mt-2">
+                      <SelectValue placeholder="Select a telecaller" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned">None (Unassigned)</SelectItem>
+                      {telecallers.map((telecaller) => (
+                        <SelectItem key={telecaller.id} value={telecaller.id}>
+                          {telecaller.full_name} ({telecaller.email})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              
+              {autoDistribute && (
+                 <p className="text-xs text-blue-600 bg-blue-100 p-2 rounded">
+                    <Users className="h-3 w-3 inline mr-1" />
+                    System will detect users who are currently checked in, shuffle them, and distribute leads evenly among them.
+                 </p>
+              )}
             </div>
 
             {file && (
@@ -340,7 +435,12 @@ Jane Smith,jane@example.com,+1987654321,Tech Inc,Director,referral,medium,456 Oa
               <div className="p-3 bg-green-50 border border-green-200 rounded-md">
                 <p className="text-green-800">
                   Successfully uploaded {uploadResult.success} leads!
-                  {selectedTelecaller && selectedTelecaller !== "unassigned" && " All leads assigned to selected telecaller."}
+                  {autoDistribute 
+                    ? ` Distributed among ${activeCount} active agents.` 
+                    : (selectedTelecaller && selectedTelecaller !== "unassigned" 
+                        ? " Assigned to selected telecaller." 
+                        : "")
+                  }
                   {uploadResult.success > 0 && " Redirecting to leads page..."}
                 </p>
               </div>
