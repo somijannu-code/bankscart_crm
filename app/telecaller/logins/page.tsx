@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -10,102 +10,133 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, PlusCircle, Search, FileText, Calendar } from "lucide-react"
+import { Loader2, PlusCircle, Search, FileText, CheckCircle2, AlertCircle, RefreshCcw } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
+import { Badge } from "@/components/ui/badge"
+
+// Simple Debounce Hook for Phone Search
+function useDebounce(value: string, delay: number) {
+    const [debouncedValue, setDebouncedValue] = useState(value);
+    useEffect(() => {
+        const handler = setTimeout(() => setDebouncedValue(value), delay);
+        return () => clearTimeout(handler);
+    }, [value, delay]);
+    return debouncedValue;
+}
 
 export default function TelecallerLoginsPage() {
     const supabase = createClient()
     const { toast } = useToast()
-    const [loading, setLoading] = useState(false)
     
-    // Form State
+    const [loading, setLoading] = useState(false)
+    const [checkingPhone, setCheckingPhone] = useState(false)
+    
+    // Form & Data State
     const [formData, setFormData] = useState({
+        id: null as string | null, // Track ID for editing
         name: "",
         phone: "",
         bank_name: "",
         notes: ""
     })
     
-    // Data State
     const [logins, setLogins] = useState<any[]>([])
-    const [fetchLoading, setFetchLoading] = useState(true)
+    const [searchTerm, setSearchTerm] = useState("")
     const [activeTab, setActiveTab] = useState("today")
+    const [existingWarning, setExistingWarning] = useState<string | null>(null)
 
-    // 1. FETCH LOGINS (My Logins Only)
+    const debouncedPhone = useDebounce(formData.phone, 500)
+
+    // 1. AUTO-CHECK PHONE NUMBER
+    useEffect(() => {
+        const checkPhone = async () => {
+            if (debouncedPhone.length < 10) return
+            setCheckingPhone(true)
+            setExistingWarning(null)
+
+            const { data } = await supabase
+                .from('leads')
+                .select('*')
+                .eq('phone', debouncedPhone)
+                .single()
+
+            if (data) {
+                // Auto-fill name if found
+                setFormData(prev => ({ ...prev, name: data.name, id: data.id }))
+                
+                // Warn if already logged in TODAY
+                const lastUpdate = new Date(data.updated_at).toDateString()
+                const today = new Date().toDateString()
+                if (data.status === 'Login Done' && lastUpdate === today) {
+                    setExistingWarning("⚠️ You have already logged this file today!")
+                } else {
+                    toast({ description: "Lead found! Name auto-filled.", className: "bg-blue-50" })
+                }
+            }
+            setCheckingPhone(false)
+        }
+        checkPhone()
+    }, [debouncedPhone, supabase, toast])
+
+    // 2. FETCH DATA
     const fetchLogins = useCallback(async () => {
-        setFetchLoading(true)
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
 
         let query = supabase
             .from('leads')
             .select('*')
-            .eq('assigned_to', user.id) // Only my data
-            .eq('status', 'Login Done') // Filter for Logins
+            .eq('assigned_to', user.id)
+            .eq('status', 'Login Done')
             .order('updated_at', { ascending: false })
 
-        // Apply Date Filters based on Tab
+        // Date Filters
         const today = new Date()
-        const startOfDay = new Date(today.setHours(0,0,0,0)).toISOString()
-        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString()
-
         if (activeTab === 'today') {
-            query = query.gte('updated_at', startOfDay)
+            query = query.gte('updated_at', new Date(today.setHours(0,0,0,0)).toISOString())
         } else {
-            query = query.gte('updated_at', startOfMonth)
+            query = query.gte('updated_at', new Date(today.getFullYear(), today.getMonth(), 1).toISOString())
         }
 
-        const { data, error } = await query
+        const { data } = await query
         if (data) setLogins(data)
-        setFetchLoading(false)
     }, [supabase, activeTab])
 
-    useEffect(() => {
-        fetchLogins()
-    }, [fetchLogins])
+    useEffect(() => { fetchLogins() }, [fetchLogins])
 
-    // 2. HANDLE SUBMISSION
+    // 3. SUBMIT HANDLER
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (!formData.phone || !formData.name || !formData.bank_name) {
-            toast({ title: "Missing Fields", description: "Name, Phone and Bank are required.", variant: "destructive" })
-            return
-        }
-
         setLoading(true)
         const { data: { user } } = await supabase.auth.getUser()
 
         try {
-            // Step A: Check if lead exists
-            const { data: existing } = await supabase
-                .from('leads').select('id').eq('phone', formData.phone).single()
-
-            let error;
             const payload = {
                 name: formData.name,
                 phone: formData.phone,
                 bank_name: formData.bank_name,
                 notes: formData.notes,
-                status: 'Login Done', // Force status
-                assigned_to: user?.id, // Assign to self
+                status: 'Login Done',
+                assigned_to: user?.id,
                 updated_at: new Date().toISOString()
             }
 
-            if (existing) {
-                // Update existing lead to "Login Done"
-                const res = await supabase.from('leads').update(payload).eq('id', existing.id)
-                error = res.error
+            if (formData.id) {
+                await supabase.from('leads').update(payload).eq('id', formData.id)
             } else {
-                // Create new lead as "Login Done"
-                const res = await supabase.from('leads').insert([payload])
-                error = res.error
+                await supabase.from('leads').insert([payload])
             }
 
-            if (error) throw error
-
-            toast({ title: "Login Added", description: "Details saved successfully." })
-            setFormData({ name: "", phone: "", bank_name: "", notes: "" }) // Reset
-            fetchLogins() // Refresh list
+            toast({ 
+                title: "Success! 🎉", 
+                description: `Login for ${formData.name} recorded.`, 
+                className: "bg-green-50 border-green-200" 
+            })
+            
+            // Reset
+            setFormData({ id: null, name: "", phone: "", bank_name: "", notes: "" })
+            setExistingWarning(null)
+            fetchLogins()
 
         } catch (err: any) {
             toast({ title: "Error", description: err.message, variant: "destructive" })
@@ -114,123 +145,209 @@ export default function TelecallerLoginsPage() {
         }
     }
 
-    return (
-        <div className="p-6 space-y-8 max-w-6xl mx-auto">
-            <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
-                <FileText className="h-8 w-8 text-blue-600" />
-                Daily Login Entry
-            </h1>
+    // Filtered List for Search
+    const filteredLogins = logins.filter(l => 
+        l.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        l.phone.includes(searchTerm) ||
+        l.bank_name.toLowerCase().includes(searchTerm.toLowerCase())
+    )
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+    return (
+        <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-8 bg-gray-50/50 min-h-screen">
+            
+            {/* Header Stats */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 flex items-center gap-2">
+                        <FileText className="h-7 w-7 text-indigo-600" />
+                        Login Entry
+                    </h1>
+                    <p className="text-gray-500 text-sm">Track your daily file submissions</p>
+                </div>
                 
-                {/* LEFT: ENTRY FORM */}
-                <Card className="md:col-span-1 shadow-md border-t-4 border-blue-600 h-fit">
-                    <CardHeader>
-                        <CardTitle className="text-lg">Add New Login</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <form onSubmit={handleSubmit} className="space-y-4">
-                            <div className="space-y-2">
-                                <Label>Mobile Number *</Label>
-                                <Input 
-                                    placeholder="9876543210" 
-                                    value={formData.phone}
-                                    onChange={(e) => setFormData({...formData, phone: e.target.value})}
-                                    maxLength={10}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Customer Name *</Label>
-                                <Input 
-                                    placeholder="Enter name" 
-                                    value={formData.name}
-                                    onChange={(e) => setFormData({...formData, name: e.target.value})}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Login Bank *</Label>
-                                <Select 
-                                    value={formData.bank_name} 
-                                    onValueChange={(val) => setFormData({...formData, bank_name: val})}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select Bank" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="ICICI Bank">ICICI Bank</SelectItem>
-                                        <SelectItem value="HDFC Bank">HDFC Bank</SelectItem>
-                                        <SelectItem value="Fi Money">Fi Money</SelectItem>
-                                        <SelectItem value="Axis Bank">Axis Bank</SelectItem>
-                                        <SelectItem value="Other">Other</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Notes</Label>
-                                <Textarea 
-                                    placeholder="Any remarks..." 
-                                    value={formData.notes}
-                                    onChange={(e) => setFormData({...formData, notes: e.target.value})}
-                                />
-                            </div>
-                            <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={loading}>
-                                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit Login Details"}
-                            </Button>
-                        </form>
+                <Card className="bg-white border-l-4 border-indigo-500 shadow-sm min-w-[200px]">
+                    <CardContent className="p-4 flex items-center gap-3">
+                        <div className="p-2 bg-indigo-50 rounded-full text-indigo-600">
+                            <CheckCircle2 className="h-5 w-5" />
+                        </div>
+                        <div>
+                            <p className="text-xs text-gray-500 font-medium">Logins Today</p>
+                            <p className="text-2xl font-bold text-gray-900">
+                                {logins.filter(l => new Date(l.updated_at).toDateString() === new Date().toDateString()).length}
+                            </p>
+                        </div>
                     </CardContent>
                 </Card>
+            </div>
 
-                {/* RIGHT: VIEW LIST */}
-                <div className="md:col-span-2 space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                
+                {/* LEFT: FORM (4 cols) */}
+                <div className="lg:col-span-4 space-y-4">
+                    <Card className="shadow-lg border-t-4 border-indigo-600">
+                        <CardHeader className="bg-gray-50/50 border-b pb-4">
+                            <CardTitle className="text-lg flex items-center justify-between">
+                                {formData.id ? "Edit Entry" : "New Entry"}
+                                {formData.id && (
+                                    <Button variant="ghost" size="sm" onClick={() => setFormData({ id: null, name: "", phone: "", bank_name: "", notes: "" })}>
+                                        Cancel Edit
+                                    </Button>
+                                )}
+                            </CardTitle>
+                            <CardDescription>Enter customer details accurately</CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-6">
+                            <form onSubmit={handleSubmit} className="space-y-4">
+                                
+                                {/* Phone Input with Live Check */}
+                                <div className="space-y-2 relative">
+                                    <Label>Mobile Number <span className="text-red-500">*</span></Label>
+                                    <div className="relative">
+                                        <Input 
+                                            placeholder="9876543210" 
+                                            value={formData.phone}
+                                            onChange={(e) => setFormData({...formData, phone: e.target.value.replace(/\D/g,'')})}
+                                            maxLength={10}
+                                            className={existingWarning ? "border-red-300 bg-red-50" : ""}
+                                        />
+                                        {checkingPhone && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-gray-400" />}
+                                    </div>
+                                    {existingWarning && (
+                                        <p className="text-xs text-red-600 flex items-center gap-1">
+                                            <AlertCircle className="h-3 w-3" /> {existingWarning}
+                                        </p>
+                                    )}
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label>Customer Name <span className="text-red-500">*</span></Label>
+                                    <Input 
+                                        placeholder="Enter full name" 
+                                        value={formData.name}
+                                        onChange={(e) => setFormData({...formData, name: e.target.value})}
+                                        required
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label>Bank Name <span className="text-red-500">*</span></Label>
+                                    <Select 
+                                        value={formData.bank_name} 
+                                        onValueChange={(val) => setFormData({...formData, bank_name: val})}
+                                        required
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select Bank" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="HDFC Bank">HDFC Bank</SelectItem>
+                                            <SelectItem value="ICICI Bank">ICICI Bank</SelectItem>
+                                            <SelectItem value="Axis Bank">Axis Bank</SelectItem>
+                                            <SelectItem value="Kotak Bank">Kotak Bank</SelectItem>
+                                            <SelectItem value="IDFC First">IDFC First</SelectItem>
+                                            <SelectItem value="Fi Money">Fi Money</SelectItem>
+                                            <SelectItem value="Other">Other</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label>Notes / Remarks</Label>
+                                    <Textarea 
+                                        placeholder="E.g., Docs collected, login id..." 
+                                        value={formData.notes}
+                                        onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                                        rows={3}
+                                    />
+                                </div>
+
+                                <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 h-11" disabled={loading}>
+                                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : formData.id ? "Update Entry" : "Submit Login"}
+                                </Button>
+                            </form>
+                        </CardContent>
+                    </Card>
+                </div>
+
+                {/* RIGHT: LIST (8 cols) */}
+                <div className="lg:col-span-8">
                     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                        <TabsList className="grid w-full grid-cols-2">
-                            <TabsTrigger value="today">Today's Logins</TabsTrigger>
-                            <TabsTrigger value="month">This Month</TabsTrigger>
-                        </TabsList>
+                        <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-4">
+                            <TabsList className="grid w-full sm:w-[300px] grid-cols-2">
+                                <TabsTrigger value="today">Today</TabsTrigger>
+                                <TabsTrigger value="month">This Month</TabsTrigger>
+                            </TabsList>
+                            
+                            <div className="relative w-full sm:w-[250px]">
+                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
+                                <Input 
+                                    placeholder="Search name or bank..." 
+                                    className="pl-9"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                            </div>
+                        </div>
 
-                        <div className="mt-4 bg-white rounded-md border shadow-sm">
+                        <Card className="shadow-sm border-gray-200">
                             <Table>
-                                <TableHeader>
+                                <TableHeader className="bg-gray-50">
                                     <TableRow>
                                         <TableHead>Customer</TableHead>
-                                        <TableHead>Bank</TableHead>
-                                        <TableHead>Phone</TableHead>
-                                        <TableHead className="text-right">Time</TableHead>
+                                        <TableHead>Details</TableHead>
+                                        <TableHead className="text-right">Action</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {fetchLoading ? (
+                                    {filteredLogins.length === 0 ? (
                                         <TableRow>
-                                            <TableCell colSpan={4} className="text-center h-24">
-                                                <Loader2 className="h-6 w-6 animate-spin mx-auto text-gray-400" />
-                                            </TableCell>
-                                        </TableRow>
-                                    ) : logins.length === 0 ? (
-                                        <TableRow>
-                                            <TableCell colSpan={4} className="text-center h-24 text-gray-500">
-                                                No logins found for this period.
+                                            <TableCell colSpan={3} className="text-center h-32 text-gray-500">
+                                                No records found for "{searchTerm}" in this period.
                                             </TableCell>
                                         </TableRow>
                                     ) : (
-                                        logins.map((login) => (
-                                            <TableRow key={login.id}>
-                                                <TableCell className="font-medium">{login.name}</TableCell>
+                                        filteredLogins.map((login) => (
+                                            <TableRow key={login.id} className="hover:bg-gray-50 group">
                                                 <TableCell>
-                                                    <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs border border-blue-100">
-                                                        {login.bank_name}
-                                                    </span>
+                                                    <div className="font-medium text-gray-900">{login.name}</div>
+                                                    <div className="text-xs text-gray-500 font-mono mt-0.5">{login.phone}</div>
                                                 </TableCell>
-                                                <TableCell>{login.phone}</TableCell>
-                                                <TableCell className="text-right text-gray-500 text-xs">
-                                                    {new Date(login.updated_at).toLocaleDateString()} <br/>
-                                                    {new Date(login.updated_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                                <TableCell>
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-100">
+                                                            {login.bank_name}
+                                                        </Badge>
+                                                        <span className="text-xs text-gray-400">
+                                                            {new Date(login.updated_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                                                        </span>
+                                                    </div>
+                                                    {login.notes && <div className="text-xs text-gray-500 truncate max-w-[200px]">{login.notes}</div>}
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                    <Button 
+                                                        variant="ghost" 
+                                                        size="sm" 
+                                                        className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                        onClick={() => {
+                                                            setFormData({
+                                                                id: login.id,
+                                                                name: login.name,
+                                                                phone: login.phone,
+                                                                bank_name: login.bank_name,
+                                                                notes: login.notes
+                                                            })
+                                                            window.scrollTo({ top: 0, behavior: 'smooth' })
+                                                        }}
+                                                    >
+                                                        <RefreshCcw className="h-4 w-4 text-gray-500" />
+                                                    </Button>
                                                 </TableCell>
                                             </TableRow>
                                         ))
                                     )}
                                 </TableBody>
                             </Table>
-                        </div>
+                        </Card>
                     </Tabs>
                 </div>
             </div>
