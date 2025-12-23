@@ -111,6 +111,7 @@ interface Lead {
   bank_name: string | null;
   account_number: string | null;
   telecaller_name: string | null;
+  salary_bank_name: string | null; // <--- NEW FIELD ADDED HERE
 }
 
 const formatCurrency = (value: number | null) => {
@@ -133,13 +134,13 @@ const getStatusBadge = (status: string) => {
     }
 };
 
-// --- 2. EDITABLE FIELD COMPONENT (UPDATED WITH DATE SUPPORT) ---
+// --- 2. EDITABLE FIELD COMPONENT ---
 
 interface EditableFieldProps {
   label: string;
   value: string | number | null;
   onSave: (value: string | number | null) => void;
-  type?: 'text' | 'number' | 'email' | 'tel' | 'textarea' | 'date'; // Added 'date'
+  type?: 'text' | 'number' | 'email' | 'tel' | 'textarea' | 'date';
   placeholder?: string;
   options?: { value: string; label: string }[];
   className?: string;
@@ -161,7 +162,6 @@ const EditableField = ({
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-      // If type is date, we might receive an ISO string, but input type='date' needs YYYY-MM-DD
       if (type === 'date' && value) {
           setEditValue(new Date(value as string).toISOString().split('T')[0]);
       } else {
@@ -173,7 +173,6 @@ const EditableField = ({
     setIsSaving(true);
     let valToSave = editValue;
     
-    // Convert inputs back to correct types
     if (type === 'number' && editValue !== '') {
         valToSave = Number(editValue);
     }
@@ -192,7 +191,6 @@ const EditableField = ({
     setIsEditing(false);
   };
 
-  // Determine display value
   let displayValue = value || 'N/A';
   if (formatter && value !== null && value !== '') {
       displayValue = formatter(value);
@@ -353,7 +351,7 @@ export default function KycLeadProfilePage({ params }: { params: { id: string } 
     setIsLoading(true);
     const { data, error } = await supabase
       .from('leads')
-      .select('*') // Select all to ensure we get new fields
+      .select('*')
       .eq('id', leadId)
       .single();
 
@@ -369,11 +367,8 @@ export default function KycLeadProfilePage({ params }: { params: { id: string } 
   const updateField = async (field: keyof Lead, value: any) => {
     if (!lead) return;
     
-    // Base Updates
     const updates: any = { [field]: value, updated_at: new Date().toISOString() };
 
-    // --- AUTOMATIC STATUS LOGIC ---
-    // If setting a Disbursed Date, automatically update status to DISBURSED
     if (field === 'disbursed_at' && value) {
         updates.status = STATUSES.DISBURSED;
     }
@@ -383,7 +378,6 @@ export default function KycLeadProfilePage({ params }: { params: { id: string } 
     if (error) {
       toast({ title: "Update Failed", description: error.message, variant: "destructive" });
     } else {
-      // Optimistic update
       setLead(prev => {
           if (!prev) return null;
           const updated = { ...prev, [field]: value };
@@ -454,6 +448,14 @@ export default function KycLeadProfilePage({ params }: { params: { id: string } 
                     <EditableField label="Occupation" value={lead.occupation} onSave={(v) => updateField('occupation', v)} options={OCCUPATION_OPTIONS} />
                     <EditableField label="Experience (Yrs)" value={lead.experience} onSave={(v) => updateField('experience', v)} type="number" />
                     <EditableField label="Nth Salary" value={lead.nth_salary} onSave={(v) => updateField('nth_salary', v)} type="number" formatter={formatCurrency} />
+                    
+                    {/* NEW FIELD ADDED HERE */}
+                    <EditableField 
+                        label="Salary Bank Account" 
+                        value={lead.salary_bank_name} 
+                        onSave={(v) => updateField('salary_bank_name', v)} 
+                        options={BANK_OPTIONS} 
+                    />
                 </CardContent>
             </Card>
 
@@ -461,11 +463,7 @@ export default function KycLeadProfilePage({ params }: { params: { id: string } 
                 <CardHeader><CardTitle className="flex items-center gap-2 text-purple-700"><IndianRupee className="h-5 w-5" /> Loan & Financial Details</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <EditableField label="Loan Amount" value={lead.loan_amount} onSave={(v) => updateField('loan_amount', v)} type="number" formatter={formatCurrency} className="font-semibold" />
-                    
-                    {/* DISBURSED AMOUNT */}
                     <EditableField label="Disbursed Amount" value={lead.disbursed_amount} onSave={(v) => updateField('disbursed_amount', v)} type="number" formatter={formatCurrency} className="font-bold text-green-700 bg-green-50 border border-green-200" />
-                    
-                    {/* DISBURSED AT - Date Selector */}
                     <EditableField 
                         label="Disbursed Date" 
                         value={lead.disbursed_at} 
@@ -473,7 +471,6 @@ export default function KycLeadProfilePage({ params }: { params: { id: string } 
                         type="date"
                         className="bg-green-50 border border-green-200"
                     />
-
                     <EditableField label="Loan Type" value={lead.loan_type} onSave={(v) => updateField('loan_type', v)} />
                     <EditableField label="ROI (%)" value={lead.roi} onSave={(v) => updateField('roi', v)} type="number" />
                     <EditableField label="Tenure (Months)" value={lead.tenure} onSave={(v) => updateField('tenure', v)} type="number" />
@@ -484,7 +481,6 @@ export default function KycLeadProfilePage({ params }: { params: { id: string } 
             <Card>
                 <CardHeader><CardTitle className="flex items-center gap-2 text-purple-700"><CreditCard className="h-5 w-5" /> Bank Account</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* UPDATED BANK NAME SELECTOR */}
                     <EditableField label="Bank Name" value={lead.bank_name} onSave={(v) => updateField('bank_name', v)} options={BANK_OPTIONS} />
                     <EditableField label="Account Number" value={lead.account_number} onSave={(v) => updateField('account_number', v)} />
                 </CardContent>
