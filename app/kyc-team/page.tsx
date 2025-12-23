@@ -25,7 +25,7 @@ const STATUSES = {
     UNDERWRITING: "Underwriting",
     REJECTED: "Rejected",
     APPROVED: "Approved",
-    DISBURSED: "Disbursed",
+    DISBURSED: "DISBURSED",
 } as const;
 
 export default async function KycTeamDashboard() {
@@ -112,8 +112,8 @@ export default async function KycTeamDashboard() {
             link: `/kyc-team/leads?status=${STATUSES.APPROVED}`
         },
         {
-            title: "Disbursed (Today)",
-            value: disbursedToday || 0,
+            title: "DISBURSED (Today)",
+            value: DISBURSEDToday || 0,
             icon: IndianRupee,
             color: "text-purple-600",
             bgColor: "bg-purple-50",
@@ -135,7 +135,7 @@ export default async function KycTeamDashboard() {
             case STATUSES.APPROVED:
                 return <Badge className="bg-green-600 text-white hover:bg-green-700">Approved</Badge>;
             case STATUSES.DISBURSED:
-                return <Badge className="bg-purple-600 text-white hover:bg-purple-700">Disbursed</Badge>;
+                return <Badge className="bg-purple-600 text-white hover:bg-purple-700">DISBURSED</Badge>;
             default:
                 return <Badge variant="secondary">Unknown</Badge>;
         }
