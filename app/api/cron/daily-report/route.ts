@@ -119,7 +119,7 @@ export async function GET(request: Request) {
         statsMap[u.id] = {
           user: u,
           count: 0, duration: 0, nr: 0, callback: 0, interested: 0, 
-          login: 0, notEligible: 0, notInterested: 0, disbursedCount: 0,
+          login: 0, notEligible: 0, notInterested: 0, DISBURSEDCount: 0,
           revenueAchieved: 0
         }
       })
@@ -144,7 +144,7 @@ export async function GET(request: Request) {
         else if (status === 'not_eligible') s.notEligible++
         else if (status === 'Not_Interested') s.notInterested++
         else if (['nr', 'Busy', 'RNR', 'Switched Off'].includes(status)) s.nr++
-        else if (status === 'DISBURSED') s.disbursedCount++
+        else if (status === 'DISBURSED') s.DISBURSEDCount++
       })
 
       // Fill Revenue
@@ -328,7 +328,7 @@ async function sendTelecallerReport({ recipient, stats, rank, totalStaff, topPer
 function generateAdminHTML(sortedStats: any[], dateStr: string) {
   
   // 1. Calculate Grand Totals
-  const total = { count: 0, nr: 0, callback: 0, interested: 0, login: 0, notEligible: 0, notInterested: 0, disbursed: 0, duration: 0 }
+  const total = { count: 0, nr: 0, callback: 0, interested: 0, login: 0, notEligible: 0, notInterested: 0, DISBURSED: 0, duration: 0 }
   
   sortedStats.forEach(s => {
     total.count += s.count
@@ -338,7 +338,7 @@ function generateAdminHTML(sortedStats: any[], dateStr: string) {
     total.login += s.login
     total.notEligible += s.notEligible
     total.notInterested += s.notInterested
-    total.disbursed += s.disbursedCount
+    total.DISBURSED += s.DISBURSEDCount
     total.duration += s.duration
   })
 
@@ -363,7 +363,7 @@ function generateAdminHTML(sortedStats: any[], dateStr: string) {
       <td style="padding: 8px;">${s.login}</td>
       <td style="padding: 8px;">${s.notEligible}</td>
       <td style="padding: 8px;">${s.notInterested}</td>
-      <td style="padding: 8px;">${s.disbursedCount}</td>
+      <td style="padding: 8px;">${s.DISBURSEDCount}</td>
       <td style="padding: 8px;">${(s.duration / 60).toFixed(1)} m</td>
     </tr>`
   }).join('')
@@ -399,7 +399,7 @@ function generateAdminHTML(sortedStats: any[], dateStr: string) {
               <td style="padding: 10px;">${total.login}</td>
               <td style="padding: 10px;">${total.notEligible}</td>
               <td style="padding: 10px;">${total.notInterested}</td>
-              <td style="padding: 10px;">${total.disbursed}</td>
+              <td style="padding: 10px;">${total.DISBURSED}</td>
               <td style="padding: 10px;">${(total.duration / 60).toFixed(1)} m</td>
             </tr>
   
