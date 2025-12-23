@@ -88,7 +88,7 @@ export default function UploadPage() {
   const [autoDistribute, setAutoDistribute] = useState(false)
   const [activeCount, setActiveCount] = useState<number>(0)
   const [duplicateAction, setDuplicateAction] = useState<'skip' | 'allow'>('skip')
-  const [globalSource, setGlobalSource] = useState("import")
+  const [globalSource, setGlobalSource] = useState("other") // Default to "other" to match DB constraints
   const [globalTags, setGlobalTags] = useState("")
   
   // --- State: Step 4 (Upload & Progress) ---
@@ -193,9 +193,15 @@ export default function UploadPage() {
     
     // 1. Parse ALL Data
     const lines = rawFileContent.split("\n").filter(line => line.trim()).slice(1)
-    const allRows = lines.map((line, idx) => {
+    
+    let tempSkipCount = 0;
+    const seenPhonesInFile = new Set<string>();
+    
+    // Parse and Deduplicate within the file immediately
+    const uniqueRows = lines.reduce((acc: any[], line, idx) => {
         const values = line.split(",").map(v => v.trim())
         const row: any = {}
+        
         Object.entries(columnMapping).forEach(([dbKey, csvHeader]) => {
             const headerIndex = csvHeaders.indexOf(csvHeader)
             if (headerIndex !== -1) {
@@ -204,12 +210,30 @@ export default function UploadPage() {
                 row[dbKey] = val
             }
         })
-        return { ...row, _originalIndex: idx + 2 } 
-    })
+
+        // Ensure we preserve the row number for error reporting
+        row._originalIndex = idx + 2; 
+
+        // Deduplication Logic
+        if (row.phone) {
+            if (seenPhonesInFile.has(row.phone)) {
+                // Duplicate inside the file, skip it
+                if (duplicateAction === 'skip') {
+                    tempSkipCount++;
+                    return acc;
+                }
+            } else {
+                seenPhonesInFile.add(row.phone);
+            }
+        }
+
+        acc.push(row);
+        return acc;
+    }, []);
 
     const BATCH_SIZE = 50
     let successCount = 0
-    let skipCount = 0
+    let skipCount = tempSkipCount; // Start with in-file duplicates
     let failCount = 0
     const errors: any[] = []
 
@@ -222,10 +246,11 @@ export default function UploadPage() {
     }
 
     // 3. Batch Process
-    for (let i = 0; i < allRows.length; i += BATCH_SIZE) {
-        const batch = allRows.slice(i, i + BATCH_SIZE)
+    for (let i = 0; i < uniqueRows.length; i += BATCH_SIZE) {
+        const batch = uniqueRows.slice(i, i + BATCH_SIZE)
         const leadsToInsert: any[] = []
 
+        // Database-Check for Duplicates
         if (duplicateAction === 'skip') {
             const phones = batch.map(r => r.phone).filter(Boolean)
             const { data: existing } = await supabase.from("leads").select("phone").in("phone", phones)
@@ -234,7 +259,7 @@ export default function UploadPage() {
             batch.forEach(row => {
                 if (existingPhones.has(row.phone)) {
                     skipCount++
-                    errors.push({ ...row, error: "Duplicate Phone Number" })
+                    // errors.push({ ...row, error: "Duplicate Phone Number (In DB)" }) // Optional: log as error or just skip silently
                 } else {
                     leadsToInsert.push(row)
                 }
@@ -244,7 +269,7 @@ export default function UploadPage() {
         }
 
         if (leadsToInsert.length > 0) {
-            const currentBatchAssignments: Record<string, number> = {} // Track this batch's assignments
+            const currentBatchAssignments: Record<string, number> = {} 
 
             const finalLeads = leadsToInsert.map((lead, idx) => {
                  let assigneeId = null
@@ -254,18 +279,18 @@ export default function UploadPage() {
                      assigneeId = selectedTelecaller
                  }
 
-                 // Track Assignment
                  if (assigneeId) {
                     currentBatchAssignments[assigneeId] = (currentBatchAssignments[assigneeId] || 0) + 1
                  }
 
-                 // IMPORTANT FIX: Remove _originalIndex before sending to Supabase
-                 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                 const { _originalIndex, ...leadData } = lead;
+                 // --- IMPORTANT FIX: Destructure to remove _originalIndex and _id ---
+                 // We remove internal fields so Supabase doesn't throw "Column not found" error
+                 const { _originalIndex, _id, ...cleanLeadData } = lead;
 
                  return {
-                    ...leadData,
-                    source: globalSource || lead.source || "import",
+                    ...cleanLeadData,
+                    // --- IMPORTANT FIX: Use "other" instead of "import" and lowercase to match Check Constraint ---
+                    source: (globalSource || lead.source || "other").toLowerCase(),
                     tags: globalTags ? globalTags.split(",").map(t => t.trim()) : [],
                     assigned_to: assigneeId,
                     assigned_by: currentUserId,
@@ -274,13 +299,17 @@ export default function UploadPage() {
                     company: lead.company || null,
                     priority: 'medium',
                     status: 'new',
-                    created_at: new Date().toISOString()
+                    // created_at is usually automatic, but we can send it if needed
+                    // created_at: new Date().toISOString() 
                  }
             })
 
             const { error } = await supabase.from("leads").insert(finalLeads)
             
             if (error) {
+                // If the batch fails, we need to know which rows failed.
+                // Since we don't know exactly which row caused it (unless we do single inserts),
+                // we mark the whole batch as failed.
                 failCount += leadsToInsert.length
                 leadsToInsert.forEach(l => errors.push({ ...l, error: error.message }))
             } else {
@@ -297,12 +326,12 @@ export default function UploadPage() {
             }
         }
 
-        const processed = Math.min(i + BATCH_SIZE, allRows.length)
-        setProgress(Math.round((processed / allRows.length) * 100))
+        const processed = Math.min(i + BATCH_SIZE, uniqueRows.length)
+        setProgress(Math.round((processed / uniqueRows.length) * 100))
     }
 
     setUploadStats({
-        total: allRows.length,
+        total: uniqueRows.length + (lines.length - uniqueRows.length), // Total rows in file
         success: successCount,
         skipped: skipCount,
         failed: failCount
@@ -495,7 +524,18 @@ export default function UploadPage() {
                             <Label>Global Attributes</Label>
                             <div className="space-y-2">
                                 <Label className="text-xs text-gray-500">Lead Source</Label>
-                                <Input value={globalSource} onChange={(e) => setGlobalSource(e.target.value)} placeholder="e.g. Google Ads" />
+                                <Select value={globalSource} onValueChange={setGlobalSource}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select Source" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="website">Website</SelectItem>
+                                        <SelectItem value="referral">Referral</SelectItem>
+                                        <SelectItem value="campaign">Campaign</SelectItem>
+                                        <SelectItem value="cold_call">Cold Call</SelectItem>
+                                        <SelectItem value="other">Other</SelectItem>
+                                    </SelectContent>
+                                </Select>
                             </div>
                             <div className="space-y-2">
                                 <Label className="text-xs text-gray-500">Add Tags (comma separated)</Label>
