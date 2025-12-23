@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button"
 import { LogoutButton } from "@/components/logout-button"
-import { LayoutDashboard, Users, UserPlus, FileSpreadsheet, BarChart3, Settings, MessageCircle, Calendar, FileText, ChevronLeft, ChevronRight, IndianRupee, Logs } from "lucide-react"
+import { LayoutDashboard, Users, UserPlus, FileSpreadsheet, BarChart3, Settings, MessageCircle, Calendar, FileText, ChevronLeft, ChevronRight, IndianRupee, Logs, KeyRound } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
@@ -21,6 +21,7 @@ const navigation = [
   { name: "Disbursed Data", href: "/admin/disbursement-report", icon: IndianRupee },
   { name: "Available Leads", href: "/admin/calls", icon: FileSpreadsheet },
   { name: "Activities", href: "/admin/audit-logs", icon: Logs },
+  { name: "Logins", href: "/admin/logins", icon: KeyRound },
 
 ]
 
