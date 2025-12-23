@@ -21,7 +21,7 @@ const STATUSES = {
     UNDERWRITING: "Underwriting",
     REJECTED: "Rejected",
     APPROVED: "Approved",
-    DISBURSED: "Disbursed",
+    DISBURSED: "DISBURSED",
 } as const;
 
 const STATUS_OPTIONS = Object.values(STATUSES);
@@ -128,7 +128,7 @@ const getStatusBadge = (status: string) => {
         case STATUSES.UNDERWRITING: return <Badge className="bg-amber-500 text-white hover:bg-amber-600">Underwriting</Badge>;
         case STATUSES.REJECTED: return <Badge className="bg-red-600 text-white hover:bg-red-700">Rejected</Badge>;
         case STATUSES.APPROVED: return <Badge className="bg-green-600 text-white hover:bg-green-700">Approved</Badge>;
-        case STATUSES.DISBURSED: return <Badge className="bg-purple-600 text-white hover:bg-purple-700">Disbursed</Badge>;
+        case STATUSES.DISBURSED: return <Badge className="bg-purple-600 text-white hover:bg-purple-700">DISBURSED</Badge>;
         default: return <Badge variant="secondary">{status || "New"}</Badge>;
     }
 };
