@@ -44,7 +44,7 @@ export default async function KycTeamDashboard() {
       { count: newAssignments }, // <--- New Count for leads just transferred
       { count: pendingUnderwriting }, 
       { count: approvedToday }, 
-      { count: disbursedToday },
+      { count: DISBURSEDToday },
       { data: recentLeadsResult }
     ] =
         await Promise.all([
