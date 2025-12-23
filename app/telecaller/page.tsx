@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Phone, Users, Calendar, CheckCircle, Clock, TrendingUp, Rocket, BarChart3, RefreshCw, Plus, Trophy } from "lucide-react"
+import { Phone, Users, Calendar, CheckCircle, Clock, TrendingUp, Rocket, BarChart3, RefreshCw, Plus, Trophy, FileText } from "lucide-react"
 import { TodaysTasks } from "@/components/todays-tasks"
 import { useRouter } from "next/navigation"
 import { AttendanceWidget } from "@/components/attendance-widget"
@@ -223,6 +223,10 @@ export default function TelecallerDashboard() {
     router.push("/leads/new")
   }
 
+  const handleLogins = () => {
+    router.push("/admin/logins")
+  }
+
   const formatValue = (stat: DashboardStats) => {
     if (stat.format === "percentage") return `${stat.value}%`
     if (stat.format === "duration") return `${stat.value}m`
@@ -295,6 +299,11 @@ export default function TelecallerDashboard() {
           <div className="flex items-center gap-3">
             <NotificationBell />
             
+            <Button size="sm" className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white" onClick={handleLogins}>
+              <FileText className="h-4 w-4" />
+              <span className="hidden sm:inline">Logins</span>
+            </Button>
+
             <Button 
               variant="outline" 
               size="sm" 
