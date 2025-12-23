@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Loader2, DollarSign, BarChart3, TrendingUp, Filter, Calendar, Trash2, MapPin } from "lucide-react"
+import { Loader2, IndianRupee, BarChart3, TrendingUp, Filter, Calendar, Trash2, MapPin } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
@@ -242,7 +242,7 @@ export default function TelecallerDisbursementReport() {
         <div className="p-6 md:p-8 space-y-8">
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
-                    <DollarSign className="h-7 w-7 text-green-600" />
+                    <IndianRupee className="h-7 w-7 text-green-600" />
                     Disbursement Report
                 </h1>
                 
