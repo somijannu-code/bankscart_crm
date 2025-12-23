@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { 
   ShieldCheck, FileText, Users, ArrowRight, Clock, 
-  CheckCircle, TrendingUp, XCircle, DollarSign, Loader2,
+  CheckCircle, TrendingUp, XCircle, IndianRupee, Loader2,
   Inbox
 } from "lucide-react";
 
@@ -114,7 +114,7 @@ export default async function KycTeamDashboard() {
         {
             title: "Disbursed (Today)",
             value: disbursedToday || 0,
-            icon: DollarSign,
+            icon: IndianRupee,
             color: "text-purple-600",
             bgColor: "bg-purple-50",
             link: `/kyc-team/leads?status=${STATUSES.DISBURSED}`
