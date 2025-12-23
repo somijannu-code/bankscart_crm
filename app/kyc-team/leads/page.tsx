@@ -63,6 +63,9 @@ const STATUS_OPTS = [
   { label: "Disbursed", value: "Disbursed" },
 ]
 
+// Style class mimicking Button variant="ghost" size="icon" (h-8 w-8)
+const triggerGhostClass = "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-8 w-8 p-0"
+
 export default function KycLeadsPage() {
   const supabase = createClient()
   const router = useRouter()
@@ -321,11 +324,12 @@ export default function KycLeadsPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
-                            <span className="sr-only">Open menu</span>
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
+                        {/* FIX: Replaced 'asChild' and 'Button' with a native trigger 
+                           styled like a ghost icon button to ensure click events work.
+                        */}
+                        <DropdownMenuTrigger className={triggerGhostClass}>
+                          <span className="sr-only">Open menu</span>
+                          <MoreHorizontal className="h-4 w-4" />
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuLabel>Actions</DropdownMenuLabel>
