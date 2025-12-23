@@ -14,7 +14,7 @@ export default async function KycTeamLayout({ children }: { children: React.Reac
 
   if (!user) {
     // 1. User is not authenticated, redirect to login
-    redirect("/login");
+    redirect("/auth/login");
   }
 
   // 2. Fetch the user's profile (full_name and role)
