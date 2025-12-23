@@ -13,7 +13,7 @@ import { Progress } from "@/components/ui/progress"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { 
   Upload, CheckCircle, AlertCircle, Download, 
-  Zap, ArrowRight, History, PieChart, UserCheck 
+  Zap, ArrowRight, History, PieChart 
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
@@ -191,10 +191,9 @@ export default function UploadPage() {
     setFailedRows([])
     setAssignmentSummary({}) // Reset summary
     
-    // 1. Parse Data
+    // 1. Parse ALL Data
     const lines = rawFileContent.split("\n").filter(line => line.trim()).slice(1)
-    
-    const parsedRows = lines.map((line, idx) => {
+    const allRows = lines.map((line, idx) => {
         const values = line.split(",").map(v => v.trim())
         const row: any = {}
         Object.entries(columnMapping).forEach(([dbKey, csvHeader]) => {
@@ -208,35 +207,13 @@ export default function UploadPage() {
         return { ...row, _originalIndex: idx + 2 } 
     })
 
-    // 2. INTERNAL DEDUPLICATION (File Level)
-    // Remove duplicates within the CSV itself before processing
-    const uniqueRows: any[] = []
-    const seenPhonesInFile = new Set<string>()
-    let internalDuplicates = 0
-
-    parsedRows.forEach(row => {
-        if (row.phone) {
-            if (seenPhonesInFile.has(row.phone)) {
-                // Duplicate found in file -> Skip
-                internalDuplicates++
-            } else {
-                seenPhonesInFile.add(row.phone)
-                uniqueRows.push(row)
-            }
-        } else {
-            // Keep rows without phone (validation will fail later if required)
-            uniqueRows.push(row)
-        }
-    })
-
-    const allRows = uniqueRows
     const BATCH_SIZE = 50
     let successCount = 0
-    let dbSkipCount = 0
+    let skipCount = 0
     let failCount = 0
     const errors: any[] = []
 
-    // 3. Prepare Auto-Assign List
+    // 2. Prepare Auto-Assign List
     let distributionList: string[] = []
     if (autoDistribute) {
         const today = new Date().toISOString().split('T')[0]
@@ -244,7 +221,7 @@ export default function UploadPage() {
         if (activeUsers) distributionList = shuffleArray(activeUsers.map(u => u.user_id))
     }
 
-    // 4. Batch Process
+    // 3. Batch Process
     for (let i = 0; i < allRows.length; i += BATCH_SIZE) {
         const batch = allRows.slice(i, i + BATCH_SIZE)
         const leadsToInsert: any[] = []
@@ -256,8 +233,8 @@ export default function UploadPage() {
 
             batch.forEach(row => {
                 if (existingPhones.has(row.phone)) {
-                    dbSkipCount++
-                    errors.push({ ...row, error: "Duplicate Phone Number (Database)" })
+                    skipCount++
+                    errors.push({ ...row, error: "Duplicate Phone Number" })
                 } else {
                     leadsToInsert.push(row)
                 }
@@ -267,31 +244,32 @@ export default function UploadPage() {
         }
 
         if (leadsToInsert.length > 0) {
-            const currentBatchAssignments: Record<string, number> = {} // Track assignments for this batch
+            const currentBatchAssignments: Record<string, number> = {} // Track this batch's assignments
 
             const finalLeads = leadsToInsert.map((lead, idx) => {
                  let assigneeId = null
-                 
-                 // Assignment Logic
                  if (autoDistribute && distributionList.length > 0) {
                      assigneeId = distributionList[(successCount + idx) % distributionList.length]
                  } else if (selectedTelecaller && selectedTelecaller !== "unassigned") {
                      assigneeId = selectedTelecaller
                  }
 
-                 // Track Assignment for Report
+                 // Track Assignment
                  if (assigneeId) {
                     currentBatchAssignments[assigneeId] = (currentBatchAssignments[assigneeId] || 0) + 1
                  }
 
+                 // IMPORTANT FIX: Remove _originalIndex before sending to Supabase
+                 // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                 const { _originalIndex, ...leadData } = lead;
+
                  return {
-                    ...lead,
+                    ...leadData,
                     source: globalSource || lead.source || "import",
                     tags: globalTags ? globalTags.split(",").map(t => t.trim()) : [],
                     assigned_to: assigneeId,
                     assigned_by: currentUserId,
                     assigned_at: assigneeId ? new Date().toISOString() : null,
-                    // Basic defaults
                     email: lead.email || null,
                     company: lead.company || null,
                     priority: 'medium',
@@ -308,7 +286,7 @@ export default function UploadPage() {
             } else {
                 successCount += leadsToInsert.length
                 
-                // Update Global Assignment Summary State
+                // Update Global Assignment Summary
                 setAssignmentSummary(prev => {
                     const next = { ...prev }
                     Object.entries(currentBatchAssignments).forEach(([id, count]) => {
@@ -324,16 +302,15 @@ export default function UploadPage() {
     }
 
     setUploadStats({
-        total: lines.length, // Total original rows
+        total: allRows.length,
         success: successCount,
-        skipped: dbSkipCount + internalDuplicates, // Total skipped (File + DB duplicates)
+        skipped: skipCount,
         failed: failCount
     })
     setFailedRows(errors)
     setIsUploading(false)
     setStep(4)
     
-    // Auto open the dialog if assignments happened
     if (autoDistribute || (selectedTelecaller && selectedTelecaller !== 'unassigned')) {
         setShowSummaryDialog(true)
     }
