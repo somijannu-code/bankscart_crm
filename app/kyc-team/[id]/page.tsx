@@ -8,16 +8,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Phone, Mail, MapPin, Calendar, MessageSquare, ArrowLeft, Clock, Save, User, IndianRupee, Loader2, RefreshCw, XCircle, Building, Home, Briefcase, CreditCard, Edit, Edit2, Edit3 } from "lucide-react";
-import Link from "next/link";
+import { Phone, Mail, MapPin, Calendar, MessageSquare, ArrowLeft, Clock, Save, User, IndianRupee, Loader2, RefreshCw, XCircle, Briefcase, CreditCard, Edit2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useCallback } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-// Assuming a toast library is available for notifications (like react-hot-toast)
+import { useToast } from "@/components/ui/use-toast"; // Ensure you have this installed
 
 // --- 1. CONSTANTS AND UTILITIES ---
 
-// Define the available statuses for the loan lifecycle
 const STATUSES = {
     LOGIN_DONE: "Login Done",
     UNDERWRITING: "Underwriting",
@@ -26,37 +24,8 @@ const STATUSES = {
     DISBURSED: "Disbursed",
 } as const;
 
-// All possible status values for the Select component
 const STATUS_OPTIONS = Object.values(STATUSES);
 
-// Gender options
-const GENDER_OPTIONS = [
-    { value: "male", label: "Male" },
-    { value: "female", label: "Female" },
-    { value: "other", label: "Other" }
-] as const;
-
-// Marital status options
-const MARITAL_STATUS_OPTIONS = [
-    { value: "married", label: "Married" },
-    { value: "unmarried", label: "Unmarried" }
-] as const;
-
-// Residence type options
-const RESIDENCE_TYPE_OPTIONS = [
-    { value: "self_owned", label: "Self Owned" },
-    { value: "rented", label: "Rented" },
-    { value: "company_provided", label: "Company Provided" }
-] as const;
-
-// Occupation options
-const OCCUPATION_OPTIONS = [
-    { value: "private", label: "Private" },
-    { value: "government", label: "Government" },
-    { value: "public", label: "Public" }
-] as const;
-
-// Priority options
 const PRIORITY_OPTIONS = [
     { value: "low", label: "Low" },
     { value: "medium", label: "Medium" },
@@ -64,7 +33,29 @@ const PRIORITY_OPTIONS = [
     { value: "urgent", label: "Urgent" }
 ] as const;
 
-// Lead interface based on your full schema
+const OCCUPATION_OPTIONS = [
+    { value: "private", label: "Private" },
+    { value: "government", label: "Government" },
+    { value: "public", label: "Public" }
+] as const;
+
+const GENDER_OPTIONS = [
+    { value: "male", label: "Male" },
+    { value: "female", label: "Female" },
+    { value: "other", label: "Other" }
+] as const;
+
+const MARITAL_STATUS_OPTIONS = [
+    { value: "married", label: "Married" },
+    { value: "unmarried", label: "Unmarried" }
+] as const;
+
+const RESIDENCE_TYPE_OPTIONS = [
+    { value: "self_owned", label: "Self Owned" },
+    { value: "rented", label: "Rented" },
+    { value: "company_provided", label: "Company Provided" }
+] as const;
+
 interface Lead {
   id: string;
   name: string;
@@ -96,6 +87,7 @@ interface Lead {
   office_email: string | null;
   personal_email: string | null;
   disbursed_amount: number | null;
+  disbursed_at: string | null; // <--- ADDED THIS CRITICAL FIELD
   roi: number | null;
   tenure: number | null;
   gender: string | null;
@@ -109,7 +101,6 @@ interface Lead {
   telecaller_name: string | null;
 }
 
-// Utility to format currency
 const formatCurrency = (value: number | null) => {
     if (value === null || isNaN(Number(value))) return "N/A";
     return new Intl.NumberFormat('en-IN', {
@@ -119,31 +110,18 @@ const formatCurrency = (value: number | null) => {
     }).format(Number(value));
 };
 
-// Utility to format percentage
-const formatPercentage = (value: number | null) => {
-    if (value === null || isNaN(Number(value))) return "N/A";
-    return `${value}%`;
-};
-
-// Utility to get the status badge style
 const getStatusBadge = (status: string) => {
     switch (status) {
-        case STATUSES.LOGIN_DONE:
-            return <Badge className="bg-blue-500 text-white hover:bg-blue-600">Login Done</Badge>;
-        case STATUSES.UNDERWRITING:
-            return <Badge className="bg-amber-500 text-white hover:bg-amber-600">Underwriting</Badge>;
-        case STATUSES.REJECTED:
-            return <Badge className="bg-red-600 text-white hover:bg-red-700">Rejected</Badge>;
-        case STATUSES.APPROVED:
-            return <Badge className="bg-green-600 text-white hover:bg-green-700">Approved</Badge>;
-        case STATUSES.DISBURSED:
-            return <Badge className="bg-purple-600 text-white hover:bg-purple-700">Disbursed</Badge>;
-        default:
-            return <Badge variant="secondary">New</Badge>;
+        case STATUSES.LOGIN_DONE: return <Badge className="bg-blue-500 text-white hover:bg-blue-600">Login Done</Badge>;
+        case STATUSES.UNDERWRITING: return <Badge className="bg-amber-500 text-white hover:bg-amber-600">Underwriting</Badge>;
+        case STATUSES.REJECTED: return <Badge className="bg-red-600 text-white hover:bg-red-700">Rejected</Badge>;
+        case STATUSES.APPROVED: return <Badge className="bg-green-600 text-white hover:bg-green-700">Approved</Badge>;
+        case STATUSES.DISBURSED: return <Badge className="bg-purple-600 text-white hover:bg-purple-700">Disbursed</Badge>;
+        default: return <Badge variant="secondary">{status || "New"}</Badge>;
     }
 };
 
-// --- 2. EDITABLE FIELD COMPONENTS ---
+// --- 2. EDITABLE FIELD COMPONENT (UPDATED WITH FORMATTER) ---
 
 interface EditableFieldProps {
   label: string;
@@ -153,6 +131,7 @@ interface EditableFieldProps {
   placeholder?: string;
   options?: { value: string; label: string }[];
   className?: string;
+  formatter?: (val: any) => string; // <--- Added formatter prop
 }
 
 const EditableField = ({ 
@@ -162,11 +141,17 @@ const EditableField = ({
   type = 'text', 
   placeholder = '',
   options,
-  className = ''
+  className = '',
+  formatter
 }: EditableFieldProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value || '');
   const [isSaving, setIsSaving] = useState(false);
+
+  // Sync state if prop changes (e.g. from real-time update)
+  useEffect(() => {
+      setEditValue(value || '');
+  }, [value]);
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -180,7 +165,7 @@ const EditableField = ({
     setIsEditing(false);
   };
 
-  const displayValue = value || 'N/A';
+  const displayValue = formatter && value !== null && value !== '' ? formatter(value) : (value || 'N/A');
 
   return (
     <div className={`flex flex-col space-y-2 p-3 bg-gray-50 rounded-lg ${className}`}>
@@ -230,32 +215,22 @@ const EditableField = ({
             />
           )}
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              onClick={handleSave}
-              disabled={isSaving}
-              className="flex-1"
-            >
+            <Button size="sm" onClick={handleSave} disabled={isSaving} className="flex-1 bg-purple-600 hover:bg-purple-700">
               {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Save'}
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleCancel}
-              disabled={isSaving}
-            >
+            <Button size="sm" variant="outline" onClick={handleCancel} disabled={isSaving}>
               Cancel
             </Button>
           </div>
         </div>
       ) : (
-        <p className="text-sm text-gray-800 break-words">{displayValue}</p>
+        <p className="text-sm text-gray-800 break-words font-medium">{displayValue}</p>
       )}
     </div>
   );
 };
 
-// --- 3. INLINE STATUS UPDATER COMPONENT ---
+// --- 3. INLINE STATUS UPDATER (UPDATED WITH DATE LOGIC) ---
 
 interface LeadStatusUpdaterProps {
     leadId: string;
@@ -267,34 +242,44 @@ const LeadStatusUpdater = ({ leadId, currentStatus, onStatusUpdate }: LeadStatus
     const [newStatus, setNewStatus] = useState(currentStatus);
     const [isUpdating, setIsUpdating] = useState(false);
     const supabase = createClient();
+    const { toast } = useToast();
 
-    // Reset status selector if parent component updates currentStatus (e.g., from real-time listener)
     useEffect(() => {
         setNewStatus(currentStatus);
     }, [currentStatus]);
 
     const handleUpdate = useCallback(async () => {
-        if (newStatus === currentStatus) {
-            return;
-        }
+        if (newStatus === currentStatus) return;
 
         setIsUpdating(true);
+        
+        // Prepare updates
+        const updates: any = { 
+            status: newStatus, 
+            updated_at: new Date().toISOString() 
+        };
+
+        // If changing to DISBURSED, set the disbursed_at timestamp automatically
+        if (newStatus === STATUSES.DISBURSED) {
+            updates.disbursed_at = new Date().toISOString();
+        }
+
         const { error } = await supabase
             .from('leads')
-            .update({ status: newStatus, updated_at: new Date().toISOString() })
+            .update(updates)
             .eq('id', leadId);
         
         setIsUpdating(false);
 
         if (error) {
             console.error("Error updating status:", error);
-            // toast.error("Failed to update status. Please try again.");
+            toast({ title: "Error", description: "Failed to update status", variant: "destructive" });
             setNewStatus(currentStatus); 
         } else {
-            // toast.success(`Status updated to ${newStatus}`);
+            toast({ title: "Success", description: "Status updated successfully", className: "bg-green-500 text-white" });
             onStatusUpdate(newStatus); 
         }
-    }, [newStatus, currentStatus, leadId, supabase, onStatusUpdate]);
+    }, [newStatus, currentStatus, leadId, supabase, onStatusUpdate, toast]);
 
     const isSaveDisabled = isUpdating || newStatus === currentStatus;
 
@@ -308,26 +293,18 @@ const LeadStatusUpdater = ({ leadId, currentStatus, onStatusUpdate }: LeadStatus
             </CardHeader>
             <CardContent className="space-y-4">
                 <div className="flex items-center gap-4">
-                    <Label htmlFor="status-select" className="min-w-[80px]">Current Status:</Label>
-                    <div className="flex-grow">
-                        {getStatusBadge(currentStatus)}
-                    </div>
+                    <Label htmlFor="status-select" className="min-w-[80px]">Current:</Label>
+                    <div className="flex-grow">{getStatusBadge(currentStatus)}</div>
                 </div>
                 <div className="flex items-center gap-4">
-                    <Label htmlFor="status-select" className="min-w-[80px]">Set New Status:</Label>
-                    <Select 
-                        value={newStatus} 
-                        onValueChange={setNewStatus}
-                        disabled={isUpdating}
-                    >
+                    <Label htmlFor="status-select" className="min-w-[80px]">Set New:</Label>
+                    <Select value={newStatus} onValueChange={setNewStatus} disabled={isUpdating}>
                         <SelectTrigger id="status-select" className="w-full">
                             <SelectValue placeholder="Select a new status" />
                         </SelectTrigger>
                         <SelectContent>
                             {STATUS_OPTIONS.map(status => (
-                                <SelectItem key={status} value={status}>
-                                    {status}
-                                </SelectItem>
+                                <SelectItem key={status} value={status}>{status}</SelectItem>
                             ))}
                         </SelectContent>
                     </Select>
@@ -338,15 +315,9 @@ const LeadStatusUpdater = ({ leadId, currentStatus, onStatusUpdate }: LeadStatus
                     className="w-full bg-purple-600 hover:bg-purple-700 transition-colors"
                 >
                     {isUpdating ? (
-                        <>
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                            Updating...
-                        </>
+                        <> <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Updating... </>
                     ) : (
-                        <>
-                            <Save className="h-4 w-4 mr-2" />
-                            Save Status Change
-                        </>
+                        <> <Save className="h-4 w-4 mr-2" /> Save Status Change </>
                     )}
                 </Button>
             </CardContent>
@@ -354,12 +325,10 @@ const LeadStatusUpdater = ({ leadId, currentStatus, onStatusUpdate }: LeadStatus
     );
 };
 
-// --- 4. MAIN LEAD PROFILE PAGE ---
+// --- 4. MAIN PAGE ---
 
 interface LeadProfilePageProps {
-  params: {
-    id: string;
-  };
+  params: { id: string };
 }
 
 export default function KycLeadProfilePage({ params }: LeadProfilePageProps) {
@@ -368,14 +337,14 @@ export default function KycLeadProfilePage({ params }: LeadProfilePageProps) {
   const [lead, setLead] = useState<Lead | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
   const supabase = createClient();
+  const { toast } = useToast();
 
   const fetchLead = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     
-    // Fetch all columns from the lead table including new fields
+    // FETCH 'disbursed_at' HERE
     const { data, error } = await supabase
       .from('leads')
       .select(`
@@ -384,7 +353,7 @@ export default function KycLeadProfilePage({ params }: LeadProfilePageProps) {
         loan_amount, loan_type, address, city, state, country, zip_code,
         pan_number, residence_address, permanent_address, office_address,
         application_number, nth_salary, office_email, personal_email,
-        disbursed_amount, roi, tenure, gender, marital_status, residence_type,
+        disbursed_amount, disbursed_at, roi, tenure, gender, marital_status, residence_type,
         experience, occupation, alternative_mobile, bank_name, account_number,
         telecaller_name
       `)
@@ -403,79 +372,60 @@ export default function KycLeadProfilePage({ params }: LeadProfilePageProps) {
 
   const updateField = async (field: keyof Lead, value: any) => {
     if (!lead) return;
-
-    setIsSaving(true);
     const { error } = await supabase
       .from('leads')
-      .update({ 
-        [field]: value,
-        updated_at: new Date().toISOString()
-      })
+      .update({ [field]: value, updated_at: new Date().toISOString() })
       .eq('id', leadId);
 
     if (error) {
       console.error(`Error updating ${field}:`, error);
-      // toast.error(`Failed to update ${field}`);
+      toast({ title: "Update Failed", description: error.message, variant: "destructive" });
     } else {
       setLead(prev => prev ? { ...prev, [field]: value } : null);
-      // toast.success(`${field.replace('_', ' ')} updated successfully`);
+      toast({ title: "Success", description: "Field updated successfully" });
     }
-    setIsSaving(false);
   };
 
   useEffect(() => {
     fetchLead();
-
-    // Setup Real-time Listener for the specific lead to update status automatically
-    const channel = supabase.channel(`lead_${leadId}_changes`);
-
-    const subscription = channel
+    const channel = supabase.channel(`lead_${leadId}_changes`)
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'leads', filter: `id=eq.${leadId}` },
         (payload) => {
-          console.log("Real-time update received for lead:", payload.new);
           setLead(prev => ({ ...(prev as Lead), ...(payload.new as Lead) }));
         }
       )
       .subscribe();
 
-    return () => {
-        supabase.removeChannel(channel);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leadId]); 
+    return () => { supabase.removeChannel(channel); };
+  }, [leadId, fetchLead, supabase]); 
 
   const handleStatusUpdate = (newStatus: string) => {
       setLead(prev => (prev ? { ...prev, status: newStatus } : null));
   };
 
-  if (isLoading) {
-    return (
+  if (isLoading) return (
       <div className="flex items-center justify-center h-screen">
         <Loader2 className="h-8 w-8 animate-spin text-purple-600" />
         <p className="ml-2 text-lg text-gray-600">Loading Lead Profile...</p>
       </div>
-    );
-  }
+  );
 
-  if (error || !lead) {
-    return (
+  if (error || !lead) return (
       <div className="p-8 text-center bg-red-50 border border-red-200 rounded-xl">
         <XCircle className="h-10 w-10 text-red-500 mx-auto" />
         <h1 className="text-2xl font-bold mt-4 text-red-700">Error Loading Lead</h1>
         <p className="text-gray-600 mt-2">{error || "The requested lead could not be found."}</p>
         <Button onClick={() => router.push('/kyc-team/leads')} className="mt-4 bg-purple-600 hover:bg-purple-700">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Leads List
+            <ArrowLeft className="h-4 w-4 mr-2" /> Back to Leads List
         </Button>
       </div>
-    );
-  }
+  );
 
   return (
     <div className="space-y-6 pb-8">
-      {/* Header and Quick Status */}
+      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-3">
           <Button onClick={() => router.back()} variant="outline" size="icon">
@@ -489,78 +439,29 @@ export default function KycLeadProfilePage({ params }: LeadProfilePageProps) {
         </div>
       </div>
 
-      {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* Left Column: Lead Details & Loan Info (2/3 width on large screens) */}
+        {/* Left Column: Details */}
         <div className="lg:col-span-2 space-y-6">
             
-            {/* Personal and Contact Details */}
+            {/* Personal Details */}
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-purple-700">
-                        <User className="h-5 w-5" />
-                        Personal & Contact Information
+                        <User className="h-5 w-5" /> Personal Information
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <EditableField 
-                        label="Name" 
-                        value={lead.name} 
-                        onSave={(value) => updateField('name', value)}
-                    />
-                    <EditableField 
-                        label="Phone" 
-                        value={lead.phone} 
-                        onSave={(value) => updateField('phone', value)}
-                        type="tel"
-                    />
-                    <EditableField 
-                        label="Email" 
-                        value={lead.email} 
-                        onSave={(value) => updateField('email', value)}
-                        type="email"
-                    />
-                    <EditableField 
-                        label="Alternative Mobile" 
-                        value={lead.alternative_mobile} 
-                        onSave={(value) => updateField('alternative_mobile', value)}
-                        type="tel"
-                    />
-                    <EditableField 
-                        label="Personal Email" 
-                        value={lead.personal_email} 
-                        onSave={(value) => updateField('personal_email', value)}
-                        type="email"
-                    />
-                    <EditableField 
-                        label="Gender" 
-                        value={lead.gender} 
-                        onSave={(value) => updateField('gender', value)}
-                        options={GENDER_OPTIONS}
-                    />
-                    <EditableField 
-                        label="Marital Status" 
-                        value={lead.marital_status} 
-                        onSave={(value) => updateField('marital_status', value)}
-                        options={MARITAL_STATUS_OPTIONS}
-                    />
-                    <EditableField 
-                        label="PAN Number" 
-                        value={lead.pan_number} 
-                        onSave={(value) => updateField('pan_number', value)}
-                        placeholder="Enter PAN number"
-                    />
-                    <EditableField 
-                        label="Application Number" 
-                        value={lead.application_number} 
-                        onSave={(value) => updateField('application_number', value)}
-                    />
-                    <EditableField 
-                        label="Telecaller Name" 
-                        value={lead.telecaller_name} 
-                        onSave={(value) => updateField('telecaller_name', value)}
-                    />
+                    <EditableField label="Name" value={lead.name} onSave={(v) => updateField('name', v)} />
+                    <EditableField label="Phone" value={lead.phone} onSave={(v) => updateField('phone', v)} type="tel" />
+                    <EditableField label="Email" value={lead.email} onSave={(v) => updateField('email', v)} type="email" />
+                    <EditableField label="Alt Mobile" value={lead.alternative_mobile} onSave={(v) => updateField('alternative_mobile', v)} type="tel" />
+                    <EditableField label="Personal Email" value={lead.personal_email} onSave={(v) => updateField('personal_email', v)} type="email" />
+                    <EditableField label="Gender" value={lead.gender} onSave={(v) => updateField('gender', v)} options={GENDER_OPTIONS} />
+                    <EditableField label="Marital Status" value={lead.marital_status} onSave={(v) => updateField('marital_status', v)} options={MARITAL_STATUS_OPTIONS} />
+                    <EditableField label="PAN Number" value={lead.pan_number} onSave={(v) => updateField('pan_number', v)} />
+                    <EditableField label="Application No" value={lead.application_number} onSave={(v) => updateField('application_number', v)} />
+                    <EditableField label="Telecaller Name" value={lead.telecaller_name} onSave={(v) => updateField('telecaller_name', v)} />
                 </CardContent>
             </Card>
 
@@ -568,52 +469,16 @@ export default function KycLeadProfilePage({ params }: LeadProfilePageProps) {
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-purple-700">
-                        <Briefcase className="h-5 w-5" />
-                        Professional Information
+                        <Briefcase className="h-5 w-5" /> Professional Information
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <EditableField 
-                        label="Company" 
-                        value={lead.company} 
-                        onSave={(value) => updateField('company', value)}
-                    />
-                    <EditableField 
-                        label="Designation" 
-                        value={lead.designation} 
-                        onSave={(value) => updateField('designation', value)}
-                    />
-                    <EditableField 
-                        label="Office Email" 
-                        value={lead.office_email} 
-                        onSave={(value) => updateField('office_email', value)}
-                        type="email"
-                    />
-                    <EditableField 
-                        label="Occupation" 
-                        value={lead.occupation} 
-                        onSave={(value) => updateField('occupation', value)}
-                        options={OCCUPATION_OPTIONS}
-                    />
-                    <EditableField 
-                        label="Experience" 
-                        value={lead.experience} 
-                        onSave={(value) => updateField('experience', value)}
-                        type="number"
-                        placeholder="Years of experience"
-                    />
-                    <EditableField 
-                        label="Nth Salary" 
-                        value={lead.nth_salary} 
-                        onSave={(value) => updateField('nth_salary', value)}
-                        type="number"
-                        placeholder="Salary amount"
-                    />
-                    <EditableField 
-                        label="Lead Source" 
-                        value={lead.source} 
-                        onSave={(value) => updateField('source', value)}
-                    />
+                    <EditableField label="Company" value={lead.company} onSave={(v) => updateField('company', v)} />
+                    <EditableField label="Designation" value={lead.designation} onSave={(v) => updateField('designation', v)} />
+                    <EditableField label="Office Email" value={lead.office_email} onSave={(v) => updateField('office_email', v)} type="email" />
+                    <EditableField label="Occupation" value={lead.occupation} onSave={(v) => updateField('occupation', v)} options={OCCUPATION_OPTIONS} />
+                    <EditableField label="Experience (Yrs)" value={lead.experience} onSave={(v) => updateField('experience', v)} type="number" />
+                    <EditableField label="Nth Salary" value={lead.nth_salary} onSave={(v) => updateField('nth_salary', v)} type="number" formatter={formatCurrency} />
                     <div className="flex flex-col space-y-1 p-3 bg-gray-50 rounded-lg">
                         <p className="text-xs font-medium text-gray-500">Creation Date</p>
                         <p className="text-sm text-gray-800">{new Date(lead.created_at).toLocaleDateString()}</p>
@@ -625,60 +490,38 @@ export default function KycLeadProfilePage({ params }: LeadProfilePageProps) {
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-purple-700">
-                        <IndianRupee className="h-5 w-5" />
-                        Loan & Financial Details
+                        <IndianRupee className="h-5 w-5" /> Loan & Financial Details
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <EditableField 
                         label="Loan Amount" 
                         value={lead.loan_amount} 
-                        onSave={(value) => updateField('loan_amount', value)}
-                        type="number"
-                        className="font-bold text-green-700"
+                        onSave={(v) => updateField('loan_amount', v)} 
+                        type="number" 
+                        formatter={formatCurrency}
+                        className="font-semibold"
                     />
                     <EditableField 
                         label="Disbursed Amount" 
                         value={lead.disbursed_amount} 
-                        onSave={(value) => updateField('disbursed_amount', value)}
-                        type="number"
-                        className="font-bold text-blue-700"
+                        onSave={(v) => updateField('disbursed_amount', v)} 
+                        type="number" 
+                        formatter={formatCurrency}
+                        className="font-bold text-green-700 bg-green-50 border border-green-200"
                     />
-                    <EditableField 
-                        label="Loan Type" 
-                        value={lead.loan_type} 
-                        onSave={(value) => updateField('loan_type', value)}
-                    />
-                    <EditableField 
-                        label="ROI" 
-                        value={lead.roi} 
-                        onSave={(value) => updateField('roi', value)}
-                        type="number"
-                        placeholder="Rate of interest"
-                    />
-                    <EditableField 
-                        label="Tenure" 
-                        value={lead.tenure} 
-                        onSave={(value) => updateField('tenure', value)}
-                        type="number"
-                        placeholder="Months"
-                    />
-                    <EditableField 
-                        label="Priority" 
-                        value={lead.priority} 
-                        onSave={(value) => updateField('priority', value)}
-                        options={PRIORITY_OPTIONS}
-                    />
-                    <div className="flex flex-col space-y-1 p-3 bg-gray-50 rounded-lg">
-                        <p className="text-xs font-medium text-gray-500">Assigned To</p>
-                        <p className="text-sm text-gray-800">{lead.assigned_to ? lead.assigned_to.substring(0, 8) + '...' : 'Unassigned'}</p>
+                    {/* --- NEW FIELD: DISBURSED DATE --- */}
+                    <div className="flex flex-col space-y-1 p-3 bg-green-50 border border-green-200 rounded-lg">
+                        <p className="text-xs font-medium text-gray-500">Disbursed Date</p>
+                        <p className="text-sm font-bold text-gray-800">
+                            {lead.disbursed_at ? new Date(lead.disbursed_at).toLocaleDateString() : 'Not Disbursed'}
+                        </p>
                     </div>
-                    <div className="flex flex-col space-y-1 p-3 bg-gray-50 rounded-lg">
-                        <p className="text-xs font-medium text-gray-500">Current Status</p>
-                        <div className="flex items-center">
-                            {getStatusBadge(lead.status)}
-                        </div>
-                    </div>
+                    {/* -------------------------------- */}
+                    <EditableField label="Loan Type" value={lead.loan_type} onSave={(v) => updateField('loan_type', v)} />
+                    <EditableField label="ROI (%)" value={lead.roi} onSave={(v) => updateField('roi', v)} type="number" />
+                    <EditableField label="Tenure (Months)" value={lead.tenure} onSave={(v) => updateField('tenure', v)} type="number" />
+                    <EditableField label="Priority" value={lead.priority} onSave={(v) => updateField('priority', v)} options={PRIORITY_OPTIONS} />
                 </CardContent>
             </Card>
 
@@ -686,23 +529,12 @@ export default function KycLeadProfilePage({ params }: LeadProfilePageProps) {
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-purple-700">
-                        <CreditCard className="h-5 w-5" />
-                        Bank Account Information
+                        <CreditCard className="h-5 w-5" /> Bank Account
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <EditableField 
-                        label="Bank Name" 
-                        value={lead.bank_name} 
-                        onSave={(value) => updateField('bank_name', value)}
-                    />
-                    <EditableField 
-                        label="Account Number" 
-                        value={lead.account_number} 
-                        onSave={(value) => updateField('account_number', value)}
-                        type="text"
-                        placeholder="Bank account number"
-                    />
+                    <EditableField label="Bank Name" value={lead.bank_name} onSave={(v) => updateField('bank_name', v)} />
+                    <EditableField label="Account Number" value={lead.account_number} onSave={(v) => updateField('account_number', v)} />
                 </CardContent>
             </Card>
 
@@ -710,110 +542,55 @@ export default function KycLeadProfilePage({ params }: LeadProfilePageProps) {
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-purple-700">
-                        <MapPin className="h-5 w-5" />
-                        Address Information
+                        <MapPin className="h-5 w-5" /> Address
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    <EditableField 
-                        label="Residence Address" 
-                        value={lead.residence_address} 
-                        onSave={(value) => updateField('residence_address', value)}
-                        type="textarea"
-                    />
-                    <EditableField 
-                        label="Permanent Address" 
-                        value={lead.permanent_address} 
-                        onSave={(value) => updateField('permanent_address', value)}
-                        type="textarea"
-                    />
-                    <EditableField 
-                        label="Office Address" 
-                        value={lead.office_address} 
-                        onSave={(value) => updateField('office_address', value)}
-                        type="textarea"
-                    />
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-                        <EditableField 
-                            label="Residence Type" 
-                            value={lead.residence_type} 
-                            onSave={(value) => updateField('residence_type', value)}
-                            options={RESIDENCE_TYPE_OPTIONS}
-                        />
-                        <EditableField 
-                            label="City" 
-                            value={lead.city} 
-                            onSave={(value) => updateField('city', value)}
-                        />
-                        <EditableField 
-                            label="State" 
-                            value={lead.state} 
-                            onSave={(value) => updateField('state', value)}
-                        />
-                        <EditableField 
-                            label="Country" 
-                            value={lead.country} 
-                            onSave={(value) => updateField('country', value)}
-                        />
-                        <EditableField 
-                            label="ZIP Code" 
-                            value={lead.zip_code} 
-                            onSave={(value) => updateField('zip_code', value)}
-                        />
+                    <EditableField label="Residence Address" value={lead.residence_address} onSave={(v) => updateField('residence_address', v)} type="textarea" />
+                    <EditableField label="Permanent Address" value={lead.permanent_address} onSave={(v) => updateField('permanent_address', v)} type="textarea" />
+                    <EditableField label="Office Address" value={lead.office_address} onSave={(v) => updateField('office_address', v)} type="textarea" />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <EditableField label="Residence Type" value={lead.residence_type} onSave={(v) => updateField('residence_type', v)} options={RESIDENCE_TYPE_OPTIONS} />
+                        <EditableField label="City" value={lead.city} onSave={(v) => updateField('city', v)} />
+                        <EditableField label="State" value={lead.state} onSave={(v) => updateField('state', v)} />
+                        <EditableField label="Country" value={lead.country} onSave={(v) => updateField('country', v)} />
+                        <EditableField label="ZIP Code" value={lead.zip_code} onSave={(v) => updateField('zip_code', v)} />
                     </div>
                 </CardContent>
             </Card>
         </div>
 
-        {/* Right Column: Status Updater & Tabs (1/3 width on large screens) */}
+        {/* Right Column */}
         <div className="lg:col-span-1 space-y-6">
-            {/* Status Update Component */}
-            <LeadStatusUpdater 
-                leadId={lead.id} 
-                currentStatus={lead.status} 
-                onStatusUpdate={handleStatusUpdate}
-            />
-
-            {/* Activity Tabs */}
+            <LeadStatusUpdater leadId={lead.id} currentStatus={lead.status} onStatusUpdate={handleStatusUpdate} />
             <Tabs defaultValue="timeline" className="w-full">
                 <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="timeline">Timeline</TabsTrigger>
-                    <TabsTrigger value="notes">Notes/Calls</TabsTrigger>
+                    <TabsTrigger value="notes">Notes</TabsTrigger>
                 </TabsList>
-                
                 <TabsContent value="timeline">
                     <Card>
-                        <CardHeader>
-                            <CardTitle>Activity Timeline</CardTitle>
-                        </CardHeader>
+                        <CardHeader><CardTitle>Activity Timeline</CardTitle></CardHeader>
                         <CardContent>
                             <div className="text-sm text-gray-500 space-y-2">
                                 <div className="p-2 border-l-4 border-purple-400">
-                                    <p className="font-semibold">Status changed to {lead.status}</p>
+                                    <p className="font-semibold">Last Updated</p>
                                     <p className="text-xs">{new Date(lead.updated_at).toLocaleString()}</p>
                                 </div>
                                 <div className="p-2 border-l-4 border-gray-300">
-                                    <p className="font-semibold">Lead created</p>
+                                    <p className="font-semibold">Created</p>
                                     <p className="text-xs">{new Date(lead.created_at).toLocaleString()}</p>
                                 </div>
                             </div>
                         </CardContent>
                     </Card>
                 </TabsContent>
-
                 <TabsContent value="notes">
                     <Card>
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2">
-                                <MessageSquare className="h-5 w-5" />
-                                Notes & Follow-ups
-                            </CardTitle>
-                        </CardHeader>
+                        <CardHeader><CardTitle className="flex items-center gap-2"><MessageSquare className="h-5 w-5" /> Notes</CardTitle></CardHeader>
                         <CardContent>
-                            <p className="text-sm text-gray-500">
-                                Feature coming soon: Add notes, call logs, and follow-ups.
-                            </p>
-                            <Textarea placeholder="Add a quick note..." className="mt-3" rows={3} />
+                            <p className="text-sm text-gray-500 mb-2">Internal notes for this lead.</p>
+                            <Textarea placeholder="Add a note..." rows={3} />
                             <Button size="sm" className="mt-2 w-full bg-purple-600 hover:bg-purple-700">Save Note</Button>
                         </CardContent>
                     </Card>
