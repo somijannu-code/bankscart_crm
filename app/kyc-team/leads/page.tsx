@@ -60,7 +60,7 @@ const STATUS_OPTS = [
   { label: "Underwriting", value: "Underwriting" },
   { label: "Approved", value: "Approved" },
   { label: "Rejected", value: "Rejected" },
-  { label: "Disbursed", value: "Disbursed" },
+  { label: "DISBURSED", value: "DISBURSED" },
 ]
 
 const triggerGhostClass = "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-8 w-8 p-0"
@@ -166,7 +166,7 @@ export default function KycLeadsPage() {
       total: leads.length,
       pending: leads.filter(l => ["Transferred to KYC", "Underwriting"].includes(l.status)).length,
       approved: leads.filter(l => l.status === "Approved").length,
-      disbursed: leads.filter(l => l.status === "Disbursed").length,
+      DISBURSED: leads.filter(l => l.status === "DISBURSED").length,
     }
   }, [leads])
 
@@ -181,8 +181,8 @@ export default function KycLeadsPage() {
         return <Badge className="bg-green-100 text-green-700 hover:bg-green-200 border-green-200">Approved</Badge>
       case "Rejected":
         return <Badge className="bg-red-100 text-red-700 hover:bg-red-200 border-red-200">Rejected</Badge>
-      case "Disbursed":
-        return <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-200 border-purple-200">Disbursed</Badge>
+      case "DISBURSED":
+        return <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-200 border-purple-200">DISBURSED</Badge>
       default:
         return <Badge variant="outline">{status}</Badge>
     }
@@ -242,8 +242,8 @@ export default function KycLeadsPage() {
         </Card>
         <Card className="border-l-4 border-l-purple-500 shadow-sm">
           <CardHeader className="pb-2">
-            <CardDescription>Disbursed</CardDescription>
-            <CardTitle className="text-2xl text-purple-600">{stats.disbursed}</CardTitle>
+            <CardDescription>DISBURSED</CardDescription>
+            <CardTitle className="text-2xl text-purple-600">{stats.DISBURSED}</CardTitle>
           </CardHeader>
         </Card>
       </div>
