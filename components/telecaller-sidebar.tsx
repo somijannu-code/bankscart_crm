@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Menu,
   X,
+  KeyRound,
   MessageCircle,
 } from "lucide-react"
 import Link from "next/link"
@@ -30,6 +31,7 @@ const navigation = [
   { name: "Attendance", href: "/telecaller/attendance", icon: FileText },
   { name: "Leave", href: "/telecaller/leave", icon: Calendar },
   { name: "Team Chat", href: "/telecaller/chat", icon: MessageCircle },
+  { name: "Logins", href: "/telecaller/logins", icon: KeyRound },
 ]
 
 type TelecallerSidebarProps = {}
