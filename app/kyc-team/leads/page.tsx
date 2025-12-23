@@ -4,9 +4,8 @@ import { useState, useEffect, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
 import { 
-  Search, Filter, Calendar, ChevronDown, MoreHorizontal, 
-  Eye, CheckCircle, XCircle, Clock, ArrowUpDown, Loader2,
-  FileText, ShieldCheck, Download
+  Search, Filter, ArrowUpDown, Loader2,
+  FileText, ShieldCheck, Download, MoreHorizontal, Eye, CheckCircle, XCircle, Clock
 } from "lucide-react"
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -36,7 +35,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { format } from "date-fns" // Ensure you have this or use native JS Date
 
 // --- TYPES ---
 type Lead = {
@@ -51,6 +49,8 @@ type Lead = {
   updated_at: string
   source: string | null
   kyc_member_id: string
+  assigned_to: string | null // Telecaller ID
+  telecaller_name?: string   // Fetched name
 }
 
 // --- CONSTANTS ---
@@ -63,7 +63,6 @@ const STATUS_OPTS = [
   { label: "Disbursed", value: "Disbursed" },
 ]
 
-// Style class mimicking Button variant="ghost" size="icon" (h-8 w-8)
 const triggerGhostClass = "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-8 w-8 p-0"
 
 export default function KycLeadsPage() {
@@ -90,8 +89,8 @@ export default function KycLeadsPage() {
       }
       setCurrentUser(user.id)
 
-      // Fetch leads assigned to this KYC member
-      const { data, error } = await supabase
+      // 1. Fetch leads assigned to this KYC member
+      const { data: leadsData, error } = await supabase
         .from("leads")
         .select("*")
         .eq("kyc_member_id", user.id)
@@ -99,8 +98,35 @@ export default function KycLeadsPage() {
 
       if (error) {
         console.error("Error fetching leads:", error)
-      } else {
-        setLeads(data as Lead[])
+        setLeads([])
+      } else if (leadsData) {
+        // 2. Extract Telecaller IDs to fetch their names
+        // (This avoids complex joins if FK relationships aren't perfect)
+        const telecallerIds = Array.from(new Set(leadsData.map((l) => l.assigned_to).filter(Boolean))) as string[]
+        
+        let userMap: Record<string, string> = {}
+
+        if (telecallerIds.length > 0) {
+          const { data: usersData } = await supabase
+            .from("users")
+            .select("id, full_name")
+            .in("id", telecallerIds)
+          
+          if (usersData) {
+            userMap = usersData.reduce((acc, curr) => {
+              acc[curr.id] = curr.full_name || "Unknown"
+              return acc
+            }, {} as Record<string, string>)
+          }
+        }
+
+        // 3. Merge Lead data with Telecaller Names
+        const enrichedLeads: Lead[] = leadsData.map((l) => ({
+          ...l,
+          telecaller_name: l.assigned_to ? userMap[l.assigned_to] || "Unknown" : "Unassigned"
+        }))
+
+        setLeads(enrichedLeads)
       }
       setLoading(false)
     }
@@ -112,12 +138,10 @@ export default function KycLeadsPage() {
   const filteredLeads = useMemo(() => {
     let result = [...leads]
 
-    // 1. Status Filter
     if (statusFilter !== "all") {
       result = result.filter(l => l.status === statusFilter)
     }
 
-    // 2. Search Filter (Name, Phone, Company)
     if (searchQuery) {
       const q = searchQuery.toLowerCase()
       result = result.filter(l => 
@@ -127,7 +151,6 @@ export default function KycLeadsPage() {
       )
     }
 
-    // 3. Sorting (Date)
     result.sort((a, b) => {
       const dateA = new Date(a.updated_at).getTime()
       const dateB = new Date(b.updated_at).getTime()
@@ -165,10 +188,14 @@ export default function KycLeadsPage() {
     }
   }
 
-  // --- HELPER: CURRENCY ---
   const formatCurrency = (amount: number | null) => {
     if (!amount) return "—"
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount)
+  }
+
+  // Helper to open profile
+  const handleOpenProfile = (id: string) => {
+    router.push(`/kyc-team/leads/${id}`)
   }
 
   return (
@@ -272,8 +299,8 @@ export default function KycLeadsPage() {
               <TableRow>
                 <TableHead className="font-semibold text-gray-600">Applicant Details</TableHead>
                 <TableHead className="font-semibold text-gray-600">Status</TableHead>
+                <TableHead className="font-semibold text-gray-600">Telecaller</TableHead> {/* NEW COLUMN */}
                 <TableHead className="font-semibold text-gray-600">Loan Amount</TableHead>
-                <TableHead className="font-semibold text-gray-600 hidden md:table-cell">Source</TableHead>
                 <TableHead className="font-semibold text-gray-600">
                   <div className="flex items-center gap-1 cursor-pointer" onClick={() => setSortOrder(prev => prev === "asc" ? "desc" : "asc")}>
                     Last Updated <ArrowUpDown className="h-3 w-3" />
@@ -301,7 +328,13 @@ export default function KycLeadsPage() {
                   <TableRow key={lead.id} className="hover:bg-gray-50/50 transition-colors">
                     <TableCell>
                       <div className="flex flex-col">
-                        <span className="font-semibold text-gray-900">{lead.name}</span>
+                        {/* UPDATED: CLICKABLE NAME */}
+                        <span 
+                          onClick={() => handleOpenProfile(lead.id)}
+                          className="font-semibold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
+                        >
+                          {lead.name}
+                        </span>
                         <span className="text-xs text-gray-500">{lead.phone}</span>
                         {lead.email && <span className="text-xs text-gray-400">{lead.email}</span>}
                       </div>
@@ -309,11 +342,14 @@ export default function KycLeadsPage() {
                     <TableCell>
                       {getStatusBadge(lead.status)}
                     </TableCell>
+                    {/* NEW CELL: TELECALLER */}
+                    <TableCell>
+                      <span className="text-sm text-gray-600 font-medium">
+                        {lead.telecaller_name}
+                      </span>
+                    </TableCell>
                     <TableCell className="font-medium text-gray-700">
                       {formatCurrency(lead.loan_amount)}
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell text-gray-500">
-                      {lead.company || lead.source || "—"}
                     </TableCell>
                     <TableCell className="text-sm text-gray-500">
                       <div className="flex items-center gap-1">
@@ -324,16 +360,13 @@ export default function KycLeadsPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>
-                        {/* FIX: Replaced 'asChild' and 'Button' with a native trigger 
-                           styled like a ghost icon button to ensure click events work.
-                        */}
                         <DropdownMenuTrigger className={triggerGhostClass}>
                           <span className="sr-only">Open menu</span>
                           <MoreHorizontal className="h-4 w-4" />
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                          <DropdownMenuItem onClick={() => router.push(`/kyc-team/leads/${lead.id}`)}>
+                          <DropdownMenuItem onClick={() => handleOpenProfile(lead.id)}>
                             <Eye className="mr-2 h-4 w-4" /> View Details
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
@@ -355,7 +388,7 @@ export default function KycLeadsPage() {
         </CardContent>
       </Card>
       
-      {/* PAGINATION INFO (Simple version) */}
+      {/* PAGINATION INFO */}
       <div className="text-xs text-gray-500 text-center">
         Showing {filteredLeads.length} of {leads.length} records
       </div>
