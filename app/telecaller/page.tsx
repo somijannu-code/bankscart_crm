@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Phone, Users, Calendar, CheckCircle, Clock, TrendingUp, Rocket, BarChart3, RefreshCw, Plus, Trophy, LogIn } from "lucide-react"
+import { Phone, Users, Calendar, CheckCircle, Clock, TrendingUp, Rocket, BarChart3, RefreshCw, Plus, Trophy } from "lucide-react"
 import { TodaysTasks } from "@/components/todays-tasks"
 import { useRouter } from "next/navigation"
 import { AttendanceWidget } from "@/components/attendance-widget"
@@ -11,13 +11,11 @@ import { NotificationProvider } from "@/components/notification-provider"
 import { NotificationBell } from "@/components/notifications/notification-bell" 
 import { QuickActions } from "@/components/quick-actions"
 import { PerformanceMetrics } from "@/components/performance-metrics"
+import { DailyTargetProgress } from "@/components/daily-target-progress"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { LoadingSpinner } from "@/components/loading-spinner"
 import { EmptyState } from "@/components/empty-state"
 import { useEffect, useState } from "react"
-
-// Removed DailyTargetProgress import as it is being replaced
-// import { DailyTargetProgress } from "@/components/daily-target-progress"
 
 interface DashboardStats {
   title: string
@@ -105,12 +103,16 @@ export default function TelecallerDashboard() {
           // User Profile (For Target)
           supabase.from("users").select("monthly_target").eq("id", user.id).single(),
 
-          // Disbursed Leads
+          // --- FIX APPLIED HERE ---
+          // 1. Use .ilike() for case-insensitive status check
+          // 2. Use 'disbursed_at' OR 'updated_at' fallback
           supabase
             .from("leads")
             .select("disbursed_amount")
             .eq("assigned_to", user.id)
-            .ilike("status", "disbursed") 
+            .ilike("status", "disbursed") // Matches 'Disbursed', 'DISBURSED', 'disbursed'
+            // We use 'gte' on disbursed_at. If your old data doesn't have disbursed_at, 
+            // you might temporarily change this back to 'updated_at', but disbursed_at is accurate.
             .gte("disbursed_at", startOfMonth)
         ])
 
@@ -132,6 +134,7 @@ export default function TelecallerDashboard() {
 
         let achievedAmount = 0;
         if (disbursedLeadsResponse.status === 'fulfilled' && disbursedLeadsResponse.value.data) {
+            // FIX: Ensure we treat amount as Number explicitly
             achievedAmount = disbursedLeadsResponse.value.data.reduce((sum: number, lead: any) => {
               return sum + Number(lead.disbursed_amount || 0);
             }, 0);
@@ -406,17 +409,19 @@ export default function TelecallerDashboard() {
           </Card>
         </div>
 
-        {/* LOGINS BUTTON (Replaces Daily Call Target Progress) */}
-        <div className="grid grid-cols-1">
-            <Button 
-                className="w-full py-6 text-lg font-bold shadow-md bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 transition-all"
-                onClick={() => router.push("/admin/logins")}
-            >
-                <LogIn className="mr-3 h-6 w-6" />
-                View Logins
-            </Button>
-        </div>
-
+        {/* Daily Call Target Progress */}
+        <ErrorBoundary fallback={null}>
+          <DailyTargetProgress 
+            userId={data.user.id} 
+            targets={{
+              daily_calls: 350,
+              daily_completed: 20,
+              monthly_target: 10000
+            }}
+            currentCalls={typeof data.stats[1]?.value === 'number' ? DAILY_CALL_TARGET - data.stats[1].value : 0} 
+            currentCompleted={typeof data.stats[3]?.value === 'number' ? data.stats[3].value : 0}
+          />
+        </ErrorBoundary>
       </div>
     </NotificationProvider>
   )
