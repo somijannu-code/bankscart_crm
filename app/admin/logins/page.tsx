@@ -1,153 +1,249 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, FileCheck, Users, Calendar } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Loader2, FileCheck, Users, Calendar, Download, Search, Building2 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 
 export default function AdminLoginsPage() {
     const supabase = createClient()
     const [loading, setLoading] = useState(true)
     const [logins, setLogins] = useState<any[]>([])
-    const [filter, setFilter] = useState("today") // today, month, all
+    
+    // Filters
+    const [dateFilter, setDateFilter] = useState("month")
+    const [searchQuery, setSearchQuery] = useState("")
+    const [selectedBank, setSelectedBank] = useState("all")
 
+    // 1. DATA FETCHING
     useEffect(() => {
         const fetchData = async () => {
             setLoading(true)
             
-            // 1. Fetch Logins
             let query = supabase
                 .from('leads')
                 .select(`
-                    id, name, phone, bank_name, updated_at, notes,
+                    id, name, phone, bank_name, updated_at, notes, status,
                     assigned_to,
                     users:assigned_to ( full_name )
                 `)
                 .eq('status', 'Login Done')
                 .order('updated_at', { ascending: false })
 
-            // 2. Apply Filters
+            // Date Logic
             const today = new Date()
-            if (filter === 'today') {
-                const startOfDay = new Date(today.setHours(0,0,0,0)).toISOString()
-                query = query.gte('updated_at', startOfDay)
-            } else if (filter === 'month') {
-                const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString()
-                query = query.gte('updated_at', startOfMonth)
+            if (dateFilter === 'today') {
+                query = query.gte('updated_at', new Date(today.setHours(0,0,0,0)).toISOString())
+            } else if (dateFilter === 'month') {
+                query = query.gte('updated_at', new Date(today.getFullYear(), today.getMonth(), 1).toISOString())
             }
 
-            const { data, error } = await query
+            const { data } = await query
             if (data) setLogins(data)
             setLoading(false)
         }
-
         fetchData()
-    }, [filter, supabase])
+    }, [dateFilter, supabase])
+
+    // 2. CLIENT-SIDE FILTERING & AGGREGATION
+    const filteredLogins = useMemo(() => {
+        return logins.filter(l => {
+            const matchesSearch = 
+                l.name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                l.phone?.includes(searchQuery) ||
+                l.users?.full_name?.toLowerCase().includes(searchQuery.toLowerCase());
+            
+            const matchesBank = selectedBank === 'all' || l.bank_name === selectedBank;
+
+            return matchesSearch && matchesBank;
+        })
+    }, [logins, searchQuery, selectedBank])
+
+    // Bank Stats Calculation
+    const bankStats = useMemo(() => {
+        const stats: Record<string, number> = {}
+        filteredLogins.forEach(l => {
+            const bank = l.bank_name || 'Other'
+            stats[bank] = (stats[bank] || 0) + 1
+        })
+        return stats
+    }, [filteredLogins])
+
+    // 3. EXPORT TO CSV
+    const downloadCSV = () => {
+        const headers = ["Telecaller", "Customer Name", "Phone", "Bank", "Date", "Notes"]
+        const rows = filteredLogins.map(l => [
+            l.users?.full_name || "Unknown",
+            l.name,
+            l.phone,
+            l.bank_name,
+            new Date(l.updated_at).toLocaleDateString(),
+            `"${l.notes || ''}"` // Escape quotes
+        ])
+        
+        const csvContent = "data:text/csv;charset=utf-8," 
+            + headers.join(",") + "\n" 
+            + rows.map(e => e.join(",")).join("\n")
+
+        const encodedUri = encodeURI(csvContent)
+        const link = document.createElement("a")
+        link.setAttribute("href", encodedUri)
+        link.setAttribute("download", `logins_report_${dateFilter}_${new Date().toISOString().slice(0,10)}.csv`)
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+    }
 
     return (
-        <div className="p-6 space-y-6">
-            <div className="flex justify-between items-center">
+        <div className="p-6 md:p-8 space-y-8 bg-gray-50/50 min-h-screen">
+            
+            {/* Header */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
                         <FileCheck className="h-8 w-8 text-indigo-600" />
-                        All Login Details
+                        Login Reporting
                     </h1>
-                    <p className="text-gray-500 mt-1">Tracking all files marked as 'Login Done'</p>
+                    <p className="text-gray-500 mt-1">Monitor daily submissions and bank distribution</p>
                 </div>
                 
-                <Select value={filter} onValueChange={setFilter}>
-                    <SelectTrigger className="w-[180px]">
-                        <Calendar className="w-4 h-4 mr-2" />
-                        <SelectValue placeholder="Filter" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="today">Today</SelectItem>
-                        <SelectItem value="month">This Month</SelectItem>
-                        <SelectItem value="all">All Time</SelectItem>
-                    </SelectContent>
-                </Select>
+                <div className="flex items-center gap-2">
+                    <Select value={dateFilter} onValueChange={setDateFilter}>
+                        <SelectTrigger className="w-[140px] bg-white">
+                            <Calendar className="w-4 h-4 mr-2 text-gray-500" />
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="today">Today</SelectItem>
+                            <SelectItem value="month">This Month</SelectItem>
+                            <SelectItem value="all">All Time</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    
+                    <Button variant="outline" className="bg-white" onClick={downloadCSV} disabled={filteredLogins.length === 0}>
+                        <Download className="w-4 h-4 mr-2" />
+                        Export
+                    </Button>
+                </div>
             </div>
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <Card>
-                    <CardContent className="p-6 flex items-center gap-4">
-                        <div className="p-3 bg-indigo-100 rounded-full text-indigo-600">
-                            <FileCheck className="h-6 w-6" />
+            {/* Quick Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <Card className="shadow-sm border-l-4 border-indigo-500">
+                    <CardContent className="p-5">
+                        <div className="flex items-center gap-3 mb-2">
+                            <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
+                                <FileCheck className="h-5 w-5" />
+                            </div>
+                            <span className="text-sm font-medium text-gray-500">Total Logins</span>
                         </div>
-                        <div>
-                            <p className="text-sm font-medium text-gray-500">Total Logins ({filter})</p>
-                            <h2 className="text-3xl font-bold">{logins.length}</h2>
-                        </div>
+                        <h2 className="text-3xl font-bold">{filteredLogins.length}</h2>
                     </CardContent>
                 </Card>
-                <Card>
-                    <CardContent className="p-6 flex items-center gap-4">
-                        <div className="p-3 bg-green-100 rounded-full text-green-600">
-                            <Users className="h-6 w-6" />
-                        </div>
-                        <div>
-                            <p className="text-sm font-medium text-gray-500">Active Telecallers</p>
-                            <h2 className="text-3xl font-bold">
-                                {new Set(logins.map(l => l.assigned_to)).size}
-                            </h2>
-                        </div>
-                    </CardContent>
-                </Card>
+
+                {/* Dynamic Bank Cards (Top 3) */}
+                {Object.entries(bankStats).sort(([,a], [,b]) => b - a).slice(0, 3).map(([bank, count], i) => (
+                    <Card key={bank} className="shadow-sm">
+                        <CardContent className="p-5">
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="p-2 bg-green-50 rounded-lg text-green-600">
+                                    <Building2 className="h-5 w-5" />
+                                </div>
+                                <span className="text-sm font-medium text-gray-500 truncate" title={bank}>{bank}</span>
+                            </div>
+                            <h2 className="text-2xl font-bold">{count}</h2>
+                        </CardContent>
+                    </Card>
+                ))}
             </div>
 
-            {/* Data Table */}
-            <Card className="shadow-lg">
-                <CardHeader>
-                    <CardTitle>Login Records</CardTitle>
+            {/* Main Data Section */}
+            <Card className="shadow-lg border-gray-200">
+                <CardHeader className="bg-white border-b px-6 py-4">
+                    <div className="flex flex-col md:flex-row gap-4 justify-between md:items-center">
+                        <CardTitle className="text-lg">Detailed Records</CardTitle>
+                        
+                        <div className="flex gap-3 w-full md:w-auto">
+                            {/* Search */}
+                            <div className="relative flex-1 md:w-[250px]">
+                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
+                                <Input 
+                                    placeholder="Search name, phone, user..." 
+                                    className="pl-9"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                />
+                            </div>
+                            
+                            {/* Bank Filter */}
+                            <Select value={selectedBank} onValueChange={setSelectedBank}>
+                                <SelectTrigger className="w-[160px]">
+                                    <SelectValue placeholder="Filter Bank" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All Banks</SelectItem>
+                                    {Array.from(new Set(logins.map(l => l.bank_name))).map((b: any) => (
+                                        <SelectItem key={b} value={b}>{b}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
                 </CardHeader>
+                
                 <CardContent className="p-0">
                     <Table>
                         <TableHeader className="bg-gray-50">
                             <TableRow>
-                                <TableHead>Telecaller</TableHead>
-                                <TableHead>Customer Name</TableHead>
-                                <TableHead>Phone</TableHead>
+                                <TableHead className="w-[200px]">Telecaller</TableHead>
+                                <TableHead>Customer Details</TableHead>
                                 <TableHead>Bank</TableHead>
-                                <TableHead>Date & Time</TableHead>
-                                <TableHead>Notes</TableHead>
+                                <TableHead>Date</TableHead>
+                                <TableHead className="hidden md:table-cell">Notes</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {loading ? (
                                 <TableRow>
-                                    <TableCell colSpan={6} className="text-center h-32">
-                                        <Loader2 className="h-8 w-8 animate-spin mx-auto text-indigo-600" />
+                                    <TableCell colSpan={5} className="text-center h-40">
+                                        <Loader2 className="h-8 w-8 animate-spin mx-auto text-indigo-600 mb-2" />
+                                        <p className="text-sm text-gray-500">Loading records...</p>
                                     </TableCell>
                                 </TableRow>
-                            ) : logins.length === 0 ? (
+                            ) : filteredLogins.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={6} className="text-center h-32 text-gray-500">
-                                        No login records found for this period.
+                                    <TableCell colSpan={5} className="text-center h-40 text-gray-500">
+                                        No login records found matching your filters.
                                     </TableCell>
                                 </TableRow>
                             ) : (
-                                logins.map((item) => (
-                                    <TableRow key={item.id} className="hover:bg-gray-50">
-                                        <TableCell className="font-semibold text-indigo-700">
-                                            {item.users?.full_name || 'Unknown'}
-                                        </TableCell>
-                                        <TableCell>{item.name}</TableCell>
-                                        <TableCell className="font-mono text-xs">{item.phone}</TableCell>
+                                filteredLogins.map((item) => (
+                                    <TableRow key={item.id} className="hover:bg-gray-50 transition-colors">
                                         <TableCell>
-                                            <span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded text-xs font-medium border border-indigo-100">
+                                            <div className="font-semibold text-gray-900">{item.users?.full_name || 'Unknown'}</div>
+                                            <div className="text-xs text-gray-400">ID: {item.assigned_to?.slice(0,6)}...</div>
+                                        </TableCell>
+                                        <TableCell>
+                                            <div className="font-medium">{item.name}</div>
+                                            <div className="text-xs font-mono text-gray-500">{item.phone}</div>
+                                        </TableCell>
+                                        <TableCell>
+                                            <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-100 font-normal">
                                                 {item.bank_name || 'N/A'}
-                                            </span>
+                                            </Badge>
                                         </TableCell>
-                                        <TableCell className="text-gray-500 text-sm">
-                                            {new Date(item.updated_at).toLocaleDateString()} 
-                                            <span className="text-xs ml-2 text-gray-400">
+                                        <TableCell className="text-sm text-gray-600">
+                                            {new Date(item.updated_at).toLocaleDateString()}
+                                            <div className="text-xs text-gray-400">
                                                 {new Date(item.updated_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-                                            </span>
+                                            </div>
                                         </TableCell>
-                                        <TableCell className="text-gray-500 text-xs max-w-[200px] truncate" title={item.notes}>
+                                        <TableCell className="hidden md:table-cell text-xs text-gray-500 max-w-[200px] truncate" title={item.notes}>
                                             {item.notes || '-'}
                                         </TableCell>
                                     </TableRow>
