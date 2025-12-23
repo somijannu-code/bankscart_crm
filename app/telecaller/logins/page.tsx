@@ -8,9 +8,9 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, PlusCircle, Search, FileText, CheckCircle2, AlertCircle, RefreshCcw } from "lucide-react"
+import { Loader2, FileText, CheckCircle2, AlertCircle, RefreshCcw, Search } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { Badge } from "@/components/ui/badge"
 
@@ -47,30 +47,40 @@ export default function TelecallerLoginsPage() {
 
     const debouncedPhone = useDebounce(formData.phone, 500)
 
-    // 1. AUTO-CHECK PHONE NUMBER
+    // 1. AUTO-CHECK PHONE NUMBER (Updated to check 'logins' table)
     useEffect(() => {
         const checkPhone = async () => {
             if (debouncedPhone.length < 10) return
             setCheckingPhone(true)
             setExistingWarning(null)
 
+            // CHANGED: Checking 'logins' table
             const { data } = await supabase
-                .from('leads')
+                .from('logins')
                 .select('*')
                 .eq('phone', debouncedPhone)
+                .order('updated_at', { ascending: false }) // Get most recent
+                .limit(1)
                 .single()
 
             if (data) {
-                // Auto-fill name if found
-                setFormData(prev => ({ ...prev, name: data.name, id: data.id }))
+                // Auto-fill name if found in previous logins
+                setFormData(prev => ({ ...prev, name: data.name }))
                 
                 // Warn if already logged in TODAY
                 const lastUpdate = new Date(data.updated_at).toDateString()
                 const today = new Date().toDateString()
-                if (data.status === 'Login Done' && lastUpdate === today) {
+                if (lastUpdate === today) {
                     setExistingWarning("⚠️ You have already logged this file today!")
+                    // Also set ID to enable edit mode for today's entry
+                    setFormData(prev => ({ 
+                        ...prev, 
+                        id: data.id, 
+                        bank_name: data.bank_name || "",
+                        notes: data.notes || ""
+                    }))
                 } else {
-                    toast({ description: "Lead found! Name auto-filled.", className: "bg-blue-50" })
+                    toast({ description: "Previous login found. Name auto-filled.", className: "bg-blue-50" })
                 }
             }
             setCheckingPhone(false)
@@ -78,16 +88,16 @@ export default function TelecallerLoginsPage() {
         checkPhone()
     }, [debouncedPhone, supabase, toast])
 
-    // 2. FETCH DATA
+    // 2. FETCH DATA (Updated to fetch from 'logins')
     const fetchLogins = useCallback(async () => {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
 
+        // CHANGED: Fetching from 'logins' table
         let query = supabase
-            .from('leads')
+            .from('logins')
             .select('*')
             .eq('assigned_to', user.id)
-            .eq('status', 'Login Done')
             .order('updated_at', { ascending: false })
 
         // Date Filters
@@ -104,7 +114,7 @@ export default function TelecallerLoginsPage() {
 
     useEffect(() => { fetchLogins() }, [fetchLogins])
 
-    // 3. SUBMIT HANDLER
+    // 3. SUBMIT HANDLER (Updated to write to 'logins')
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         setLoading(true)
@@ -121,10 +131,13 @@ export default function TelecallerLoginsPage() {
                 updated_at: new Date().toISOString()
             }
 
+            // CHANGED: Operations on 'logins' table
             if (formData.id) {
-                await supabase.from('leads').update(payload).eq('id', formData.id)
+                const { error } = await supabase.from('logins').update(payload).eq('id', formData.id)
+                if (error) throw error
             } else {
-                await supabase.from('leads').insert([payload])
+                const { error } = await supabase.from('logins').insert([payload])
+                if (error) throw error
             }
 
             toast({ 
