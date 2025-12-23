@@ -522,14 +522,43 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     setShowDuplicatesDialog(true)
   }
 
+  // --- UPDATED EXPORT FUNCTION ---
   const exportToCSV = () => {
-    const headers = Object.keys(visibleColumns).filter(k => visibleColumns[k])
+    const columnMapping: Record<string, { label: string; value: (l: Lead) => any }[]> = {
+      name: [{ label: 'Name', value: l => l.name }],
+      // Split 'contact' into separate Phone and Email columns
+      contact: [
+        { label: 'Phone', value: l => l.phone },
+        { label: 'Email', value: l => l.email }
+      ],
+      company: [{ label: 'Company', value: l => l.company }],
+      status: [{ label: 'Status', value: l => l.status }],
+      priority: [{ label: 'Priority', value: l => l.priority }],
+      score: [{ label: 'Lead Score', value: l => l.lead_score }],
+      created: [{ label: 'Created At', value: l => l.created_at }],
+      lastContacted: [{ label: 'Last Contacted', value: l => l.last_contacted }],
+      loanAmount: [{ label: 'Loan Amount', value: l => l.loan_amount }],
+      notes: [{ label: 'Notes', value: l => l.notes }],
+      loanType: [{ label: 'Loan Type', value: l => l.loan_type }],
+      source: [{ label: 'Source', value: l => l.source }],
+      assignedTo: [{ label: 'Assigned To', value: l => l.assigned_user?.full_name || l.assigned_to }],
+      tags: [{ label: 'Tags', value: l => Array.isArray(l.tags) ? l.tags.join('; ') : l.tags }]
+    }
+
+    const activeColumns = Object.keys(visibleColumns)
+      .filter(key => visibleColumns[key])
+      .flatMap(key => columnMapping[key] || [])
+
     const csvContent = [
-      headers.join(','),
+      activeColumns.map(col => col.label).join(','),
       ...filteredLeads.map(lead => 
-        headers.map(h => {
-          const val = (lead as any)[h]
-          return typeof val === 'string' ? `"${val}"` : val
+        activeColumns.map(col => {
+          let val = col.value(lead)
+          if (val === null || val === undefined) return ''
+          if (typeof val === 'string') {
+            return `"${val.replace(/"/g, '""')}"` 
+          }
+          return val
         }).join(',')
       )
     ].join('\n')
@@ -538,8 +567,11 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `leads-export-${new Date().toISOString()}.csv`
+    a.download = `leads-export-${new Date().toISOString().split('T')[0]}.csv`
+    document.body.appendChild(a)
     a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(url)
   }
 
   const saveCurrentFilter = () => {
