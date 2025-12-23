@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,12 +9,11 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { 
-  Upload, FileSpreadsheet, CheckCircle, AlertCircle, Download, 
-  Zap, Users, ArrowRight, ArrowLeft, Settings2, Database, History 
+  Upload, CheckCircle, AlertCircle, Download, 
+  Zap, ArrowRight, History, PieChart 
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
@@ -58,9 +57,7 @@ const shuffleArray = <T,>(array: T[]): T[] => {
 };
 
 const cleanPhoneNumber = (phone: string) => {
-  // Remove non-digits
   const cleaned = phone.replace(/\D/g, '');
-  // If > 10 digits and starts with 91, remove 91 (Simple India logic, adjust as needed)
   if (cleaned.length > 10 && cleaned.startsWith('91')) {
     return cleaned.substring(2);
   }
@@ -72,7 +69,7 @@ export default function UploadPage() {
   const supabase = createClient()
 
   // --- State: General ---
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1) // 1: File, 2: Map, 3: Preview/Config, 4: Result
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
   const [telecallers, setTelecallers] = useState<Telecaller[]>([])
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   
@@ -82,7 +79,7 @@ export default function UploadPage() {
   const [csvHeaders, setCsvHeaders] = useState<string[]>([])
   
   // --- State: Step 2 (Mapping) ---
-  const [columnMapping, setColumnMapping] = useState<Record<string, string>>({}) // DB Field -> CSV Header
+  const [columnMapping, setColumnMapping] = useState<Record<string, string>>({}) 
   
   // --- State: Step 3 (Configuration & Preview) ---
   const [previewData, setPreviewData] = useState<any[]>([])
@@ -98,6 +95,10 @@ export default function UploadPage() {
   const [progress, setProgress] = useState(0)
   const [uploadStats, setUploadStats] = useState({ total: 0, success: 0, failed: 0, skipped: 0 })
   const [failedRows, setFailedRows] = useState<any[]>([])
+  
+  // --- NEW STATE: Assignment Summary ---
+  const [assignmentSummary, setAssignmentSummary] = useState<Record<string, number>>({})
+  const [showSummaryDialog, setShowSummaryDialog] = useState(false)
 
   // --- Effects ---
   useEffect(() => {
@@ -136,7 +137,6 @@ export default function UploadPage() {
         const headers = lines[0].split(",").map(h => h.trim())
         setCsvHeaders(headers)
         
-        // Auto-Map Logic
         const initialMapping: Record<string, string> = {}
         DB_FIELDS.forEach(dbField => {
             const match = headers.find(h => h.toLowerCase().includes(dbField.key) || h.toLowerCase() === dbField.label.toLowerCase())
@@ -156,18 +156,16 @@ export default function UploadPage() {
 
   // --- Handlers: Step 2 (Mapping) ---
   const goToStep3 = () => {
-    // Validate required fields
     const missingRequired = DB_FIELDS.filter(f => f.required && !columnMapping[f.key])
     if (missingRequired.length > 0) {
         alert(`Please map the following required fields: ${missingRequired.map(f => f.label).join(', ')}`)
         return
     }
 
-    // Generate Preview Data
-    const lines = rawFileContent.split("\n").filter(line => line.trim()).slice(1) // Skip header
-    const parsed = lines.slice(0, 50).map((line, idx) => { // Take first 50 for preview
+    const lines = rawFileContent.split("\n").filter(line => line.trim()).slice(1) 
+    const parsed = lines.slice(0, 50).map((line, idx) => {
         const values = line.split(",").map(v => v.trim())
-        const row: any = { _id: idx } // Temp ID for editing
+        const row: any = { _id: idx } 
         
         Object.entries(columnMapping).forEach(([dbKey, csvHeader]) => {
             const headerIndex = csvHeaders.indexOf(csvHeader)
@@ -190,6 +188,7 @@ export default function UploadPage() {
     setIsUploading(true)
     setUploadStats({ total: 0, success: 0, failed: 0, skipped: 0 })
     setFailedRows([])
+    setAssignmentSummary({}) // Reset summary
     
     // 1. Parse ALL Data
     const lines = rawFileContent.split("\n").filter(line => line.trim()).slice(1)
@@ -200,12 +199,11 @@ export default function UploadPage() {
             const headerIndex = csvHeaders.indexOf(csvHeader)
             if (headerIndex !== -1) {
                 let val = values[headerIndex]
-                // Clean Phone Numbers
                 if (dbKey === 'phone') val = cleanPhoneNumber(val)
                 row[dbKey] = val
             }
         })
-        return { ...row, _originalIndex: idx + 2 } // Keep track of CSV row number
+        return { ...row, _originalIndex: idx + 2 } 
     })
 
     const BATCH_SIZE = 50
@@ -227,7 +225,6 @@ export default function UploadPage() {
         const batch = allRows.slice(i, i + BATCH_SIZE)
         const leadsToInsert: any[] = []
 
-        // Duplicate Check Logic (Batch Level)
         if (duplicateAction === 'skip') {
             const phones = batch.map(r => r.phone).filter(Boolean)
             const { data: existing } = await supabase.from("leads").select("phone").in("phone", phones)
@@ -245,15 +242,20 @@ export default function UploadPage() {
             leadsToInsert.push(...batch)
         }
 
-        // Final Object Preparation & Insert
         if (leadsToInsert.length > 0) {
+            const currentBatchAssignments: Record<string, number> = {} // Track this batch's assignments
+
             const finalLeads = leadsToInsert.map((lead, idx) => {
-                 // Assignment Logic
                  let assigneeId = null
                  if (autoDistribute && distributionList.length > 0) {
                      assigneeId = distributionList[(successCount + idx) % distributionList.length]
                  } else if (selectedTelecaller && selectedTelecaller !== "unassigned") {
                      assigneeId = selectedTelecaller
+                 }
+
+                 // Track Assignment
+                 if (assigneeId) {
+                    currentBatchAssignments[assigneeId] = (currentBatchAssignments[assigneeId] || 0) + 1
                  }
 
                  return {
@@ -263,7 +265,6 @@ export default function UploadPage() {
                     assigned_to: assigneeId,
                     assigned_by: currentUserId,
                     assigned_at: assigneeId ? new Date().toISOString() : null,
-                    // Ensure required fields exist
                     email: lead.email || null,
                     company: lead.company || null,
                     priority: 'medium'
@@ -277,10 +278,18 @@ export default function UploadPage() {
                 leadsToInsert.forEach(l => errors.push({ ...l, error: error.message }))
             } else {
                 successCount += leadsToInsert.length
+                
+                // Update Global Assignment Summary
+                setAssignmentSummary(prev => {
+                    const next = { ...prev }
+                    Object.entries(currentBatchAssignments).forEach(([id, count]) => {
+                        next[id] = (next[id] || 0) + count
+                    })
+                    return next
+                })
             }
         }
 
-        // Update Progress
         const processed = Math.min(i + BATCH_SIZE, allRows.length)
         setProgress(Math.round((processed / allRows.length) * 100))
     }
@@ -294,20 +303,17 @@ export default function UploadPage() {
     setFailedRows(errors)
     setIsUploading(false)
     setStep(4)
+    // Optional: Auto open the dialog
+    // if (autoDistribute || (selectedTelecaller && selectedTelecaller !== 'unassigned')) {
+    //     setShowSummaryDialog(true)
+    // }
   }
 
   // --- Handlers: Step 4 (Results) ---
   const downloadErrorCSV = () => {
     if (failedRows.length === 0) return
-    
     const headers = ["Row", "Name", "Phone", "Error Message"]
-    const csvContent = [
-        headers.join(","),
-        ...failedRows.map(row => 
-            `${row._originalIndex || '-'},"${row.name || ''}","${row.phone || ''}","${row.error}"`
-        )
-    ].join("\n")
-
+    const csvContent = [headers.join(","), ...failedRows.map(row => `${row._originalIndex || '-'},"${row.name || ''}","${row.phone || ''}","${row.error}"`)].join("\n")
     const blob = new Blob([csvContent], { type: 'text/csv' })
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -316,7 +322,6 @@ export default function UploadPage() {
     a.click()
   }
 
-  // --- Render Helpers ---
   const downloadTemplate = () => {
     const template = `Name,Phone,Email,Company,Designation,Address,City,Loan Amount,Notes\nJohn Doe,9876543210,john@example.com,Acme Corp,Manager,123 Main St,Mumbai,500000,Interested in PL`
     const blob = new Blob([template], { type: "text/csv" })
@@ -571,6 +576,39 @@ export default function UploadPage() {
                             <div className="text-sm text-amber-600">Skipped (Dupes)</div>
                         </div>
                     </div>
+
+                    {/* ASSIGNMENT REPORT BUTTON */}
+                    {(Object.keys(assignmentSummary).length > 0) && (
+                        <div className="flex justify-center">
+                            <Dialog open={showSummaryDialog} onOpenChange={setShowSummaryDialog}>
+                                <DialogTrigger asChild>
+                                    <Button variant="outline" className="gap-2 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100">
+                                        <PieChart className="h-4 w-4" />
+                                        View Assignment Report
+                                    </Button>
+                                </DialogTrigger>
+                                <DialogContent>
+                                    <DialogHeader>
+                                        <DialogTitle>Lead Distribution Report</DialogTitle>
+                                        <DialogDescription>
+                                            Breakdown of leads assigned in this upload batch.
+                                        </DialogDescription>
+                                    </DialogHeader>
+                                    <div className="space-y-2 mt-2 max-h-[300px] overflow-y-auto">
+                                        {Object.entries(assignmentSummary).map(([id, count]) => {
+                                            const agent = telecallers.find(t => t.id === id)
+                                            return (
+                                                <div key={id} className="flex items-center justify-between p-2 border-b last:border-0">
+                                                    <span className="font-medium">{agent?.full_name || "Unknown Agent"}</span>
+                                                    <span className="bg-slate-100 px-2 py-1 rounded-full text-xs font-bold">{count} leads</span>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                </DialogContent>
+                            </Dialog>
+                        </div>
+                    )}
 
                     {uploadStats.failed > 0 && (
                         <div className="bg-red-50 border border-red-200 rounded-md p-4 flex items-center justify-between">
