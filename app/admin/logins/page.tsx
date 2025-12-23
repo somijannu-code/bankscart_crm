@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Loader2, FileCheck, Users, Calendar, Download, Search, Building2 } from "lucide-react"
+import { Loader2, FileCheck, Users, Calendar, Download, Search, Building2, Trophy } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
 export default function AdminLoginsPage() {
@@ -74,6 +74,26 @@ export default function AdminLoginsPage() {
         return stats
     }, [filteredLogins])
 
+    // --- NEW LOGIC: Today's Top Performers ---
+    const todayTopTelecallers = useMemo(() => {
+        const todayStr = new Date().toDateString() // "Fri Dec 01 2023"
+        
+        // 1. Filter only today's logins from the main dataset
+        const todayLogins = logins.filter(l => new Date(l.updated_at).toDateString() === todayStr)
+
+        // 2. Count per user
+        const counts: Record<string, number> = {}
+        todayLogins.forEach(l => {
+            const name = l.users?.full_name || 'Unknown'
+            counts[name] = (counts[name] || 0) + 1
+        })
+
+        // 3. Sort Descending and take top 3
+        return Object.entries(counts)
+            .sort(([, a], [, b]) => b - a)
+            .slice(0, 3)
+    }, [logins]) // Re-run whenever logins update
+
     // 3. EXPORT TO CSV
     const downloadCSV = () => {
         const headers = ["Telecaller", "Customer Name", "Phone", "Bank", "Date", "Notes"]
@@ -83,7 +103,7 @@ export default function AdminLoginsPage() {
             l.phone,
             l.bank_name,
             new Date(l.updated_at).toLocaleDateString(),
-            `"${l.notes || ''}"` // Escape quotes
+            `"${l.notes || ''}"`
         ])
         
         const csvContent = "data:text/csv;charset=utf-8," 
@@ -134,6 +154,8 @@ export default function AdminLoginsPage() {
 
             {/* Quick Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                
+                {/* Card 1: Total Logins */}
                 <Card className="shadow-sm border-l-4 border-indigo-500">
                     <CardContent className="p-5">
                         <div className="flex items-center gap-3 mb-2">
@@ -146,8 +168,36 @@ export default function AdminLoginsPage() {
                     </CardContent>
                 </Card>
 
-                {/* Dynamic Bank Cards (Top 3) */}
-                {Object.entries(bankStats).sort(([,a], [,b]) => b - a).slice(0, 3).map(([bank, count], i) => (
+                {/* Card 2: Today's Top Performers (NEW) */}
+                <Card className="shadow-sm border-l-4 border-amber-500">
+                    <CardContent className="p-5">
+                        <div className="flex items-center gap-3 mb-3">
+                            <div className="p-2 bg-amber-50 rounded-lg text-amber-600">
+                                <Trophy className="h-5 w-5" />
+                            </div>
+                            <span className="text-sm font-medium text-gray-500">Today's Top Logins</span>
+                        </div>
+                        <div className="space-y-2">
+                            {todayTopTelecallers.length > 0 ? (
+                                todayTopTelecallers.map(([name, count], i) => (
+                                    <div key={name} className="flex justify-between items-center text-sm">
+                                        <span className="font-medium text-gray-700">
+                                            {i + 1}. {name}
+                                        </span>
+                                        <Badge variant="secondary" className="bg-amber-100 text-amber-800 font-bold">
+                                            {count}
+                                        </Badge>
+                                    </div>
+                                ))
+                            ) : (
+                                <p className="text-xs text-gray-400">No logins recorded today</p>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Card 3 & 4: Top Banks */}
+                {Object.entries(bankStats).sort(([,a], [,b]) => b - a).slice(0, 2).map(([bank, count]) => (
                     <Card key={bank} className="shadow-sm">
                         <CardContent className="p-5">
                             <div className="flex items-center gap-3 mb-2">
