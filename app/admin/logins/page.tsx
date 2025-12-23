@@ -2,12 +2,12 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Loader2, FileCheck, Users, Calendar, Download, Search, Building2, Trophy } from "lucide-react"
+import { Loader2, FileCheck, Download, Search, Building2, Trophy, Calendar } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
 export default function AdminLoginsPage() {
@@ -25,14 +25,14 @@ export default function AdminLoginsPage() {
         const fetchData = async () => {
             setLoading(true)
             
+            // CHANGED: Fetching from 'logins' table instead of 'leads'
             let query = supabase
-                .from('leads')
+                .from('logins') 
                 .select(`
                     id, name, phone, bank_name, updated_at, notes, status,
                     assigned_to,
                     users:assigned_to ( full_name )
                 `)
-                .eq('status', 'Login Done')
                 .order('updated_at', { ascending: false })
 
             // Date Logic
@@ -43,8 +43,13 @@ export default function AdminLoginsPage() {
                 query = query.gte('updated_at', new Date(today.getFullYear(), today.getMonth(), 1).toISOString())
             }
 
-            const { data } = await query
-            if (data) setLogins(data)
+            const { data, error } = await query
+            
+            if (error) {
+                console.error("Error fetching logins:", error)
+            } else if (data) {
+                setLogins(data)
+            }
             setLoading(false)
         }
         fetchData()
@@ -76,9 +81,9 @@ export default function AdminLoginsPage() {
 
     // --- NEW LOGIC: Today's Top Performers ---
     const todayTopTelecallers = useMemo(() => {
-        const todayStr = new Date().toDateString() // "Fri Dec 01 2023"
+        const todayStr = new Date().toDateString()
         
-        // 1. Filter only today's logins from the main dataset
+        // 1. Filter only today's logins
         const todayLogins = logins.filter(l => new Date(l.updated_at).toDateString() === todayStr)
 
         // 2. Count per user
@@ -92,7 +97,7 @@ export default function AdminLoginsPage() {
         return Object.entries(counts)
             .sort(([, a], [, b]) => b - a)
             .slice(0, 3)
-    }, [logins]) // Re-run whenever logins update
+    }, [logins]) 
 
     // 3. EXPORT TO CSV
     const downloadCSV = () => {
@@ -168,7 +173,7 @@ export default function AdminLoginsPage() {
                     </CardContent>
                 </Card>
 
-                {/* Card 2: Today's Top Performers (NEW) */}
+                {/* Card 2: Today's Top Performers */}
                 <Card className="shadow-sm border-l-4 border-amber-500">
                     <CardContent className="p-5">
                         <div className="flex items-center gap-3 mb-3">
@@ -214,38 +219,6 @@ export default function AdminLoginsPage() {
 
             {/* Main Data Section */}
             <Card className="shadow-lg border-gray-200">
-                <CardHeader className="bg-white border-b px-6 py-4">
-                    <div className="flex flex-col md:flex-row gap-4 justify-between md:items-center">
-                        <CardTitle className="text-lg">Detailed Records</CardTitle>
-                        
-                        <div className="flex gap-3 w-full md:w-auto">
-                            {/* Search */}
-                            <div className="relative flex-1 md:w-[250px]">
-                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
-                                <Input 
-                                    placeholder="Search name, phone, user..." 
-                                    className="pl-9"
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                />
-                            </div>
-                            
-                            {/* Bank Filter */}
-                            <Select value={selectedBank} onValueChange={setSelectedBank}>
-                                <SelectTrigger className="w-[160px]">
-                                    <SelectValue placeholder="Filter Bank" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">All Banks</SelectItem>
-                                    {Array.from(new Set(logins.map(l => l.bank_name))).map((b: any) => (
-                                        <SelectItem key={b} value={b}>{b}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-                </CardHeader>
-                
                 <CardContent className="p-0">
                     <Table>
                         <TableHeader className="bg-gray-50">
