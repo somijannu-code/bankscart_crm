@@ -21,7 +21,7 @@ const STATUSES = {
     UNDERWRITING: "Underwriting",
     REJECTED: "Rejected",
     APPROVED: "Approved",
-    DISBURSED: "Disbursed",
+    DISBURSED: "DISBURSED",
 } as const;
 
 const STATUS_OPTIONS = Object.values(STATUSES);
