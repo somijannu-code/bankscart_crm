@@ -31,7 +31,7 @@ export default function KycSidebar({ userProfile }: { userProfile: UserProfile }
         router.refresh();
         
         // 3. Force redirect to the login page
-        router.replace("/login");
+        router.replace("/auth/login");
     };
 
     return (
