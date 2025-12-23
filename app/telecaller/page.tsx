@@ -224,7 +224,7 @@ export default function TelecallerDashboard() {
   }
 
   const handleLogins = () => {
-    router.push("/admin/logins")
+    router.push("/telecaller/logins")
   }
 
   const formatValue = (stat: DashboardStats) => {
