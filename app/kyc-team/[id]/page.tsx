@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Phone, Mail, MapPin, Calendar, MessageSquare, ArrowLeft, Clock, Save, User, DollarSign, Loader2, RefreshCw, XCircle, Building, Home, Briefcase, CreditCard, Edit, Edit2, Edit3 } from "lucide-react";
+import { Phone, Mail, MapPin, Calendar, MessageSquare, ArrowLeft, Clock, Save, User, IndianRupee, Loader2, RefreshCw, XCircle, Building, Home, Briefcase, CreditCard, Edit, Edit2, Edit3 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useCallback } from "react";
@@ -625,7 +625,7 @@ export default function KycLeadProfilePage({ params }: LeadProfilePageProps) {
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-purple-700">
-                        <DollarSign className="h-5 w-5" />
+                        <IndianRupee className="h-5 w-5" />
                         Loan & Financial Details
                     </CardTitle>
                 </CardHeader>
