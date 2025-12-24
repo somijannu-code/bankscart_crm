@@ -3,11 +3,13 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Loader2, IndianRupee, BarChart3, TrendingUp, Filter, Calendar, Trash2, MapPin } from "lucide-react"
+import { Loader2, IndianRupee, BarChart3, TrendingUp, Filter, Calendar, Trash2, MapPin, Search, RefreshCw, X } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
+import { Badge } from "@/components/ui/badge"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -59,11 +61,23 @@ export default function TelecallerDisbursementReport() {
     const supabase = createClient();
     const { toast } = useToast();
     
-    // State
+    // --- STATE ---
+    
+    // Filter Mode: 'monthly' (Dropdowns) or 'custom' (Date Range)
+    const [filterMode, setFilterMode] = useState<'monthly' | 'custom'>('monthly');
+
+    // 1. Monthly Filters
     const currentYear = new Date().getFullYear();
     const [selectedYear, setSelectedYear] = useState(String(currentYear));
-    const [selectedMonth, setSelectedMonth] = useState('all');
-    
+    const [selectedMonth, setSelectedMonth] = useState<string>('all'); // 'all' or '01', '02', etc.
+
+    // 2. Custom Date Filters
+    const [customStart, setCustomStart] = useState("");
+    const [customEnd, setCustomEnd] = useState("");
+
+    // 3. Search Filter
+    const [searchTerm, setSearchTerm] = useState("");
+
     // Data State
     const [loading, setLoading] = useState(true);
     const [disbursements, setDisbursements] = useState<LeadDisbursement[]>([]);
@@ -95,19 +109,46 @@ export default function TelecallerDisbursementReport() {
         setUserMap(map);
     }, [supabase]);
 
-    // 2. Fetch Leads (Transactions)
+    // 2. Fetch Leads (Transactions) based on Filters
     const fetchLeads = useCallback(async () => {
         setLoading(true);
         
-        const startOfYear = `${selectedYear}-01-01T00:00:00.000Z`;
-        const endOfYear = `${Number(selectedYear) + 1}-01-01T00:00:00.000Z`;
+        let startQuery: string, endQuery: string;
+
+        // LOGIC: Determine Date Range based on Filter Mode
+        if (filterMode === 'custom' && customStart && customEnd) {
+            // Custom Range
+            startQuery = `${customStart}T00:00:00.000Z`;
+            endQuery = `${customEnd}T23:59:59.999Z`;
+        } else {
+            // Monthly Mode (Default)
+            if (selectedMonth !== 'all') {
+                // Specific Month Selected
+                const monthIndex = parseInt(selectedMonth) - 1; // 0-based
+                const startDate = new Date(Number(selectedYear), monthIndex, 1);
+                const endDate = new Date(Number(selectedYear), monthIndex + 1, 0); // Last day of month
+                
+                // Adjust to IST/Local if needed, keeping simple UTC ISO for DB
+                // Creating simplified ISO strings
+                const y = startDate.getFullYear();
+                const m = String(startDate.getMonth() + 1).padStart(2, '0');
+                const lastDay = endDate.getDate();
+                
+                startQuery = `${y}-${m}-01T00:00:00.000Z`;
+                endQuery = `${y}-${m}-${lastDay}T23:59:59.999Z`;
+            } else {
+                // Whole Year
+                startQuery = `${selectedYear}-01-01T00:00:00.000Z`;
+                endQuery = `${Number(selectedYear) + 1}-01-01T00:00:00.000Z`;
+            }
+        }
 
         const { data, error } = await supabase
             .from('leads')
             .select('id, assigned_to, disbursed_amount, disbursed_at, application_number, name, bank_name, city')
-            .eq('status', 'DISBURSED') // Only fetch if status is DISBURSED
-            .gte('disbursed_at', startOfYear)
-            .lt('disbursed_at', endOfYear)
+            .eq('status', 'DISBURSED') 
+            .gte('disbursed_at', startQuery)
+            .lte('disbursed_at', endQuery)
             .order('disbursed_at', { ascending: false })
             .limit(5000); 
 
@@ -125,69 +166,34 @@ export default function TelecallerDisbursementReport() {
 
         setDisbursements(safeData as LeadDisbursement[]);
         setLoading(false);
-    }, [supabase, selectedYear, toast]);
+    }, [supabase, filterMode, selectedYear, selectedMonth, customStart, customEnd, toast]);
 
     // 3. INITIAL LOAD & REAL-TIME SUBSCRIPTION
     useEffect(() => {
-        // Initial Fetch
         fetchUsers().then(() => fetchLeads());
 
-        // --- REAL-TIME LISTENER START ---
         const channel = supabase
             .channel('disbursement-updates')
-            .on(
-                'postgres_changes',
-                {
-                    event: '*', // Listen to INSERT and UPDATE
-                    schema: 'public',
-                    table: 'leads'
-                },
-                (payload) => {
-                    const newData = payload.new as any;
-                    
-                    // Logic: Only refresh if the lead is 'DISBURSED' or if a 'DISBURSED' lead was changed
-                    if (newData.status === 'DISBURSED' || (payload.old as any)?.status === 'DISBURSED') {
-                        console.log("⚡ Real-time update detected:", payload);
-                        
-                        // Add a small delay to ensure DB write is fully committed before re-fetching
-                        setTimeout(() => {
-                            fetchLeads();
-                            toast({
-                                title: "New Update",
-                                description: "Disbursement data refreshed automatically.",
-                                className: "bg-blue-50 text-blue-700 border-blue-200"
-                            });
-                        }, 500);
-                    }
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, (payload) => {
+                const newData = payload.new as any;
+                if (newData.status === 'DISBURSED' || (payload.old as any)?.status === 'DISBURSED') {
+                    setTimeout(() => fetchLeads(), 500);
                 }
-            )
+            })
             .subscribe();
 
-        // Cleanup listener on unmount
-        return () => {
-            supabase.removeChannel(channel);
-        };
-        // --- REAL-TIME LISTENER END ---
-
-    }, [fetchUsers, fetchLeads, refreshKey, supabase, toast]);
+        return () => { supabase.removeChannel(channel); };
+    }, [fetchUsers, fetchLeads, refreshKey, supabase]);
 
     // 4. Delete Handler
     const handleDelete = async () => {
         if (!deleteId) return;
         setIsDeleting(true);
-
         try {
-            const { error } = await supabase
-                .from('leads')
-                .update({ 
-                    status: 'Interested', // Revert to previous status
-                    disbursed_amount: null,
-                    disbursed_at: null 
-                })
+            const { error } = await supabase.from('leads')
+                .update({ status: 'Interested', disbursed_amount: null, disbursed_at: null })
                 .eq('id', deleteId);
-
             if (error) throw error;
-
             toast({ title: "Deleted", description: "Transaction removed successfully." });
             setRefreshKey(prev => prev + 1); 
         } catch (error: any) {
@@ -198,39 +204,40 @@ export default function TelecallerDisbursementReport() {
         }
     };
 
-    // --- AGGREGATION & FILTERING ---
-    const { filteredData, grandTotal, uniqueMonths, displayLabel } = useMemo(() => {
-        const monthsSet = new Set<string>();
+    // --- CLIENT-SIDE SEARCH & AGGREGATION ---
+    const { filteredData, grandTotal, displayLabel } = useMemo(() => {
         let total = 0;
-
-        disbursements.forEach(d => {
-            if (d.disbursed_at) {
-                const monthKey = d.disbursed_at.substring(0, 7); 
-                monthsSet.add(monthKey);
-            }
-        });
         
-        const filtered = disbursements.filter(d => {
-            if (selectedMonth === 'all') return true;
-            return d.disbursed_at && d.disbursed_at.startsWith(selectedMonth);
+        // Apply Text Search (Telecaller Name OR Customer Name)
+        const searched = disbursements.filter(item => {
+            const term = searchTerm.toLowerCase();
+            const telecallerName = userMap[item.assigned_to]?.toLowerCase() || "";
+            const customerName = item.name?.toLowerCase() || "";
+            const appNo = item.application_number?.toLowerCase() || "";
+            
+            return telecallerName.includes(term) || customerName.includes(term) || appNo.includes(term);
         });
 
-        filtered.forEach(d => { total += d.disbursed_amount; });
+        searched.forEach(d => { total += d.disbursed_amount; });
 
-        let label = `Total Disbursed (${selectedYear})`;
-        if (selectedMonth !== 'all') {
-            const [y, m] = selectedMonth.split('-');
-            const date = new Date(Number(y), Number(m)-1, 1);
-            label = `Total Disbursed (${date.toLocaleString('default', { month: 'long' })})`;
+        let label = "Total Disbursed";
+        if (filterMode === 'monthly') {
+            if (selectedMonth === 'all') label += ` (${selectedYear})`;
+            else {
+                const date = new Date(Number(selectedYear), parseInt(selectedMonth)-1, 1);
+                label += ` (${date.toLocaleString('default', { month: 'long', year: 'numeric' })})`;
+            }
+        } else {
+            if (customStart && customEnd) label += ` (${customStart} to ${customEnd})`;
+            else label += " (Custom Range)";
         }
 
         return {
-            filteredData: filtered,
+            filteredData: searched,
             grandTotal: total,
-            uniqueMonths: Array.from(monthsSet).sort().reverse(),
             displayLabel: label
         };
-    }, [disbursements, selectedMonth, selectedYear]);
+    }, [disbursements, searchTerm, userMap, filterMode, selectedYear, selectedMonth, customStart, customEnd]);
 
     const availableYears = useMemo(() => {
         const years = [];
@@ -239,106 +246,193 @@ export default function TelecallerDisbursementReport() {
     }, [currentYear]);
 
     return (
-        <div className="p-6 md:p-8 space-y-8">
-            <div className="flex items-center justify-between flex-wrap gap-4">
-                <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
-                    <IndianRupee className="h-7 w-7 text-green-600" />
-                    Disbursement Report
-                </h1>
-                
+        <div className="p-4 md:p-8 space-y-6 bg-gray-50/50 min-h-screen">
+            
+            {/* Header */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+                        <IndianRupee className="h-7 w-7 text-green-600" />
+                        Disbursement Report
+                    </h1>
+                    <p className="text-gray-500 text-sm mt-1">Track and manage processed disbursements</p>
+                </div>
                 <DisbursementModal onSuccess={() => setRefreshKey(prev => prev + 1)} />
             </div>
 
-            {/* Summary Card */}
-            <Card className="shadow-lg bg-white border-l-4 border-l-green-600">
-                <CardContent className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-                    <div className="md:col-span-1 border-r md:border-r-2 border-green-100 pr-6">
-                        <p className="text-sm font-medium text-gray-600 flex items-center gap-1">
-                            <TrendingUp className="h-4 w-4 text-green-600" />
-                            {displayLabel}
-                        </p>
-                        <p className="text-4xl font-extrabold text-green-700 mt-2 break-words">
-                            {loading ? <Loader2 className="h-8 w-8 animate-spin" /> : formatCurrency(grandTotal)}
-                        </p>
-                    </div>
-
-                    <div className="md:col-span-2 grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1">
-                                <Calendar className="h-3 w-3" /> Year
-                            </label>
-                            <Select value={selectedYear} onValueChange={setSelectedYear} disabled={loading}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    {availableYears.map(y => <SelectItem key={y} value={y}>{y}</SelectItem>)}
-                                </SelectContent>
-                            </Select>
+            {/* --- FILTER SECTION --- */}
+            <Card className="shadow-sm border-gray-200">
+                <CardContent className="p-4">
+                    <div className="flex flex-col lg:flex-row gap-4 justify-between items-end lg:items-center">
+                        
+                        {/* LEFT: Search Bar */}
+                        <div className="w-full lg:w-1/3 relative">
+                            <label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">Search Records</label>
+                            <div className="relative">
+                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
+                                <Input 
+                                    placeholder="Search by Telecaller or Customer..." 
+                                    className="pl-9 bg-gray-50 border-gray-200 focus:bg-white transition-colors"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                                {searchTerm && (
+                                    <button 
+                                        onClick={() => setSearchTerm("")}
+                                        className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                                    >
+                                        <X className="h-4 w-4" />
+                                    </button>
+                                )}
+                            </div>
                         </div>
-                        <div className="space-y-2">
-                            <label className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1">
-                                <Filter className="h-3 w-3" /> Filter Month
-                            </label>
-                            <Select value={selectedMonth} onValueChange={setSelectedMonth} disabled={loading || uniqueMonths.length === 0}>
-                                <SelectTrigger><SelectValue placeholder="All Months" /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">All Months</SelectItem>
-                                    {uniqueMonths.map(m => {
-                                        const [y, mon] = m.split('-');
-                                        const date = new Date(Number(y), Number(mon)-1, 1);
-                                        return <SelectItem key={m} value={m}>{date.toLocaleString('default', { month: 'long' })}</SelectItem>
-                                    })}
-                                </SelectContent>
-                            </Select>
+
+                        {/* RIGHT: Date Filters */}
+                        <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+                            
+                            {/* Toggle Mode */}
+                            <div className="flex flex-col">
+                                <label className="text-xs font-semibold text-gray-500 uppercase mb-1">Filter Type</label>
+                                <Select value={filterMode} onValueChange={(val: any) => setFilterMode(val)}>
+                                    <SelectTrigger className="w-[140px] bg-white">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="monthly">Monthly View</SelectItem>
+                                        <SelectItem value="custom">Custom Range</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            {/* CONDITIONAL INPUTS */}
+                            {filterMode === 'monthly' ? (
+                                <>
+                                    <div className="flex flex-col">
+                                        <label className="text-xs font-semibold text-gray-500 uppercase mb-1">Year</label>
+                                        <Select value={selectedYear} onValueChange={setSelectedYear}>
+                                            <SelectTrigger className="w-[100px] bg-white"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                {availableYears.map(y => <SelectItem key={y} value={y}>{y}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <label className="text-xs font-semibold text-gray-500 uppercase mb-1">Month</label>
+                                        <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                                            <SelectTrigger className="w-[140px] bg-white"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">Whole Year</SelectItem>
+                                                {Array.from({length: 12}, (_, i) => {
+                                                    const date = new Date(2000, i, 1);
+                                                    return <SelectItem key={i} value={String(i+1).padStart(2, '0')}>{date.toLocaleString('default', { month: 'long' })}</SelectItem>
+                                                })}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <div className="flex flex-col">
+                                        <label className="text-xs font-semibold text-gray-500 uppercase mb-1">From Date</label>
+                                        <Input 
+                                            type="date" 
+                                            className="w-[150px] bg-white" 
+                                            value={customStart}
+                                            onChange={(e) => setCustomStart(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <label className="text-xs font-semibold text-gray-500 uppercase mb-1">To Date</label>
+                                        <Input 
+                                            type="date" 
+                                            className="w-[150px] bg-white" 
+                                            value={customEnd}
+                                            onChange={(e) => setCustomEnd(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="flex flex-col justify-end">
+                                        <Button 
+                                            onClick={() => fetchLeads()} 
+                                            disabled={!customStart || !customEnd || loading}
+                                            variant="secondary"
+                                            className="gap-2"
+                                        >
+                                            {loading ? <Loader2 className="h-4 w-4 animate-spin"/> : <RefreshCw className="h-4 w-4"/>}
+                                            Apply
+                                        </Button>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     </div>
                 </CardContent>
             </Card>
 
-            {/* Results Table */}
-            <Card className="shadow-lg">
+            {/* Stats Summary */}
+            <Card className="shadow-sm border-l-4 border-l-green-600 bg-white">
+                <CardContent className="p-6">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-sm font-medium text-gray-500 flex items-center gap-1">
+                                <TrendingUp className="h-4 w-4 text-green-600" />
+                                {displayLabel}
+                            </p>
+                            <p className="text-3xl font-extrabold text-gray-900 mt-2">
+                                {loading ? <Loader2 className="h-6 w-6 animate-spin text-gray-400" /> : formatCurrency(grandTotal)}
+                            </p>
+                        </div>
+                        {/* Optional: Add export button here */}
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* Data Table */}
+            <Card className="shadow-lg border-gray-200">
                 <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-xl">
-                        <BarChart3 className="h-5 w-5 text-gray-700" />
-                        Transactions List ({filteredData.length})
+                    <CardTitle className="text-lg flex items-center justify-between">
+                        <span>Transactions ({filteredData.length})</span>
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
                     {loading ? (
                         <div className="p-10 text-center text-gray-500">
                             <Loader2 className="h-8 w-8 animate-spin mx-auto mb-3 text-indigo-500" />
-                            Loading transactions...
+                            Loading data...
                         </div>
                     ) : filteredData.length === 0 ? (
-                        <div className="p-10 text-center text-gray-500">
-                            <p className="text-lg font-semibold">No Data Found</p>
-                            <p className="text-sm text-gray-500">No disbursements found for the selected period.</p>
+                        <div className="p-16 text-center text-gray-500">
+                            <Filter className="h-10 w-10 mx-auto text-gray-300 mb-3" />
+                            <p className="text-lg font-medium">No records found</p>
+                            <p className="text-sm">Try adjusting your search or date filters.</p>
                         </div>
                     ) : (
-                        <div className="overflow-x-auto max-h-[600px]">
+                        <div className="overflow-x-auto">
                             <Table>
-                                <TableHeader className="bg-gray-50 sticky top-0 z-10 shadow-sm">
+                                <TableHeader className="bg-gray-50">
                                     <TableRow>
-                                        <TableHead className="w-[50px] font-bold text-gray-700">#</TableHead>
-                                        <TableHead className="font-bold text-gray-700">App No.</TableHead>
-                                        <TableHead className="font-bold text-gray-700">Telecaller</TableHead>
-                                        <TableHead className="font-bold text-gray-700">Customer</TableHead>
-                                        <TableHead className="font-bold text-gray-700">Disbursed Date</TableHead>
-                                        <TableHead className="font-bold text-gray-700">Bank</TableHead>
-                                        <TableHead className="text-right font-bold text-gray-700">Amount</TableHead>
+                                        <TableHead className="w-[50px] font-bold">#</TableHead>
+                                        <TableHead className="font-bold">App No.</TableHead>
+                                        <TableHead className="font-bold">Telecaller</TableHead>
+                                        <TableHead className="font-bold">Customer</TableHead>
+                                        <TableHead className="font-bold">Disbursed On</TableHead>
+                                        <TableHead className="font-bold">Bank</TableHead>
+                                        <TableHead className="text-right font-bold">Amount</TableHead>
                                         <TableHead className="w-[50px] text-center">Action</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {filteredData.map((item, index) => (
-                                        <TableRow key={item.id} className="hover:bg-green-50 transition-colors">
+                                        <TableRow key={item.id} className="hover:bg-gray-50">
                                             <TableCell className="text-gray-500 text-xs">{index + 1}</TableCell>
-                                            <TableCell className="font-medium text-xs font-mono">{item.application_number || '-'}</TableCell>
-                                            <TableCell className="font-semibold text-blue-700">
-                                                {userMap[item.assigned_to] || 'Unknown'}
+                                            <TableCell className="font-mono text-xs text-gray-600">{item.application_number || '-'}</TableCell>
+                                            <TableCell>
+                                                <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium border-0">
+                                                    {userMap[item.assigned_to] || 'Unknown'}
+                                                </Badge>
                                             </TableCell>
                                             <TableCell>
                                                 <div className="flex flex-col">
-                                                    <span className="font-medium">{item.name}</span>
+                                                    <span className="font-medium text-gray-900">{item.name}</span>
                                                     {item.city && (
                                                         <span className="text-[10px] text-gray-500 flex items-center gap-1">
                                                             <MapPin className="h-3 w-3" /> {item.city}
@@ -346,20 +440,20 @@ export default function TelecallerDisbursementReport() {
                                                     )}
                                                 </div>
                                             </TableCell>
-                                            <TableCell>{formatDate(item.disbursed_at)}</TableCell>
+                                            <TableCell className="text-sm text-gray-600">{formatDate(item.disbursed_at)}</TableCell>
                                             <TableCell>
-                                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 border border-gray-200">
+                                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
                                                     {item.bank_name || 'N/A'}
                                                 </span>
                                             </TableCell>
-                                            <TableCell className="text-right font-bold text-green-700 text-base">
+                                            <TableCell className="text-right font-bold text-green-700">
                                                 {formatCurrency(item.disbursed_amount)}
                                             </TableCell>
                                             <TableCell className="text-center">
                                                 <Button 
                                                     variant="ghost" 
                                                     size="sm" 
-                                                    className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                    className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"
                                                     onClick={() => setDeleteId(item.id)}
                                                 >
                                                     <Trash2 className="h-4 w-4" />
@@ -378,18 +472,14 @@ export default function TelecallerDisbursementReport() {
             <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                        <AlertDialogTitle>Delete Record?</AlertDialogTitle>
                         <AlertDialogDescription>
-                            This will remove the disbursement record. This action can be undone by re-adding the disbursement.
+                            This will remove the disbursement status from this lead.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction 
-                            onClick={handleDelete} 
-                            disabled={isDeleting}
-                            className="bg-red-600 hover:bg-red-700"
-                        >
+                        <AlertDialogAction onClick={handleDelete} disabled={isDeleting} className="bg-red-600 hover:bg-red-700">
                             {isDeleting ? "Deleting..." : "Delete"}
                         </AlertDialogAction>
                     </AlertDialogFooter>
