@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/smart-notifications",
-      "schedule": "30 9-17 * * *" 
+      "schedule": "30 9 * * *"
     }
   ]
 }
