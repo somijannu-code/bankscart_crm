@@ -256,9 +256,9 @@ export default function TelecallerLoginsPage() {
                                             <SelectItem value="HDFC Bank">HDFC Bank</SelectItem>
                                             <SelectItem value="ICICI Bank">ICICI Bank</SelectItem>
                                             <SelectItem value="Axis Bank">Axis Bank</SelectItem>
-                                            <SelectItem value="Kotak Bank">Kotak Bank</SelectItem>
+                                            <SelectItem value="Incred">Incred</SelectItem>
                                             <SelectItem value="IDFC First">IDFC First</SelectItem>
-                                            <SelectItem value="Fi Money">Fi Money</SelectItem>
+                                            <SelectItem value="FINNABLE">FINNABLE</SelectItem>
                                             <SelectItem value="Other">Other</SelectItem>
                                         </SelectContent>
                                     </Select>
