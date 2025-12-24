@@ -22,6 +22,15 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const formatCurrency = (amount: number) => 
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount)
 
+// HELPER: Safe Number Parser (Fixes the concatenation issue)
+const parseAmount = (value: any) => {
+  if (!value) return 0;
+  // Convert to string, remove commas/symbols, then parse to float
+  const cleanString = String(value).replace(/[^0-9.-]+/g, "");
+  const number = parseFloat(cleanString);
+  return isNaN(number) ? 0 : number;
+}
+
 export async function GET(request: Request) {
   try {
     // 1. SECURITY CHECK
@@ -93,7 +102,7 @@ export async function GET(request: Request) {
         .gte('created_at', startOfYesterday)
         .lte('created_at', endOfYesterday)
 
-      // 2. Leads Updated Yesterday (For Status Counts like "Login", "Interested")
+      // 2. Leads Updated Yesterday
       const { data: leadUpdates } = await supabase
         .from('leads')
         .select('assigned_to, status')
@@ -108,7 +117,7 @@ export async function GET(request: Request) {
         .in('assigned_to', staffIds)
         .gte('updated_at', startOfMonth)
         .lte('updated_at', endOfMonth)
-        .eq('status', 'DISBURSED') // Or whatever your disbursed status string is
+        .eq('status', 'DISBURSED')
 
       // B. AGGREGATE STATS
       // -----------------
@@ -147,10 +156,15 @@ export async function GET(request: Request) {
         else if (status === 'DISBURSED') s.DISBURSEDCount++
       })
 
-      // Fill Revenue
+      // Fill Revenue (FIXED CALCULATION)
       revenueLeads?.forEach(l => {
         if(statsMap[l.assigned_to]) {
-          statsMap[l.assigned_to].revenueAchieved += (l.disbursed_amount || l.loan_amount || 0)
+          // 1. Get amount safely (prefer disbursed, fallback to loan)
+          const rawAmount = l.disbursed_amount || l.loan_amount;
+          // 2. Parse it to a real Number (removes commas if string)
+          const cleanAmount = parseAmount(rawAmount);
+          // 3. Add mathematically
+          statsMap[l.assigned_to].revenueAchieved += cleanAmount;
         }
       })
 
@@ -182,7 +196,7 @@ export async function GET(request: Request) {
           dateStr
         })
         emailsSent++
-        await delay(500) // Prevent Rate Limit
+        await delay(500) 
       }
 
       // 2. Send "Global Report" to Admins
@@ -191,7 +205,7 @@ export async function GET(request: Request) {
         
         for (const admin of admins) {
           await resend.emails.send({
-            from: 'Bankscart CRM <reports@crm.bankscart.com>', // Verify Domain!
+            from: 'Bankscart CRM <reports@crm.bankscart.com>',
             to: admin.email,
             subject: `📊 Global Daily Report - ${dateStr}`,
             html: adminHTML
@@ -218,7 +232,7 @@ export async function GET(request: Request) {
 async function sendTelecallerReport({ recipient, stats, rank, totalStaff, topPerformer, daysRemaining, dateStr }: any) {
   
   // Logic needed for Coach's Analysis
-  const target = recipient.monthly_target || 3000000
+  const target = parseAmount(recipient.monthly_target || 3000000)
   const gap = Math.max(0, target - stats.revenueAchieved)
   const dailyRequired = gap / daysRemaining
   
@@ -314,7 +328,7 @@ async function sendTelecallerReport({ recipient, stats, rank, totalStaff, topPer
   `
 
   await resend.emails.send({
-    from: 'Bankscart CRM <reports@crm.bankscart.com>', // UPDATE THIS
+    from: 'Bankscart CRM <reports@crm.bankscart.com>', 
     to: recipient.email,
     subject: `🎯 Performance Coach - ${dateStr}`,
     html: html
