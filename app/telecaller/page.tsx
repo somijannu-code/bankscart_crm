@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Phone, Users, Calendar, CheckCircle, Clock, TrendingUp, Rocket, BarChart3, RefreshCw, Plus, Trophy, FileText } from "lucide-react"
+import { Phone, Users, Clock, CheckCircle, TrendingUp, Rocket, BarChart3, RefreshCw, Plus, Trophy, FileText } from "lucide-react"
 import { TodaysTasks } from "@/components/todays-tasks"
 import { useRouter } from "next/navigation"
 import { AttendanceWidget } from "@/components/attendance-widget"
@@ -100,19 +100,15 @@ export default function TelecallerDashboard() {
             .eq("status", "completed")
             .gte("completed_at", startOfDay),
 
-          // User Profile (For Target)
-          supabase.from("users").select("monthly_target").eq("id", user.id).single(),
+          // User Profile (For Target) - FIX: Changed .single() to .maybeSingle()
+          supabase.from("users").select("monthly_target").eq("id", user.id).maybeSingle(),
 
-          // --- FIX APPLIED HERE ---
-          // 1. Use .ilike() for case-insensitive status check
-          // 2. Use 'disbursed_at' OR 'updated_at' fallback
+          // Disbursed Leads
           supabase
             .from("leads")
             .select("disbursed_amount")
             .eq("assigned_to", user.id)
-            .ilike("status", "disbursed") // Matches 'Disbursed', 'DISBURSED', 'disbursed'
-            // We use 'gte' on disbursed_at. If your old data doesn't have disbursed_at, 
-            // you might temporarily change this back to 'updated_at', but disbursed_at is accurate.
+            .ilike("status", "disbursed") 
             .gte("disbursed_at", startOfMonth)
         ])
 
@@ -134,7 +130,6 @@ export default function TelecallerDashboard() {
 
         let achievedAmount = 0;
         if (disbursedLeadsResponse.status === 'fulfilled' && disbursedLeadsResponse.value.data) {
-            // FIX: Ensure we treat amount as Number explicitly
             achievedAmount = disbursedLeadsResponse.value.data.reduce((sum: number, lead: any) => {
               return sum + Number(lead.disbursed_amount || 0);
             }, 0);
