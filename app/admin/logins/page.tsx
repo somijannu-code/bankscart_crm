@@ -16,7 +16,7 @@ export default function AdminLoginsPage() {
     const [logins, setLogins] = useState<any[]>([])
     
     // Filters
-    const [dateFilter, setDateFilter] = useState("today")
+    const [dateFilter, setDateFilter] = useState("month")
     const [searchQuery, setSearchQuery] = useState("")
     const [selectedBank, setSelectedBank] = useState("all")
 
@@ -25,13 +25,13 @@ export default function AdminLoginsPage() {
         const fetchData = async () => {
             setLoading(true)
             
-            // CHANGED: Fetching from 'logins' table instead of 'leads'
+            // Fetch from 'logins' table
             let query = supabase
                 .from('logins') 
                 .select(`
                     id, name, phone, bank_name, updated_at, notes, status,
                     assigned_to,
-                    users:assigned_to ( full_name )
+                    users:assigned_to ( full_name, email )
                 `)
                 .order('updated_at', { ascending: false })
 
@@ -59,9 +59,9 @@ export default function AdminLoginsPage() {
     const filteredLogins = useMemo(() => {
         return logins.filter(l => {
             const matchesSearch = 
-                l.name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                l.phone?.includes(searchQuery) ||
-                l.users?.full_name?.toLowerCase().includes(searchQuery.toLowerCase());
+                (l.name && l.name.toLowerCase().includes(searchQuery.toLowerCase())) || 
+                (l.phone && l.phone.includes(searchQuery)) ||
+                (l.users?.full_name && l.users.full_name.toLowerCase().includes(searchQuery.toLowerCase()));
             
             const matchesBank = selectedBank === 'all' || l.bank_name === selectedBank;
 
@@ -79,34 +79,29 @@ export default function AdminLoginsPage() {
         return stats
     }, [filteredLogins])
 
-    // --- NEW LOGIC: Today's Top Performers ---
-    const todayTopTelecallers = useMemo(() => {
-        const todayStr = new Date().toDateString()
-        
-        // 1. Filter only today's logins
-        const todayLogins = logins.filter(l => new Date(l.updated_at).toDateString() === todayStr)
-
-        // 2. Count per user
+    // 3. TOP PERFORMERS LOGIC
+    const topTelecallers = useMemo(() => {
         const counts: Record<string, number> = {}
-        todayLogins.forEach(l => {
-            const name = l.users?.full_name || 'Unknown'
+        
+        filteredLogins.forEach(l => {
+            // Use email if name is missing
+            const name = l.users?.full_name || l.users?.email || 'Unknown User'
             counts[name] = (counts[name] || 0) + 1
         })
 
-        // 3. Sort Descending and take top 3
         return Object.entries(counts)
             .sort(([, a], [, b]) => b - a)
             .slice(0, 3)
-    }, [logins]) 
+    }, [filteredLogins])
 
-    // 3. EXPORT TO CSV
+    // 4. EXPORT TO CSV
     const downloadCSV = () => {
         const headers = ["Telecaller", "Customer Name", "Phone", "Bank", "Date", "Notes"]
         const rows = filteredLogins.map(l => [
             l.users?.full_name || "Unknown",
-            l.name,
-            l.phone,
-            l.bank_name,
+            l.name || "-",
+            l.phone || "-",
+            l.bank_name || "-",
             new Date(l.updated_at).toLocaleDateString(),
             `"${l.notes || ''}"`
         ])
@@ -173,20 +168,20 @@ export default function AdminLoginsPage() {
                     </CardContent>
                 </Card>
 
-                {/* Card 2: Today's Top Performers */}
+                {/* Card 2: Top Performers */}
                 <Card className="shadow-sm border-l-4 border-amber-500">
                     <CardContent className="p-5">
                         <div className="flex items-center gap-3 mb-3">
                             <div className="p-2 bg-amber-50 rounded-lg text-amber-600">
                                 <Trophy className="h-5 w-5" />
                             </div>
-                            <span className="text-sm font-medium text-gray-500">Today's Top Logins</span>
+                            <span className="text-sm font-medium text-gray-500">Top Performers</span>
                         </div>
                         <div className="space-y-2">
-                            {todayTopTelecallers.length > 0 ? (
-                                todayTopTelecallers.map(([name, count], i) => (
+                            {topTelecallers.length > 0 ? (
+                                topTelecallers.map(([name, count], i) => (
                                     <div key={name} className="flex justify-between items-center text-sm">
-                                        <span className="font-medium text-gray-700">
+                                        <span className="font-medium text-gray-700 truncate max-w-[120px]" title={name}>
                                             {i + 1}. {name}
                                         </span>
                                         <Badge variant="secondary" className="bg-amber-100 text-amber-800 font-bold">
@@ -195,7 +190,7 @@ export default function AdminLoginsPage() {
                                     </div>
                                 ))
                             ) : (
-                                <p className="text-xs text-gray-400">No logins recorded today</p>
+                                <p className="text-xs text-gray-400">No data available</p>
                             )}
                         </div>
                     </CardContent>
@@ -248,7 +243,7 @@ export default function AdminLoginsPage() {
                                 filteredLogins.map((item) => (
                                     <TableRow key={item.id} className="hover:bg-gray-50 transition-colors">
                                         <TableCell>
-                                            <div className="font-semibold text-gray-900">{item.users?.full_name || 'Unknown'}</div>
+                                            <div className="font-semibold text-gray-900">{item.users?.full_name || item.users?.email || 'Unknown'}</div>
                                             <div className="text-xs text-gray-400">ID: {item.assigned_to?.slice(0,6)}...</div>
                                         </TableCell>
                                         <TableCell>
