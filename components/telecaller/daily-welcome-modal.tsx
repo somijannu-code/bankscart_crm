@@ -2,7 +2,13 @@
 
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Dialog, DialogContent } from "@/components/ui/dialog"
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogDescription 
+} from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Trophy, Sparkles } from "lucide-react"
@@ -20,10 +26,9 @@ export function DailyWelcomeModal() {
   const supabase = createClient()
   const { toast } = useToast()
 
-  // --- UPDATED USE EFFECT ---
   useEffect(() => {
     const checkAndInit = async () => {
-      // 1. Check LocalStorage to see if user already saw this today
+      // 1. Check LocalStorage
       const today = new Date().toISOString().split('T')[0]
       const seenKey = `seen_welcome_${today}`
       const hasSeen = localStorage.getItem(seenKey)
@@ -33,14 +38,12 @@ export function DailyWelcomeModal() {
         return
       }
 
-      // 2. Fetch Top Performer using the Secure RPC Function
-      // This bypasses RLS so every telecaller can see who the winner is
+      // 2. Fetch Top Performer
       const { data, error } = await supabase.rpc('get_top_performer')
 
       if (data) {
-        setTopPerformer(data) // { name: "Name", amount: 10000 }
+        setTopPerformer(data)
       } else {
-        // Fallback if no sales yet this month or error
         setTopPerformer({ name: "No one yet", amount: 0 })
       }
 
@@ -51,13 +54,11 @@ export function DailyWelcomeModal() {
 
     checkAndInit()
   }, [])
-  // --------------------------
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!prediction.trim()) return
 
-    // Save to LocalStorage so it doesn't show again today
     const today = new Date().toISOString().split('T')[0]
     localStorage.setItem(`seen_welcome_${today}`, 'true')
 
@@ -74,10 +75,18 @@ export function DailyWelcomeModal() {
 
   return (
     <Dialog open={isOpen} onOpenChange={() => {}}> 
-      {/* onOpenChange empty prevents closing by clicking outside */}
       <DialogContent className="sm:max-w-md text-center bg-gradient-to-br from-indigo-50 to-white border-2 border-indigo-100 shadow-2xl">
         
-        {/* Floating Flowers Animation Background (CSS-based) */}
+        {/* --- ACCESSIBILITY FIX START --- */}
+        <DialogHeader>
+          <DialogTitle className="sr-only">Daily Top Performer Announcement</DialogTitle>
+          <DialogDescription className="sr-only">
+            See the top performer of the month and enter your prediction for the next champion.
+          </DialogDescription>
+        </DialogHeader>
+        {/* --- ACCESSIBILITY FIX END --- */}
+
+        {/* Floating Flowers Animation */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none z-0 opacity-40">
            {Array.from({ length: 15 }).map((_, i) => (
              <span key={i} className="absolute animate-fall" style={{
@@ -137,7 +146,6 @@ export function DailyWelcomeModal() {
           </form>
         </div>
         
-        {/* CSS for falling animation */}
         <style jsx global>{`
           @keyframes fall {
             0% { transform: translateY(-20px) rotate(0deg); opacity: 0; }
