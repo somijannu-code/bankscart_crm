@@ -289,9 +289,10 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [lastCallTimestamps, setLastCallTimestamps] = useState<Record<string, string | null>>({})
   const [telecallerStatus, setTelecallerStatus] = useState<Record<string, boolean>>({})
 
-  // Fetch Data
+  // --- UPDATED FETCH LOGIC: WITH BATCHING ---
   useEffect(() => {
     const fetchData = async () => {
+      // 1. Fetch Attendance (No changes needed, typically small data)
       try {
         const today = new Date().toISOString().split('T')[0]
         const { data: attendanceRecords } = await supabase
@@ -310,22 +311,40 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         console.error("Error fetching telecaller status:", err)
       }
 
+      // 2. Fetch Call Logs (BATCHED)
       const leadIds = leads.map(l => l.id);
       if (leadIds.length === 0) return;
 
       try {
-        const { data: callLogs, error } = await supabase
-          .from("call_logs")
-          .select("lead_id, created_at")
-          .in("lead_id", leadIds)
-          .order("created_at", { ascending: false });
-
-        if (error) return;
+        // --- FIX: Batch the call logs request to prevent URL Too Long errors ---
+        const BATCH_SIZE = 100; // Safe chunk size
+        const allCallLogs: any[] = [];
         
+        // Loop through leadIds in chunks
+        for (let i = 0; i < leadIds.length; i += BATCH_SIZE) {
+            const chunk = leadIds.slice(i, i + BATCH_SIZE);
+            
+            const { data, error } = await supabase
+                .from("call_logs")
+                .select("lead_id, created_at")
+                .in("lead_id", chunk)
+                .order("created_at", { ascending: false });
+
+            if (error) {
+                console.error("Error fetching chunk of call logs:", error);
+                // Continue to next chunk even if one fails
+                continue;
+            }
+            if (data) {
+                allCallLogs.push(...data);
+            }
+        }
+
+        // Process combined logs
         const latestCalls: Record<string, string | null> = {};
         const seenLeadIds = new Set<string>();
 
-        for (const log of callLogs) {
+        for (const log of allCallLogs) {
           if (!seenLeadIds.has(log.lead_id)) {
             latestCalls[log.lead_id] = log.created_at;
             seenLeadIds.add(log.lead_id);
