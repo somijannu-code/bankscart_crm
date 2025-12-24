@@ -4,8 +4,8 @@ import { TelecallerSidebar } from "@/components/telecaller-sidebar"
 import { CallTrackingProvider } from "@/context/call-tracking-context"
 import { PushSubscriber } from "@/components/push-subscriber" 
 import { TelecallerTicker } from "@/components/telecaller-ticker"
-// IMPORT THE NEW MODAL
 import { DailyWelcomeModal } from "@/components/telecaller/daily-welcome-modal"
+import { Watermark } from "@/components/watermark" // <--- 1. IMPORT THIS
 
 export default function TelecallerLayout({
   children,
@@ -15,9 +15,9 @@ export default function TelecallerLayout({
   return (
     <AuthGuard requiredRole="telecaller">
       <PushSubscriber />
+      <Watermark /> {/* <--- 2. ADD COMPONENT HERE */}
       <CallTrackingProvider>
         
-        {/* ADD THE MODAL HERE - It handles its own visibility state */}
         <DailyWelcomeModal />
         
         <div className="flex h-screen bg-gray-50">
@@ -31,7 +31,7 @@ export default function TelecallerLayout({
                </div>
             </div>
 
-            <main className="flex-1 overflow-y-auto pt-4">
+            <main className="flex-1 overflow-y-auto pt-4 relative">
               {children}
             </main>
           </div>
