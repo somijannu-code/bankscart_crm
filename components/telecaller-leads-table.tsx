@@ -5,8 +5,7 @@ import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { 
   User, Building, Calendar, Clock, Eye, Phone, Mail, 
-  Search, Filter, ChevronDown, ChevronUp, Download,
-  MessageSquare
+  Search, ChevronDown, ChevronUp, MessageSquare
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -16,12 +15,6 @@ import { Input } from "@/components/ui/input"
 import { LeadStatusDialog } from "@/components/lead-status-dialog"
 import { QuickActions } from "@/components/quick-actions"
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination"
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import Link from "next/link"
 
 interface Lead {
@@ -62,67 +55,58 @@ export function TelecallerLeadsTable({
   const [priorityFilter, setPriorityFilter] = useState<string>("all")
   const [sortField, setSortField] = useState<string>("created_at")
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
+  
+  // Note: Since the filter UI is removed, these defaults control what is visible.
+  // Add 'company', 'actions' etc. to true if you want them always shown.
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
     name: true,
     contact: true,
+    company: true, // Added default true since toggle is gone
     status: true,
     priority: true,
     created: true,
     loanAmount: true,
+    lastContacted: true, // Added default true since toggle is gone
+    actions: true // Added default true since toggle is gone
   })
   const [isCallInitiated, setIsCallInitiated] = useState(false) 
   
-  // --- ADDED STATE FOR TELECALLER NAME ---
   const [telecallerName, setTelecallerName] = useState("ICICI Telecaller")
-  // ---------------------------------------
 
   const supabase = createClient()
 
-  // --- ADDED useEffect TO FETCH CURRENT USER NAME ---
   useEffect(() => {
     const fetchUser = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        // Attempt to get the name from user_metadata (common Supabase field)
         const name = user.user_metadata.name 
-          // Fallback to email prefix if name isn't set
           || user.email?.split('@')[0]
-          // Final fallback
           || "ICICI Telecaller"
         setTelecallerName(name)
       }
     }
     fetchUser()
   }, [supabase])
-  // --------------------------------------------------
 
-  // Add safe value getters
   const getSafeValue = (value: any, defaultValue: string = 'N/A') => {
     return value ?? defaultValue
   }
 
-  // Function to generate the WhatsApp link
   const getWhatsAppLink = (phoneNumber: string) => {
     const cleanedPhone = phoneNumber.replace(/\D/g, '')
 
-    // --- UPDATED MESSAGE TO USE DYNAMIC STATE ---
-    const message = `Dear *Patron* 
-
-Thank you for showing interest with the *ICICI Bank Personal Loan!* 
-We’re excited to offer you one of the best deals with attractive *ROI (9.99 %) and Zero processing fee* and for a quick *approval*
+    const message = `Dear *Patron* Thank you for showing interest with the *ICICI Bank Personal Loan!* We’re excited to offer you one of the best deals with attractive *ROI (9.99 %) and Zero processing fee* and for a quick *approval*
 
 Please share below documents. 
  Adhaar,
  PAN,
  3 Salary Slips & months and Bank statement`
-    // --------------------------------------------
     
     const encodedMessage = encodeURIComponent(message)
     
     return `https://wa.me/${cleanedPhone}?text=${encodedMessage}`
   }
 
-  // Filter and sort leads
   const filteredLeads = leads.filter(lead => {
     const matchesSearch = searchTerm === "" || 
       lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -328,27 +312,7 @@ Please share below documents.
             </SelectContent>
           </Select>
           
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="ml-auto">
-                Columns <ChevronDown className="ml-2 h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {Object.entries(visibleColumns).map(([key, value]) => (
-                <DropdownMenuCheckboxItem
-                  key={key}
-                  className="capitalize"
-                  checked={value}
-                  onCheckedChange={(checked) =>
-                    setVisibleColumns({ ...visibleColumns, [key]: checked })
-                  }
-                >
-                  {key.replace(/([A-Z])/g, ' $1').toLowerCase()}
-                </DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* Columns dropdown has been removed here */}
         </div>
       </div>
 
@@ -430,7 +394,7 @@ Please share below documents.
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-green-500 hover:text-green-600 transition-colors ml-1"
-                          onClick={(e) => e.stopPropagation()} // Prevent row click event
+                          onClick={(e) => e.stopPropagation()}
                           title="WhatsApp Chat"
                         >
                           <MessageSquare className="h-4 w-4" />
@@ -570,7 +534,7 @@ Please share below documents.
           open={isStatusDialogOpen}
           onOpenChange={(open) => {
             setIsStatusDialogOpen(open)
-            if (!open) setIsCallInitiated(false) // Reset when dialog is closed
+            if (!open) setIsCallInitiated(false)
           }}
           onStatusUpdate={handleStatusUpdate}
           isCallInitiated={isCallInitiated}
