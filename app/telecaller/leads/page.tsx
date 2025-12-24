@@ -1,18 +1,20 @@
 import { createClient } from "@/lib/supabase/server"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Users, Filter, BarChart3, TrendingUp, CheckCircle, Clock, AlertCircle, LogIn } from "lucide-react"
+import { Users, Filter, BarChart3, TrendingUp, Clock, LogIn } from "lucide-react"
 import { TelecallerLeadsTable } from "@/components/telecaller-leads-table"
 import { TelecallerLeadFilters } from "@/components/telecaller-lead-filters"
 import { redirect } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 
+// Define search params interface
 interface SearchParams {
   status?: string
   priority?: string
   search?: string
   source?: string
   date_range?: string
+  page?: string // Added page for pagination
 }
 
 export default async function TelecallerLeadsPage({
@@ -22,6 +24,7 @@ export default async function TelecallerLeadsPage({
 }) {
   const supabase = await createClient()
 
+  // 1. Check Authentication
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -30,30 +33,58 @@ export default async function TelecallerLeadsPage({
     redirect("/auth/login")
   }
 
-  // Build query with filters for telecaller's assigned leads
+  // 2. Pagination Logic
+  const page = Number(searchParams.page) || 1
+  const pageSize = 20
+  const from = (page - 1) * pageSize
+  const to = from + pageSize - 1
+
+  // =========================================================
+  // QUERY 1: FETCH STATS (Lightweight - only Status column)
+  // This runs fast even with thousands of leads
+  // =========================================================
+  const { data: statsData } = await supabase
+    .from("leads")
+    .select("status")
+    .eq("assigned_to", user.id)
+
+  const leadStats = {
+    total: statsData?.length || 0,
+    new: statsData?.filter(lead => ['New Lead', 'new'].includes(lead.status)).length || 0,
+    contacted: statsData?.filter(lead => ['Contacted', 'contacted'].includes(lead.status)).length || 0,
+    logins: statsData?.filter(lead => ['Login', 'Login Done', 'login'].includes(lead.status)).length || 0,
+    converted: statsData?.filter(lead => ['Disbursed', 'converted'].includes(lead.status)).length || 0,
+  }
+
+  // =========================================================
+  // QUERY 2: FETCH PAGINATED LEADS (Heavy Data)
+  // Only fetches the 20 rows needed for the screen
+  // =========================================================
   let query = supabase
     .from("leads")
-    .select("*")
+    .select("*", { count: "exact" }) // Get total count for pagination
     .eq("assigned_to", user.id)
     .order("created_at", { ascending: false })
+    .range(from, to) // <--- CRITICAL FIX: Only fetch current page
 
-  // Apply filters
-  if (searchParams.status) {
+  // Apply Filters to the Data Query
+  if (searchParams.status && searchParams.status !== "all") {
     query = query.eq("status", searchParams.status)
   }
-  if (searchParams.priority) {
+  if (searchParams.priority && searchParams.priority !== "all") {
     query = query.eq("priority", searchParams.priority)
   }
   if (searchParams.source) {
     query = query.eq("source", searchParams.source)
   }
   if (searchParams.search) {
+    // Search across multiple columns
     query = query.or(
-      `name.ilike.%${searchParams.search}%,email.ilike.%${searchParams.search}%,phone.ilike.%${searchParams.search}%,company.ilike.%${searchParams.search}%`,
+      `name.ilike.%${searchParams.search}%,email.ilike.%${searchParams.search}%,phone.ilike.%${searchParams.search}%,company.ilike.%${searchParams.search}%`
     )
   }
 
-  // Date range filter
+  // Date Range Filter
   if (searchParams.date_range) {
     const today = new Date()
     let startDate = new Date()
@@ -69,21 +100,11 @@ export default async function TelecallerLeadsPage({
         startDate.setDate(today.getDate() - 30)
         break
     }
-    
     query = query.gte("created_at", startDate.toISOString())
   }
 
-  const { data: leads } = await query
-
-  // Calculate lead statistics
-  const leadStats = {
-    total: leads?.length || 0,
-    new: leads?.filter(lead => ['New Lead', 'new'].includes(lead.status)).length || 0,
-    contacted: leads?.filter(lead => ['Contacted', 'contacted'].includes(lead.status)).length || 0,
-    // Count both "Login" and "Login Done" as Logins
-    logins: leads?.filter(lead => ['Login', 'Login Done', 'login'].includes(lead.status)).length || 0,
-    converted: leads?.filter(lead => ['Disbursed', 'converted'].includes(lead.status)).length || 0,
-  }
+  // Execute Data Query
+  const { data: leads, count } = await query
 
   return (
     <div className="p-6 space-y-6">
@@ -99,7 +120,7 @@ export default async function TelecallerLeadsPage({
         </Button>
       </div>
 
-      {/* Stats Cards - Replaced generic component with inline cards for custom click behavior */}
+      {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         
         {/* Total Leads */}
@@ -138,7 +159,7 @@ export default async function TelecallerLeadsPage({
           </CardContent>
         </Card>
 
-        {/* CLICKABLE LOGINS CARD */}
+        {/* Logins Card */}
         <Link href="/telecaller/logins" className="block transition-transform hover:scale-105">
           <Card className="bg-indigo-50 border-indigo-200 cursor-pointer hover:shadow-md">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -154,7 +175,7 @@ export default async function TelecallerLeadsPage({
 
       </div>
 
-      {/* Enhanced Filters Section */}
+      {/* Filters Section */}
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
@@ -163,7 +184,7 @@ export default async function TelecallerLeadsPage({
               Filters & Search
             </CardTitle>
             <div className="text-sm text-gray-500">
-              {leads?.length} leads found
+              Showing {leads?.length || 0} of {count} leads
             </div>
           </div>
         </CardHeader>
@@ -172,19 +193,21 @@ export default async function TelecallerLeadsPage({
         </CardContent>
       </Card>
 
-      {/* Leads Table */}
+      {/* Leads Table - Now receives paginated data and total counts */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Users className="h-5 w-5" />
             My Assigned Leads
-            <span className="text-lg font-normal text-gray-500">
-              ({leads?.length || 0})
-            </span>
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <TelecallerLeadsTable leads={leads || []} />
+          <TelecallerLeadsTable 
+            leads={leads || []} 
+            totalCount={count || 0}
+            currentPage={page}
+            pageSize={pageSize}
+          />
         </CardContent>
       </Card>
     </div>
