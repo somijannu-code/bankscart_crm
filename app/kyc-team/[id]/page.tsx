@@ -63,10 +63,10 @@ const RESIDENCE_TYPE_OPTIONS = [
 const BANK_OPTIONS = [
     { value: "ICICI Bank", label: "ICICI Bank" },
     { value: "HDFC Bank", label: "HDFC Bank" },
-    { value: "Fi Money", label: "Fi Money" },
-    { value: "Kotak Mahindra", label: "Kotak Mahindra" },
+    { value: "Incred", label: "Incred" },
+    { value: "IDFC First", label: "IDFC First" },
     { value: "Axis Bank", label: "Axis Bank" },
-    { value: "SBI", label: "SBI" },
+    { value: "FINNABLE", label: "FINNABLE" },
     { value: "Other", label: "Other" }
 ];
 
