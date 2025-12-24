@@ -12,8 +12,9 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
+     * - /api (API routes - crucial for Cron jobs and Webhooks)
      * - Any file with a common extension (css, js, images, fonts, etc.)
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|css|js|woff|woff2|ttf|eot|pdf|csv|xlsx|json|map)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api|.*\\.(?:svg|png|jpg|jpeg|gif|webp|css|js|woff|woff2|ttf|eot|pdf|csv|xlsx|json|map)$).*)",
   ],
 }
