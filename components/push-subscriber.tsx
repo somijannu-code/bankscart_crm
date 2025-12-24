@@ -20,31 +20,52 @@ export function PushSubscriber() {
 
   useEffect(() => {
     async function registerServiceWorker() {
-      if ('serviceWorker' in navigator && 'PushManager' in window && PUBLIC_KEY) {
+      // 1. Check if Env Var exists
+      if (!PUBLIC_KEY) {
+        console.error("VAPID Public Key is missing in Environment Variables!");
+        return;
+      }
+
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
         try {
-          // 1. Register SW
+          // 2. Register SW
           const registration = await navigator.serviceWorker.register('/sw.js')
           
-          // 2. Ask for Permission
+          // 3. Ask Permission
           const permission = await Notification.requestPermission()
           if (permission !== 'granted') return
 
-          // 3. Subscribe to Push Service
+          // 4. Subscribe
           const subscription = await registration.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: urlBase64ToUint8Array(PUBLIC_KEY)
           })
 
-          // 4. Save Subscription to Database
+          // 5. Serialize safely using .toJSON()
+          // This avoids the complex binary conversion errors causing the 400 Bad Request
+          const subJson = subscription.toJSON()
+
+          if (!subJson.keys?.p256dh || !subJson.keys?.auth) {
+            console.error("Failed to generate subscription keys")
+            return
+          }
+
+          // 6. Save to Database
           const { data: { user } } = await supabase.auth.getUser()
+          
           if (user) {
-             await supabase.from('push_subscriptions').upsert({
+             const { error } = await supabase.from('push_subscriptions').upsert({
                user_id: user.id,
-               // Serialize the subscription object safely
-               endpoint: subscription.endpoint,
-               p256dh_key: btoa(String.fromCharCode.apply(null, new Uint8Array(subscription.getKey('p256dh')!))),
-               auth_key: btoa(String.fromCharCode.apply(null, new Uint8Array(subscription.getKey('auth')!)))
+               endpoint: subJson.endpoint,
+               p256dh_key: subJson.keys.p256dh,
+               auth_key: subJson.keys.auth
              }, { onConflict: 'endpoint' })
+
+             if (error) {
+               console.error("Supabase Save Error:", error)
+             } else {
+               console.log("✅ Device Subscribed Successfully!")
+             }
           }
 
         } catch (error) {
@@ -56,5 +77,5 @@ export function PushSubscriber() {
     registerServiceWorker()
   }, [])
 
-  return null // This component is invisible
+  return null
 }
