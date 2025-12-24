@@ -13,8 +13,8 @@ export interface AttendanceRecord {
   break_hours: string | null
   status: string
   notes: string | null
-  location_check_in?: any // Added to interface
-  ip_check_in?: string | null // Added to interface
+  location_check_in?: any 
+  ip_check_in?: string | null 
 }
 
 export class AttendanceService {
@@ -29,12 +29,11 @@ export class AttendanceService {
     return AttendanceService.instance
   }
 
-  // UPDATED: Added location parameter
   async checkIn(userId: string, notes?: string, location?: string): Promise<AttendanceRecord> {
     const supabase = createClient()
     const now = new Date().toISOString()
     
-    // Optional: Try to get IP address (Client-side fetch)
+    // Optional: Try to get IP address
     let ipAddress = null;
     try {
         const res = await fetch('https://api.ipify.org?format=json');
@@ -54,7 +53,6 @@ export class AttendanceService {
           status: "present",
           notes: notes || null,
           updated_at: now,
-          // UPDATED: Insert Location (as JSON) and IP
           location_check_in: location ? { coordinates: location } : null,
           ip_check_in: ipAddress
         },
@@ -78,7 +76,7 @@ export class AttendanceService {
       .select()
       .eq("user_id", userId)
       .eq("date", new Date().toISOString().split("T")[0])
-      .single()
+      .maybeSingle() // Use maybeSingle to avoid 406 error if checking out without checkin (rare edge case)
 
     if (!attendance) {
       throw new Error("No check-in record found for today")
@@ -125,7 +123,7 @@ export class AttendanceService {
       .select()
       .eq("user_id", userId)
       .eq("date", new Date().toISOString().split("T")[0])
-      .single()
+      .maybeSingle()
 
     if (!attendance) {
       throw new Error("Please check in first")
@@ -158,7 +156,7 @@ export class AttendanceService {
       .select()
       .eq("user_id", userId)
       .eq("date", new Date().toISOString().split("T")[0])
-      .single()
+      .maybeSingle()
 
     if (!attendance) {
       throw new Error("No attendance record found")
@@ -182,6 +180,7 @@ export class AttendanceService {
     return data
   }
 
+  // --- FIX IS HERE ---
   async getTodayAttendance(userId: string): Promise<AttendanceRecord | null> {
     const supabase = await createClient()
 
@@ -190,13 +189,13 @@ export class AttendanceService {
       .select()
       .eq("user_id", userId)
       .eq("date", new Date().toISOString().split("T")[0])
-      .single()
+      .maybeSingle() // <--- CHANGED FROM .single() TO .maybeSingle()
 
-    if (error && error.code !== "PGRST116") {
+    if (error) {
       throw error
     }
 
-    return data
+    return data // This will be null if no rows, which is what we want
   }
 
   async getAttendanceHistory(userId: string, startDate: string, endDate: string): Promise<AttendanceRecord[]> {
