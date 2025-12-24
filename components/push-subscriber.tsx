@@ -20,52 +20,35 @@ export function PushSubscriber() {
 
   useEffect(() => {
     async function registerServiceWorker() {
-      // 1. Check if Env Var exists
       if (!PUBLIC_KEY) {
-        console.error("VAPID Public Key is missing in Environment Variables!");
-        return;
+        console.error("VAPID Public Key is missing!")
+        return
       }
 
       if ('serviceWorker' in navigator && 'PushManager' in window) {
         try {
-          // 2. Register SW
           const registration = await navigator.serviceWorker.register('/sw.js')
           
-          // 3. Ask Permission
           const permission = await Notification.requestPermission()
           if (permission !== 'granted') return
 
-          // 4. Subscribe
           const subscription = await registration.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: urlBase64ToUint8Array(PUBLIC_KEY)
           })
 
-          // 5. Serialize safely using .toJSON()
-          // This avoids the complex binary conversion errors causing the 400 Bad Request
           const subJson = subscription.toJSON()
 
-          if (!subJson.keys?.p256dh || !subJson.keys?.auth) {
-            console.error("Failed to generate subscription keys")
-            return
-          }
+          if (subJson.keys?.p256dh && subJson.keys?.auth) {
+             // NEW: Call the Secure RPC Function
+             const { error } = await supabase.rpc('save_push_subscription', {
+               p_endpoint: subJson.endpoint,
+               p_p256dh_key: subJson.keys.p256dh,
+               p_auth_key: subJson.keys.auth
+             })
 
-          // 6. Save to Database
-          const { data: { user } } = await supabase.auth.getUser()
-          
-          if (user) {
-             const { error } = await supabase.from('push_subscriptions').upsert({
-               user_id: user.id,
-               endpoint: subJson.endpoint,
-               p256dh_key: subJson.keys.p256dh,
-               auth_key: subJson.keys.auth
-             }, { onConflict: 'endpoint' })
-
-             if (error) {
-               console.error("Supabase Save Error:", error)
-             } else {
-               console.log("✅ Device Subscribed Successfully!")
-             }
+             if (error) console.error("Subscription Error:", error)
+             else console.log("✅ Device Subscribed (via Secure RPC)")
           }
 
         } catch (error) {
