@@ -1,7 +1,14 @@
 import { updateSession } from "@/lib/supabase/middleware"
-import type { NextRequest } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
 export async function middleware(request: NextRequest) {
+  // 1. SAFETY CHECK: If the request is for an API route, skip the auth check completely.
+  // This ensures Cron jobs and Webhooks are never redirected to login.
+  if (request.nextUrl.pathname.startsWith('/api')) {
+    return NextResponse.next()
+  }
+
+  // 2. For all other pages, run the Supabase Session update (Auth check)
   return await updateSession(request)
 }
 
@@ -12,9 +19,8 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - /api (API routes - crucial for Cron jobs and Webhooks)
      * - Any file with a common extension (css, js, images, fonts, etc.)
      */
-    "/((?!_next/static|_next/image|favicon.ico|api|.*\\.(?:svg|png|jpg|jpeg|gif|webp|css|js|woff|woff2|ttf|eot|pdf|csv|xlsx|json|map)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|css|js|woff|woff2|ttf|eot|pdf|csv|xlsx|json|map)$).*)",
   ],
 }
