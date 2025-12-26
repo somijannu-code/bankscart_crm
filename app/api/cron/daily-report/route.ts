@@ -196,7 +196,7 @@ export async function GET(request: Request) {
           dateStr
         })
         emailsSent++
-        await delay(500) 
+        await delay(700) 
       }
 
       // 2. Send "Global Report" to Admins
@@ -211,7 +211,7 @@ export async function GET(request: Request) {
             html: adminHTML
           })
           emailsSent++
-          await delay(200)
+          await delay(700)
         }
       }
 
