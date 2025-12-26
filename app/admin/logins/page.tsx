@@ -109,7 +109,7 @@ export default function AdminLoginsPage() {
 
         return Object.entries(counts)
             .sort(([, a], [, b]) => b - a)
-            .slice(0, 3)
+            .slice(0, 5)
     }, [filteredLogins])
 
     // 4. EXPORT TO CSV
