@@ -77,7 +77,7 @@ export async function GET(request: Request) {
     // =================================================================
     // SCENARIO 1: 9:30 AM - CHECK-IN REMINDERS
     // =================================================================
-    if (currentHour === 9 && currentMinute >= 00 && currentMinute < 60) {
+    if (currentHour === 9 && currentMinute >= 30 && currentMinute < 60) {
       
       // Get all active telecallers
       const { data: telecallers } = await supabase
