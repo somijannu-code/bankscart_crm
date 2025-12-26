@@ -2,21 +2,23 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Loader2, FileCheck, Download, Search, Building2, Trophy, Calendar } from "lucide-react"
+import { Loader2, FileCheck, Download, Search, Building2, Trophy, Calendar, ArrowRightLeft } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
 export default function AdminLoginsPage() {
     const supabase = createClient()
     const [loading, setLoading] = useState(true)
     const [logins, setLogins] = useState<any[]>([])
+    // New State for Transfers
+    const [transfers, setTransfers] = useState<any[]>([])
     
     // Filters
-    const [dateFilter, setDateFilter] = useState("today")
+    const [dateFilter, setDateFilter] = useState("month")
     const [searchQuery, setSearchQuery] = useState("")
     const [selectedBank, setSelectedBank] = useState("all")
 
@@ -25,8 +27,8 @@ export default function AdminLoginsPage() {
         const fetchData = async () => {
             setLoading(true)
             
-            // Fetch from 'logins' table
-            let query = supabase
+            // A. Fetch Logins (Existing Logic)
+            let loginsQuery = supabase
                 .from('logins') 
                 .select(`
                     id, name, phone, bank_name, updated_at, notes, status,
@@ -35,21 +37,37 @@ export default function AdminLoginsPage() {
                 `)
                 .order('updated_at', { ascending: false })
 
-            // Date Logic
-            const today = new Date()
+            // Date Logic for Logins
+            const todayDate = new Date()
+            const startOfToday = new Date(todayDate.setHours(0,0,0,0)).toISOString()
+
             if (dateFilter === 'today') {
-                query = query.gte('updated_at', new Date(today.setHours(0,0,0,0)).toISOString())
+                loginsQuery = loginsQuery.gte('updated_at', startOfToday)
             } else if (dateFilter === 'month') {
-                query = query.gte('updated_at', new Date(today.getFullYear(), today.getMonth(), 1).toISOString())
+                loginsQuery = loginsQuery.gte('updated_at', new Date(todayDate.getFullYear(), todayDate.getMonth(), 1).toISOString())
             }
 
-            const { data, error } = await query
+            // B. Fetch Today's KYC Transfers (New Logic)
+            // We fetch from 'leads' table where status is 'Transferred to KYC' and updated TODAY
+            const transfersQuery = supabase
+                .from('leads')
+                .select(`
+                    id, name, updated_at,
+                    users:assigned_to ( full_name )
+                `)
+                .eq('status', 'Transferred to KYC')
+                .gte('updated_at', startOfToday) // Always fetch ONLY today's transfers
+                .order('updated_at', { ascending: false })
+
+            // Execute both queries in parallel
+            const [loginsRes, transfersRes] = await Promise.all([loginsQuery, transfersQuery])
             
-            if (error) {
-                console.error("Error fetching logins:", error)
-            } else if (data) {
-                setLogins(data)
-            }
+            if (loginsRes.error) console.error("Error fetching logins:", loginsRes.error)
+            else if (loginsRes.data) setLogins(loginsRes.data)
+
+            if (transfersRes.error) console.error("Error fetching transfers:", transfersRes.error)
+            else if (transfersRes.data) setTransfers(transfersRes.data)
+
             setLoading(false)
         }
         fetchData()
@@ -214,6 +232,38 @@ export default function AdminLoginsPage() {
 
             {/* Main Data Section */}
             <Card className="shadow-lg border-gray-200">
+                <CardHeader className="bg-white border-b px-6 py-4">
+                    <div className="flex flex-col md:flex-row gap-4 justify-between md:items-center">
+                        <CardTitle className="text-lg">Detailed Records</CardTitle>
+                        
+                        <div className="flex gap-3 w-full md:w-auto">
+                            {/* Search */}
+                            <div className="relative flex-1 md:w-[250px]">
+                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
+                                <Input 
+                                    placeholder="Search name, phone, user..." 
+                                    className="pl-9"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                />
+                            </div>
+                            
+                            {/* Bank Filter */}
+                            <Select value={selectedBank} onValueChange={setSelectedBank}>
+                                <SelectTrigger className="w-[160px]">
+                                    <SelectValue placeholder="Filter Bank" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All Banks</SelectItem>
+                                    {Array.from(new Set(logins.map(l => l.bank_name))).map((b: any) => (
+                                        <SelectItem key={b} value={b}>{b}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                </CardHeader>
+                
                 <CardContent className="p-0">
                     <Table>
                         <TableHeader className="bg-gray-50">
@@ -269,6 +319,55 @@ export default function AdminLoginsPage() {
                             )}
                         </TableBody>
                     </Table>
+                </CardContent>
+            </Card>
+
+            {/* --- NEW SECTION: KYC TRANSFERS --- */}
+            <Card className="shadow-lg border-2 border-indigo-50 bg-indigo-50/20">
+                <CardHeader className="border-b border-indigo-100 pb-3">
+                    <CardTitle className="text-lg flex items-center gap-2 text-indigo-900">
+                        <ArrowRightLeft className="h-5 w-5 text-indigo-600" />
+                        Today's KYC Handover Report
+                        <Badge variant="secondary" className="ml-2 bg-indigo-100 text-indigo-700">
+                            {transfers.length} Leads
+                        </Badge>
+                    </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                    <div className="max-h-[300px] overflow-y-auto">
+                        <Table>
+                            <TableHeader className="bg-indigo-50/50 sticky top-0">
+                                <TableRow>
+                                    <TableHead className="font-semibold text-indigo-800">Telecaller Name</TableHead>
+                                    <TableHead className="font-semibold text-indigo-800">Lead Name</TableHead>
+                                    <TableHead className="font-semibold text-indigo-800 text-right">Time Transferred</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {transfers.length === 0 ? (
+                                    <TableRow>
+                                        <TableCell colSpan={3} className="text-center h-24 text-gray-500 italic">
+                                            No leads marked as 'Transferred to KYC' today.
+                                        </TableCell>
+                                    </TableRow>
+                                ) : (
+                                    transfers.map((t) => (
+                                        <TableRow key={t.id} className="hover:bg-indigo-50/60 transition-colors border-b border-indigo-100">
+                                            <TableCell className="font-medium text-gray-800">
+                                                {t.users?.full_name || 'Unknown Telecaller'}
+                                            </TableCell>
+                                            <TableCell className="text-gray-700">
+                                                {t.name}
+                                            </TableCell>
+                                            <TableCell className="text-right text-gray-500 text-sm font-mono">
+                                                {new Date(t.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                            </TableCell>
+                                        </TableRow>
+                                    ))
+                                )}
+                            </TableBody>
+                        </Table>
+                    </div>
                 </CardContent>
             </Card>
         </div>
