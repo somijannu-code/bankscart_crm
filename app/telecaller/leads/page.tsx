@@ -7,14 +7,13 @@ import { redirect } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 
-// Define search params interface
 interface SearchParams {
   status?: string
   priority?: string
   search?: string
   source?: string
   date_range?: string
-  page?: string // Added page for pagination
+  page?: string
 }
 
 export default async function TelecallerLeadsPage({
@@ -39,9 +38,19 @@ export default async function TelecallerLeadsPage({
   const from = (page - 1) * pageSize
   const to = from + pageSize - 1
 
+  // 3. GENERATE QUERY STRING FOR PAGINATION PRESERVATION
+  // We create a string of all current filters (status, search, etc.) EXCEPT 'page'.
+  // We pass this to the Table component so "Next" buttons can append "&page=2" to it.
+  const params = new URLSearchParams()
+  Object.entries(searchParams).forEach(([key, value]) => {
+    if (key !== 'page' && value) {
+      params.set(key, value)
+    }
+  })
+  const currentFiltersString = params.toString() // e.g., "status=Interested&priority=high"
+
   // =========================================================
-  // QUERY 1: FETCH STATS (Lightweight - only Status column)
-  // This runs fast even with thousands of leads
+  // QUERY 1: FETCH STATS
   // =========================================================
   const { data: statsData } = await supabase
     .from("leads")
@@ -57,17 +66,16 @@ export default async function TelecallerLeadsPage({
   }
 
   // =========================================================
-  // QUERY 2: FETCH PAGINATED LEADS (Heavy Data)
-  // Only fetches the 20 rows needed for the screen
+  // QUERY 2: FETCH PAGINATED LEADS
   // =========================================================
   let query = supabase
     .from("leads")
-    .select("*", { count: "exact" }) // Get total count for pagination
+    .select("*", { count: "exact" })
     .eq("assigned_to", user.id)
     .order("created_at", { ascending: false })
-    .range(from, to) // <--- CRITICAL FIX: Only fetch current page
+    .range(from, to)
 
-  // Apply Filters to the Data Query
+  // Apply Filters
   if (searchParams.status && searchParams.status !== "all") {
     query = query.eq("status", searchParams.status)
   }
@@ -78,13 +86,12 @@ export default async function TelecallerLeadsPage({
     query = query.eq("source", searchParams.source)
   }
   if (searchParams.search) {
-    // Search across multiple columns
     query = query.or(
       `name.ilike.%${searchParams.search}%,email.ilike.%${searchParams.search}%,phone.ilike.%${searchParams.search}%,company.ilike.%${searchParams.search}%`
     )
   }
 
-  // Date Range Filter
+  // Date Range
   if (searchParams.date_range) {
     const today = new Date()
     let startDate = new Date()
@@ -103,12 +110,10 @@ export default async function TelecallerLeadsPage({
     query = query.gte("created_at", startDate.toISOString())
   }
 
-  // Execute Data Query
   const { data: leads, count } = await query
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">My Leads</h1>
@@ -120,10 +125,7 @@ export default async function TelecallerLeadsPage({
         </Button>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        
-        {/* Total Leads */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Leads</CardTitle>
@@ -135,7 +137,6 @@ export default async function TelecallerLeadsPage({
           </CardContent>
         </Card>
 
-        {/* New / Pending */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">New Leads</CardTitle>
@@ -147,7 +148,6 @@ export default async function TelecallerLeadsPage({
           </CardContent>
         </Card>
 
-        {/* Contacted */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Contacted</CardTitle>
@@ -159,7 +159,6 @@ export default async function TelecallerLeadsPage({
           </CardContent>
         </Card>
 
-        {/* Logins Card */}
         <Link href="/telecaller/logins" className="block transition-transform hover:scale-105">
           <Card className="bg-indigo-50 border-indigo-200 cursor-pointer hover:shadow-md">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -172,10 +171,8 @@ export default async function TelecallerLeadsPage({
             </CardContent>
           </Card>
         </Link>
-
       </div>
 
-      {/* Filters Section */}
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
@@ -193,7 +190,6 @@ export default async function TelecallerLeadsPage({
         </CardContent>
       </Card>
 
-      {/* Leads Table - Now receives paginated data and total counts */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -207,6 +203,8 @@ export default async function TelecallerLeadsPage({
             totalCount={count || 0}
             currentPage={page}
             pageSize={pageSize}
+            // Passing the existing filters down to the table
+            filterParams={currentFiltersString} 
           />
         </CardContent>
       </Card>
