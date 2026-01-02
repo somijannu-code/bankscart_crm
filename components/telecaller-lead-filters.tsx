@@ -17,9 +17,14 @@ export function TelecallerLeadFilters() {
 
   const applyFilters = () => {
     const params = new URLSearchParams()
+    
+    // Set filters
     if (search) params.set("search", search)
     if (status !== "all") params.set("status", status)
     if (priority !== "all") params.set("priority", priority)
+    
+    // IMPORTANT: Reset to page 1 when applying new filters
+    params.set("page", "1")
 
     router.push(`/telecaller/leads?${params.toString()}`)
   }
@@ -34,6 +39,7 @@ export function TelecallerLeadFilters() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Search Input */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
           <Input
@@ -45,6 +51,7 @@ export function TelecallerLeadFilters() {
           />
         </div>
 
+        {/* Status Select */}
         <Select value={status} onValueChange={setStatus}>
           <SelectTrigger>
             <SelectValue placeholder="Filter by status" />
@@ -59,13 +66,13 @@ export function TelecallerLeadFilters() {
             <SelectItem value="Disbursed">Disbursed</SelectItem>
             <SelectItem value="Not_Interested">Not Interested</SelectItem>
             <SelectItem value="Call_Back">Call Back</SelectItem>
-            <SelectItem value="not_eligible">not eligible</SelectItem>
-            <SelectItem value="nr">nr</SelectItem>
-            <SelectItem value="self_employed">self employed</SelectItem>
-            
+            <SelectItem value="not_eligible">Not Eligible</SelectItem>
+            <SelectItem value="nr">NR</SelectItem>
+            <SelectItem value="self_employed">Self Employed</SelectItem>
           </SelectContent>
         </Select>
 
+        {/* Priority Select */}
         <Select value={priority} onValueChange={setPriority}>
           <SelectTrigger>
             <SelectValue placeholder="Filter by priority" />
