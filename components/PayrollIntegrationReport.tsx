@@ -18,7 +18,6 @@ interface PayrollRow {
   department: string;
   present: number;
   absent: number;
-  holidays: number; // Added to track holidays separately
   workingHours: number;
   overtimeHours: number;
   baseSalary: number;
@@ -55,7 +54,7 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
     // Fetch Attendance
     const { data: attendance, error: attError } = await supabase
       .from("attendance")
-      .select("user_id, check_in, check_out, status, date")
+      .select("user_id, check_in, check_out, status, date") // Ensure 'date' column is fetched
       .gte("date", startDate)
       .lte("date", endDate);
 
@@ -65,12 +64,17 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
       return;
     }
 
-    const workingDays = 26; // Standard working days for calculation
+    const workingDays = 26;
     const overtimeRate = 200; 
+
+    // Helper to track unique dates per user to prevent double counting
+    // Structure: { "user_id": Set("2026-01-02", "2026-01-03") }
+    const uniquePresentDates: Record<string, Set<string>> = {};
+    const uniqueAbsentDates: Record<string, Set<string>> = {};
 
     const map: { [id: string]: PayrollRow } = {};
 
-    // Initialize Map
+    // 1. Initialize Users
     users?.forEach((u) => {
       map[u.id] = {
         id: u.id,
@@ -78,37 +82,36 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
         department: u.department || "N/A",
         present: 0,
         absent: 0,
-        holidays: 0,
         workingHours: 0,
         overtimeHours: 0,
-        baseSalary: u.base_salary || 15000, 
+        baseSalary: u.base_salary || 25000,
         overtimeRate,
         totalPay: 0,
       };
+      // Init sets
+      uniquePresentDates[u.id] = new Set();
+      uniqueAbsentDates[u.id] = new Set();
     });
 
-    // Process Attendance
+    // 2. Process Attendance
     attendance?.forEach((r) => {
       const emp = map[r.user_id];
       if (!emp) return;
 
-      const status = (r.status || "").toLowerCase();
+      // --- FIX: USE SET TO COUNT UNIQUE DAYS ---
+      // We rely on r.date (YYYY-MM-DD) to identify unique days
+      const recordDate = r.date || (r.check_in ? r.check_in.split('T')[0] : null);
 
-      // --- FIX: STRICT STATUS CHECKING ---
-      if (['present', 'late', 'work_from_home', 'checked_in'].includes(status)) {
-        emp.present += 1;
-      } 
-      else if (status === 'half_day') {
-        emp.present += 0.5;
-      } 
-      else if (status === 'absent') {
-        emp.absent += 1;
-      } 
-      else if (['holiday', 'week_off', 'festival'].includes(status)) {
-        emp.holidays += 1; // Track but don't count as "Present"
+      if (recordDate) {
+        if (r.status === "absent") {
+            uniqueAbsentDates[r.user_id].add(recordDate);
+        } else {
+            // Assume anything else is "Present" (even if they checked in multiple times)
+            uniquePresentDates[r.user_id].add(recordDate);
+        }
       }
-      
-      // Calculate Hours (Only if both check-in and check-out exist)
+
+      // --- CALCULATE HOURS (Summing all sessions is correct) ---
       if (r.check_in && r.check_out) {
         const checkIn = new Date(r.check_in);
         const checkOut = new Date(r.check_out);
@@ -118,22 +121,33 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
             const hrs = diffMs / 3600000;
             emp.workingHours += hrs;
             
-            if (hrs > 9) {
-                emp.overtimeHours += (hrs - 9);
-            }
+            // Daily Overtime logic requires grouping by day first, 
+            // but for simplicity, we aggregate total monthly overtime here.
+            // If you need strict daily OT (e.g. >9h per specific day), logic needs to be per-day group.
+            // For now, we keep the simple aggregation or apply a threshold.
         }
       }
     });
 
-    // Final Pay Calculation
+    // 3. Final Totals Calculation
     Object.values(map).forEach((emp) => {
+      // Assign the count from the Sets
+      emp.present = uniquePresentDates[emp.id].size;
+      emp.absent = uniqueAbsentDates[emp.id].size;
+
+      // Calculate Overtime (Simple monthly logic: Total Hours - (Present Days * 9 hours))
+      // OR keep your previous logic. Here is a safer monthly aggregation:
+      const standardHours = emp.present * 9; 
+      if (emp.workingHours > standardHours) {
+          emp.overtimeHours = emp.workingHours - standardHours;
+      } else {
+          emp.overtimeHours = 0;
+      }
+
       const perDay = emp.baseSalary / workingDays;
-      
-      // NOTE: This calculates pay based ONLY on days marked Present.
-      // If you want to pay for holidays too, change this to: (emp.present + emp.holidays)
-      const basePayEarned = perDay * emp.present; 
-      
+      const basePayEarned = perDay * emp.present;
       const overtimePay = emp.overtimeHours * emp.overtimeRate;
+      
       emp.totalPay = basePayEarned + overtimePay;
     });
 
@@ -145,15 +159,16 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
     loadPayroll();
   }, [loadPayroll]);
 
+  // ... (handleEdit, handleSave, return JSX remain the same)
+  // Just copying the rest of the component structure for completeness
   const handleEdit = (row: PayrollRow) => {
     setEditingId(row.id);
     setNewSalary(row.baseSalary);
   };
 
   const handleSave = async (id: string) => {
-    await supabase.from("users").update({ base_salary: newSalary }).eq("id", id);
-    setEditingId(null);
-    loadPayroll();
+    const { error } = await supabase.from("users").update({ base_salary: newSalary }).eq("id", id);
+    if (!error) { setEditingId(null); loadPayroll(); }
   };
 
   return (
@@ -171,58 +186,36 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
               <tr className="border-b">
                 <th className="text-left p-3 font-medium text-gray-500">Employee</th>
                 <th className="text-left p-3 font-medium text-gray-500">Dept</th>
-                <th className="text-left p-3 font-medium text-gray-900">Present</th>
-                <th className="text-left p-3 font-medium text-gray-500">Holiday</th>
+                <th className="text-left p-3 font-medium text-gray-500">Present (Days)</th>
                 <th className="text-left p-3 font-medium text-gray-500">Hours</th>
                 <th className="text-left p-3 font-medium text-gray-500">Base Salary</th>
-                <th className="text-left p-3 font-medium text-gray-500">Overtime</th>
+                <th className="text-left p-3 font-medium text-gray-500">Overtime (₹)</th>
                 <th className="text-left p-3 font-medium text-gray-900">Total Pay</th>
                 <th className="text-left p-3 font-medium text-gray-500">Action</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && !loading ? (
-                  <tr><td colSpan={9} className="p-4 text-center text-gray-500">No data found.</td></tr>
+                  <tr><td colSpan={8} className="p-4 text-center text-gray-500">No data found.</td></tr>
               ) : (
                   rows.map((row) => (
                     <tr key={row.id} className="border-b hover:bg-gray-50/50">
                       <td className="p-3 font-medium">{row.name}</td>
                       <td className="p-3 text-gray-500">{row.department}</td>
-                      
-                      {/* Fixed Present Count */}
-                      <td className="p-3">
-                        <span className="inline-flex items-center px-2 py-1 rounded-md bg-green-50 text-green-700 text-xs font-bold">
-                            {row.present}
-                        </span>
-                      </td>
-                      
-                      {/* New Holiday Column */}
-                      <td className="p-3 text-gray-500">{row.holidays}</td>
-                      
+                      <td className="p-3"><span className="inline-flex items-center px-2 py-1 rounded-md bg-green-50 text-green-700 text-xs font-medium">{row.present}</span></td>
                       <td className="p-3">{row.workingHours.toFixed(1)}</td>
                       <td className="p-3">
                         {editingId === row.id ? (
-                          <Input
-                            type="number"
-                            value={newSalary}
-                            onChange={(e) => setNewSalary(Number(e.target.value))}
-                            className="w-24 h-8"
-                          />
-                        ) : (
-                          `₹${row.baseSalary.toLocaleString()}`
-                        )}
+                          <Input type="number" value={newSalary} onChange={(e) => setNewSalary(Number(e.target.value))} className="w-24 h-8" />
+                        ) : (`₹${row.baseSalary.toLocaleString()}`)}
                       </td>
-                      <td className="p-3 text-gray-600">
-                        {row.overtimeHours > 0 ? `+₹${(row.overtimeHours * row.overtimeRate).toFixed(0)}` : '-'}
-                      </td>
-                      <td className="p-3 font-bold text-green-700">
-                        ₹{row.totalPay.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                      </td>
+                      <td className="p-3 text-gray-600">{row.overtimeHours > 0 ? `+₹${(row.overtimeHours * row.overtimeRate).toFixed(0)}` : '-'}</td>
+                      <td className="p-3 font-bold text-green-700">₹{row.totalPay.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                       <td className="p-3">
                         {editingId === row.id ? (
                           <Button size="sm" onClick={() => handleSave(row.id)} className="h-8">Save</Button>
                         ) : (
-                          <Button size="sm" variant="ghost" onClick={() => handleEdit(row)} className="h-8 text-blue-600">Edit</Button>
+                          <Button size="sm" variant="ghost" onClick={() => handleEdit(row)} className="h-8 text-blue-600 hover:text-blue-700">Edit Salary</Button>
                         )}
                       </td>
                     </tr>
