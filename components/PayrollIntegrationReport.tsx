@@ -7,9 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Loader2 } from "lucide-react";
 
-// 1. Define Props to accept the filter values
 interface PayrollIntegrationReportProps {
-  month: number; // 0 = Jan, 11 = Dec
+  month: number;
   year: number;
 }
 
@@ -19,6 +18,7 @@ interface PayrollRow {
   department: string;
   present: number;
   absent: number;
+  holidays: number; // Added to track holidays separately
   workingHours: number;
   overtimeHours: number;
   baseSalary: number;
@@ -33,24 +33,18 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
   const [newSalary, setNewSalary] = useState<number>(0);
   const supabase = createClient();
 
-  // 2. Wrap loadPayroll in useCallback so it updates when month/year changes
   const loadPayroll = useCallback(async () => {
     setLoading(true);
     
-    // Calculate Date Range for Filter
-    // Start Date: e.g., "2025-02-01"
+    // Calculate Date Range
     const startDate = new Date(year, month, 1).toISOString().split('T')[0];
-    
-    // End Date: Last day of the month
     const endDate = new Date(year, month + 1, 0).toISOString().split('T')[0];
-
-    console.log(`Fetching Payroll for: ${startDate} to ${endDate}`);
 
     // Fetch Users
     const { data: users, error: userError } = await supabase
       .from("users")
       .select("id, full_name, department, base_salary")
-      .eq("is_active", true); // Optional: Only show active employees
+      .eq("is_active", true);
 
     if (userError) {
       console.error("User fetch error:", userError);
@@ -58,12 +52,12 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
       return;
     }
 
-    // 3. Fetch Attendance with DATE FILTERS
+    // Fetch Attendance
     const { data: attendance, error: attError } = await supabase
       .from("attendance")
       .select("user_id, check_in, check_out, status, date")
-      .gte("date", startDate) // Filter Start
-      .lte("date", endDate);  // Filter End
+      .gte("date", startDate)
+      .lte("date", endDate);
 
     if (attError) {
       console.error("Attendance fetch error:", attError);
@@ -71,12 +65,12 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
       return;
     }
 
-    const workingDays = 26;
-    const overtimeRate = 200; // ₹200 per hour
+    const workingDays = 26; // Standard working days for calculation
+    const overtimeRate = 200; 
 
     const map: { [id: string]: PayrollRow } = {};
 
-    // Initialize Map with Users
+    // Initialize Map
     users?.forEach((u) => {
       map[u.id] = {
         id: u.id,
@@ -84,38 +78,46 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
         department: u.department || "N/A",
         present: 0,
         absent: 0,
+        holidays: 0,
         workingHours: 0,
         overtimeHours: 0,
-        baseSalary: u.base_salary || 15000, // Default salary if null
+        baseSalary: u.base_salary || 15000, 
         overtimeRate,
         totalPay: 0,
       };
     });
 
-    // Process Attendance Data
+    // Process Attendance
     attendance?.forEach((r) => {
       const emp = map[r.user_id];
       if (!emp) return;
 
-      if (r.status === "absent") {
-        emp.absent += 1;
-      } else {
-        // Assume anything else (present, late) counts as present for base pay
-        emp.present += 1;
-      }
+      const status = (r.status || "").toLowerCase();
 
-      // Calculate Hours
+      // --- FIX: STRICT STATUS CHECKING ---
+      if (['present', 'late', 'work_from_home', 'checked_in'].includes(status)) {
+        emp.present += 1;
+      } 
+      else if (status === 'half_day') {
+        emp.present += 0.5;
+      } 
+      else if (status === 'absent') {
+        emp.absent += 1;
+      } 
+      else if (['holiday', 'week_off', 'festival'].includes(status)) {
+        emp.holidays += 1; // Track but don't count as "Present"
+      }
+      
+      // Calculate Hours (Only if both check-in and check-out exist)
       if (r.check_in && r.check_out) {
         const checkIn = new Date(r.check_in);
         const checkOut = new Date(r.check_out);
         const diffMs = checkOut.getTime() - checkIn.getTime();
         
-        // Only count valid positive duration
         if (diffMs > 0) {
             const hrs = diffMs / 3600000;
             emp.workingHours += hrs;
             
-            // Simple Overtime logic: > 9 hours in a day
             if (hrs > 9) {
                 emp.overtimeHours += (hrs - 9);
             }
@@ -123,14 +125,12 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
       }
     });
 
-    // Final Calculation
+    // Final Pay Calculation
     Object.values(map).forEach((emp) => {
-      // Logic: Pay = (Base / 26 * Present Days) + Overtime
-      // Alternatively (Deduction Logic): Pay = Base - (Base/26 * Absent)
-      
       const perDay = emp.baseSalary / workingDays;
       
-      // Calculate Pay based on presence (This handles new joiners better than deduction)
+      // NOTE: This calculates pay based ONLY on days marked Present.
+      // If you want to pay for holidays too, change this to: (emp.present + emp.holidays)
       const basePayEarned = perDay * emp.present; 
       
       const overtimePay = emp.overtimeHours * emp.overtimeRate;
@@ -139,9 +139,8 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
 
     setRows(Object.values(map));
     setLoading(false);
-  }, [month, year, supabase]); // Dependencies ensure it runs when filter changes
+  }, [month, year, supabase]);
 
-  // 4. Trigger loadPayroll whenever month/year changes
   useEffect(() => {
     loadPayroll();
   }, [loadPayroll]);
@@ -152,17 +151,9 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
   };
 
   const handleSave = async (id: string) => {
-    const { error } = await supabase
-      .from("users")
-      .update({ base_salary: newSalary })
-      .eq("id", id);
-
-    if (error) {
-      console.error("Error updating salary:", error);
-    } else {
-        setEditingId(null);
-        loadPayroll(); // Refresh data
-    }
+    await supabase.from("users").update({ base_salary: newSalary }).eq("id", id);
+    setEditingId(null);
+    loadPayroll();
   };
 
   return (
@@ -180,29 +171,34 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
               <tr className="border-b">
                 <th className="text-left p-3 font-medium text-gray-500">Employee</th>
                 <th className="text-left p-3 font-medium text-gray-500">Dept</th>
-                <th className="text-left p-3 font-medium text-gray-500">Present (Days)</th>
+                <th className="text-left p-3 font-medium text-gray-900">Present</th>
+                <th className="text-left p-3 font-medium text-gray-500">Holiday</th>
                 <th className="text-left p-3 font-medium text-gray-500">Hours</th>
                 <th className="text-left p-3 font-medium text-gray-500">Base Salary</th>
-                <th className="text-left p-3 font-medium text-gray-500">Overtime (₹)</th>
+                <th className="text-left p-3 font-medium text-gray-500">Overtime</th>
                 <th className="text-left p-3 font-medium text-gray-900">Total Pay</th>
                 <th className="text-left p-3 font-medium text-gray-500">Action</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && !loading ? (
-                  <tr>
-                      <td colSpan={8} className="p-4 text-center text-gray-500">No attendance data found for this month.</td>
-                  </tr>
+                  <tr><td colSpan={9} className="p-4 text-center text-gray-500">No data found.</td></tr>
               ) : (
                   rows.map((row) => (
                     <tr key={row.id} className="border-b hover:bg-gray-50/50">
                       <td className="p-3 font-medium">{row.name}</td>
                       <td className="p-3 text-gray-500">{row.department}</td>
+                      
+                      {/* Fixed Present Count */}
                       <td className="p-3">
-                        <span className="inline-flex items-center px-2 py-1 rounded-md bg-green-50 text-green-700 text-xs font-medium">
+                        <span className="inline-flex items-center px-2 py-1 rounded-md bg-green-50 text-green-700 text-xs font-bold">
                             {row.present}
                         </span>
                       </td>
+                      
+                      {/* New Holiday Column */}
+                      <td className="p-3 text-gray-500">{row.holidays}</td>
+                      
                       <td className="p-3">{row.workingHours.toFixed(1)}</td>
                       <td className="p-3">
                         {editingId === row.id ? (
@@ -224,18 +220,9 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
                       </td>
                       <td className="p-3">
                         {editingId === row.id ? (
-                          <Button size="sm" onClick={() => handleSave(row.id)} className="h-8">
-                            Save
-                          </Button>
+                          <Button size="sm" onClick={() => handleSave(row.id)} className="h-8">Save</Button>
                         ) : (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleEdit(row)}
-                            className="h-8 text-blue-600 hover:text-blue-700"
-                          >
-                            Edit Salary
-                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => handleEdit(row)} className="h-8 text-blue-600">Edit</Button>
                         )}
                       </td>
                     </tr>
