@@ -86,7 +86,7 @@ export function PayrollIntegrationReport({ month, year }: PayrollIntegrationRepo
         absent: 0,
         workingHours: 0,
         overtimeHours: 0,
-        baseSalary: u.base_salary || 25000, // Default salary if null
+        baseSalary: u.base_salary || 15000, // Default salary if null
         overtimeRate,
         totalPay: 0,
       };
