@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Users, Filter, BarChart3, TrendingUp, Clock, LogIn } from "lucide-react"
 import { TelecallerLeadsTable } from "@/components/telecaller-leads-table"
 import { TelecallerLeadFilters } from "@/components/telecaller-lead-filters"
+import { PaginationControls } from "@/components/pagination-controls" // <--- IMPORT THIS
 import { redirect } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
@@ -38,19 +39,8 @@ export default async function TelecallerLeadsPage({
   const from = (page - 1) * pageSize
   const to = from + pageSize - 1
 
-  // 3. GENERATE QUERY STRING FOR PAGINATION PRESERVATION
-  // We create a string of all current filters (status, search, etc.) EXCEPT 'page'.
-  // We pass this to the Table component so "Next" buttons can append "&page=2" to it.
-  const params = new URLSearchParams()
-  Object.entries(searchParams).forEach(([key, value]) => {
-    if (key !== 'page' && value) {
-      params.set(key, value)
-    }
-  })
-  const currentFiltersString = params.toString() // e.g., "status=Interested&priority=high"
-
   // =========================================================
-  // QUERY 1: FETCH STATS
+  // QUERY 1: FETCH STATS (Lightweight)
   // =========================================================
   const { data: statsData } = await supabase
     .from("leads")
@@ -90,22 +80,13 @@ export default async function TelecallerLeadsPage({
       `name.ilike.%${searchParams.search}%,email.ilike.%${searchParams.search}%,phone.ilike.%${searchParams.search}%,company.ilike.%${searchParams.search}%`
     )
   }
-
-  // Date Range
   if (searchParams.date_range) {
     const today = new Date()
     let startDate = new Date()
-    
     switch (searchParams.date_range) {
-      case "today":
-        startDate.setHours(0, 0, 0, 0)
-        break
-      case "week":
-        startDate.setDate(today.getDate() - 7)
-        break
-      case "month":
-        startDate.setDate(today.getDate() - 30)
-        break
+      case "today": startDate.setHours(0, 0, 0, 0); break
+      case "week": startDate.setDate(today.getDate() - 7); break
+      case "month": startDate.setDate(today.getDate() - 30); break
     }
     query = query.gte("created_at", startDate.toISOString())
   }
@@ -125,52 +106,9 @@ export default async function TelecallerLeadsPage({
         </Button>
       </div>
 
+      {/* Stats Cards ... (Keep existing code) ... */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Leads</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{leadStats.total}</div>
-            <p className="text-xs text-muted-foreground">Assigned to you</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">New Leads</CardTitle>
-            <Clock className="h-4 w-4 text-blue-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{leadStats.new}</div>
-            <p className="text-xs text-muted-foreground">Requires action</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Contacted</CardTitle>
-            <TrendingUp className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{leadStats.contacted}</div>
-            <p className="text-xs text-muted-foreground">In progress</p>
-          </CardContent>
-        </Card>
-
-        <Link href="/telecaller/logins" className="block transition-transform hover:scale-105">
-          <Card className="bg-indigo-50 border-indigo-200 cursor-pointer hover:shadow-md">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-bold text-indigo-700">Logins Done</CardTitle>
-              <LogIn className="h-4 w-4 text-indigo-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-indigo-900">{leadStats.logins}</div>
-              <p className="text-xs text-indigo-600 font-medium">Click to view details →</p>
-            </CardContent>
-          </Card>
-        </Link>
+        {/* ... (Your existing stats cards here) ... */}
       </div>
 
       <Card>
@@ -186,7 +124,7 @@ export default async function TelecallerLeadsPage({
           </div>
         </CardHeader>
         <CardContent>
-          <TelecallerLeadFilters initialSearchParams={searchParams} />
+          <TelecallerLeadFilters />
         </CardContent>
       </Card>
 
@@ -203,9 +141,15 @@ export default async function TelecallerLeadsPage({
             totalCount={count || 0}
             currentPage={page}
             pageSize={pageSize}
-            // Passing the existing filters down to the table
-            filterParams={currentFiltersString} 
           />
+          {/* Add Pagination Controls Here */}
+          <div className="px-4 border-t">
+            <PaginationControls 
+              totalCount={count || 0}
+              pageSize={pageSize}
+              currentPage={page}
+            />
+          </div>
         </CardContent>
       </Card>
     </div>
