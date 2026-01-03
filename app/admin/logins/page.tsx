@@ -193,7 +193,7 @@ export default function AdminLoginsPage() {
                             <div className="p-2 bg-amber-50 rounded-lg text-amber-600">
                                 <Trophy className="h-5 w-5" />
                             </div>
-                            <span className="text-sm font-medium text-gray-500">Top Performers</span>
+                            <span className="text-sm font-medium text-gray-500">Top Login Performers</span>
                         </div>
                         <div className="space-y-2">
                             {topTelecallers.length > 0 ? (
