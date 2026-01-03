@@ -48,7 +48,6 @@ export default function AdminLoginsPage() {
             }
 
             // B. Fetch Today's KYC Transfers (New Logic)
-            // We fetch from 'leads' table where status is 'Transferred to KYC' and updated TODAY
             const transfersQuery = supabase
                 .from('leads')
                 .select(`
@@ -248,15 +247,17 @@ export default function AdminLoginsPage() {
                                 />
                             </div>
                             
-                            {/* Bank Filter */}
+                            {/* Bank Filter - FIXED CRASH HERE */}
                             <Select value={selectedBank} onValueChange={setSelectedBank}>
                                 <SelectTrigger className="w-[160px]">
                                     <SelectValue placeholder="Filter Bank" />
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">All Banks</SelectItem>
-                                    {Array.from(new Set(logins.map(l => l.bank_name))).map((b: any) => (
-                                        <SelectItem key={b} value={b}>{b}</SelectItem>
+                                    {Array.from(new Set(logins.map(l => l.bank_name)))
+                                        .filter(b => b && b.trim() !== "") // FIX: Filter out null/empty strings
+                                        .map((b: any) => (
+                                            <SelectItem key={b} value={b}>{b}</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
