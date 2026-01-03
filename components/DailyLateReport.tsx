@@ -119,7 +119,7 @@ export function DailyLateReport() {
                   <th className="text-left p-3 rounded-tr-lg">
                     Expected Check Out
                     <span className="block text-[10px] font-normal opacity-75">
-                      (+8 hrs 30 mins)
+                      hrs
                     </span>
                   </th>
                 </tr>
