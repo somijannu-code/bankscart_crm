@@ -8,10 +8,10 @@ import { Loader2, Clock, AlertTriangle } from "lucide-react";
 interface LateEntry {
   id: string;
   user_name: string;
-  check_in_time: string; // Formatted time string
-  check_in_raw: Date;    // Date object for sorting
+  check_in_time: string;
+  check_in_raw: Date;
   expected_out_time: string;
-  late_by: string;       // e.g., "15 mins"
+  late_by: string;
 }
 
 export function DailyLateReport() {
@@ -19,7 +19,6 @@ export function DailyLateReport() {
   const [loading, setLoading] = useState(false);
   const supabase = createClient();
 
-  // CONFIGURATION: Set your office start time here
   const OFFICE_START_HOUR = 9;
   const OFFICE_START_MINUTE = 30;
 
@@ -29,12 +28,12 @@ export function DailyLateReport() {
 
   const fetchLateComers = async () => {
     setLoading(true);
-    const todayStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+    const todayStr = new Date().toISOString().split("T")[0];
 
-    // 1. Fetch Today's Attendance
+    // FIX: Added '!attendance_user_id_fkey' to resolve the ambiguous relationship error
     const { data: attendance, error } = await supabase
       .from("attendance")
-      .select("id, check_in, user_id, users(full_name)")
+      .select("id, check_in, user_id, users!attendance_user_id_fkey(full_name)")
       .eq("date", todayStr)
       .not("check_in", "is", null);
 
@@ -52,25 +51,25 @@ export function DailyLateReport() {
       if (!record.check_in) return;
 
       const checkInTime = new Date(record.check_in);
-
-      // 2. Check if Late (Compare Check-in Time vs Office Start Time)
-      // We only care about the time part, so normalize the dates to today
+      
+      // Normalize comparison time to today
       const checkInCompare = new Date(officeStartTime);
       checkInCompare.setHours(checkInTime.getHours(), checkInTime.getMinutes(), 0, 0);
 
       if (checkInCompare > officeStartTime) {
-        // 3. Calculate "Late By" Duration
+        // Late By calculation
         const diffMs = checkInCompare.getTime() - officeStartTime.getTime();
         const diffMins = Math.floor(diffMs / 60000);
         const lateByStr = `${Math.floor(diffMins / 60)}h ${diffMins % 60}m`;
 
-        // 4. Calculate Expected Check-out (Check-in + 8h 30m)
-        const WORK_DURATION_MS = (8 * 60 + 30) * 60 * 1000; // 8h 30m in ms
+        // Expected Exit (+8h 30m)
+        const WORK_DURATION_MS = (8 * 60 + 30) * 60 * 1000;
         const expectedOutDate = new Date(checkInTime.getTime() + WORK_DURATION_MS);
 
         lateList.push({
           id: record.id,
-          user_name: record.users?.full_name || "Unknown",
+          // Handle the nested user object safely
+          user_name: Array.isArray(record.users) ? record.users[0]?.full_name : record.users?.full_name || "Unknown",
           check_in_raw: checkInTime,
           check_in_time: checkInTime.toLocaleTimeString("en-IN", {
             hour: "2-digit",
@@ -82,12 +81,11 @@ export function DailyLateReport() {
             minute: "2-digit",
             hour12: true,
           }),
-          late_by: lateByStr.replace("0h ", ""), // Clean up if less than 1 hour
+          late_by: lateByStr.replace("0h ", ""),
         });
       }
     });
 
-    // Sort by most late first
     lateList.sort((a, b) => b.check_in_raw.getTime() - a.check_in_raw.getTime());
     setData(lateList);
     setLoading(false);
