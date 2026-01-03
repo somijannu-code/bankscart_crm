@@ -5,6 +5,7 @@ import { PayrollIntegrationReport } from "@/components/PayrollIntegrationReport"
 import { SummaryReport } from "@/components/SummaryReport";
 import { DetailedReport } from "@/components/DetailedReport";
 import { TrendsReport } from "@/components/TrendsReport";
+import { DailyLateReport } from "@/components/DailyLateReport"; // New Component
 
 import { Button } from "@/components/ui/button";
 import {
@@ -14,12 +15,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Calendar } from "lucide-react";
+import { Calendar, Download } from "lucide-react";
 
 export default function AttendanceReportsPageClient() {
-  const [view, setView] = useState<"summary" | "detailed" | "trends" | "payroll">("payroll");
+  // View State (includes new 'late_checkins' option)
+  const [view, setView] = useState<"summary" | "detailed" | "trends" | "payroll" | "late_checkins">("payroll");
 
-  // DATE STATE
+  // Date Filter State
   const currentDate = new Date();
   const [selectedMonth, setSelectedMonth] = useState<string>(String(currentDate.getMonth())); // 0 = Jan, 11 = Dec
   const [selectedYear, setSelectedYear] = useState<string>(String(currentDate.getFullYear()));
@@ -49,18 +51,18 @@ export default function AttendanceReportsPageClient() {
         <div>
           <h1 className="text-2xl font-bold">Attendance Reports</h1>
           <p className="text-muted-foreground">
-            Analyze attendance trends and patterns
+            Analyze attendance trends, payroll, and punctuality.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-           
+          
           {/* YEAR SELECTOR */}
-          <div className="flex items-center gap-2 bg-white border rounded-md px-2">
+          <div className="flex items-center gap-2 bg-white border rounded-md px-2 shadow-sm">
             <Calendar className="h-4 w-4 text-gray-500" />
             <Select value={selectedYear} onValueChange={setSelectedYear}>
-                <SelectTrigger className="w-[100px] border-0 focus:ring-0">
-                <SelectValue />
+                <SelectTrigger className="w-[80px] border-0 focus:ring-0 h-9">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                 {years.map((y) => (
@@ -74,7 +76,7 @@ export default function AttendanceReportsPageClient() {
 
           {/* MONTH SELECTOR */}
           <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-            <SelectTrigger className="w-[140px] bg-white">
+            <SelectTrigger className="w-[130px] bg-white shadow-sm h-10">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -86,32 +88,50 @@ export default function AttendanceReportsPageClient() {
             </SelectContent>
           </Select>
 
-          {/* VIEW SELECTOR */}
+          {/* REPORT VIEW SELECTOR */}
           <Select value={view} onValueChange={(val) => setView(val as any)}>
-            <SelectTrigger className="w-[140px] bg-white">
+            <SelectTrigger className="w-[180px] bg-white shadow-sm h-10 font-medium">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="summary">Summary</SelectItem>
-              <SelectItem value="detailed">Detailed</SelectItem>
-              <SelectItem value="trends">Trends</SelectItem>
-              <SelectItem value="payroll">Payroll</SelectItem>
+              <SelectItem value="detailed">Detailed History</SelectItem>
+              <SelectItem value="trends">Trends Analysis</SelectItem>
+              <SelectItem value="payroll">Payroll (Salary)</SelectItem>
+              <SelectItem value="late_checkins" className="text-red-600 focus:text-red-700">
+                🔴 Late Check-ins
+              </SelectItem>
             </SelectContent>
           </Select>
 
-          <Button variant="outline">Export</Button>
+          <Button variant="outline" className="gap-2 shadow-sm">
+            <Download className="h-4 w-4" /> Export
+          </Button>
         </div>
       </div>
 
-      {/* PASS MONTH/YEAR PROPS TO CHILDREN */}
-      {/* Ensure your child components (e.g., PayrollIntegrationReport) accept these props to filter data */}
-      
-      {view === "summary" && <SummaryReport month={parseInt(selectedMonth)} year={parseInt(selectedYear)} />}
-      {view === "detailed" && <DetailedReport month={parseInt(selectedMonth)} year={parseInt(selectedYear)} />}
-      {view === "trends" && <TrendsReport month={parseInt(selectedMonth)} year={parseInt(selectedYear)} />}
-      
-      {/* This is the one you likely use for "Present Days" count */}
-      {view === "payroll" && <PayrollIntegrationReport month={parseInt(selectedMonth)} year={parseInt(selectedYear)} />}
+      {/* DYNAMIC REPORT RENDERING */}
+      <div className="min-h-[500px]">
+        {view === "summary" && (
+          <SummaryReport month={parseInt(selectedMonth)} year={parseInt(selectedYear)} />
+        )}
+        
+        {view === "detailed" && (
+          <DetailedReport month={parseInt(selectedMonth)} year={parseInt(selectedYear)} />
+        )}
+        
+        {view === "trends" && (
+          <TrendsReport month={parseInt(selectedMonth)} year={parseInt(selectedYear)} />
+        )}
+        
+        {view === "payroll" && (
+          <PayrollIntegrationReport month={parseInt(selectedMonth)} year={parseInt(selectedYear)} />
+        )}
+
+        {view === "late_checkins" && (
+          <DailyLateReport />
+        )}
+      </div>
     </div>
   );
 }
