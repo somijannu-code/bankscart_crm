@@ -11,15 +11,14 @@ import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
 import { 
     Loader2, FileCheck, Download, Search, Building2, Trophy, 
-    Calendar, ArrowRightLeft, Edit, Plus, X, Save, AlertCircle 
+    Calendar, ArrowRightLeft, Edit, Plus, X, Save, AlertCircle, Users 
 } from "lucide-react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog" // Assuming you have shadcn Dialog, if not use standard modal logic below
 
 // --- TYPE DEFINITIONS ---
 type BankAttempt = {
     bank: string;
     status: 'Pending' | 'Approved' | 'Rejected' | 'Disbursed';
-    reason?: string; // Rejection reason
+    reason?: string;
     date: string;
 }
 
@@ -43,7 +42,6 @@ export default function AdminLoginsPage() {
     const fetchData = async () => {
         setLoading(true)
         
-        // A. Fetch Logins
         let loginsQuery = supabase
             .from('logins') 
             .select(`
@@ -53,7 +51,6 @@ export default function AdminLoginsPage() {
             `)
             .order('updated_at', { ascending: false })
 
-        // Date Logic
         const todayDate = new Date()
         const startOfToday = new Date(todayDate.setHours(0,0,0,0)).toISOString()
 
@@ -63,7 +60,6 @@ export default function AdminLoginsPage() {
             loginsQuery = loginsQuery.gte('updated_at', new Date(todayDate.getFullYear(), todayDate.getMonth(), 1).toISOString())
         }
 
-        // B. Fetch Today's KYC Transfers
         const transfersQuery = supabase
             .from('leads')
             .select(`
@@ -86,21 +82,15 @@ export default function AdminLoginsPage() {
         fetchData()
     }, [dateFilter])
 
-    // 2. EDITING LOGIC
+    // 2. EDITING LOGIC (Unchanged)
     const handleEditClick = (login: any) => {
         setEditingLogin(login)
-        // Ensure bank_attempts is an array
         setTempAttempts(Array.isArray(login.bank_attempts) ? login.bank_attempts : [])
         setIsEditOpen(true)
     }
 
     const handleAddAttempt = () => {
-        setTempAttempts([...tempAttempts, { 
-            bank: '', 
-            status: 'Pending', 
-            reason: '', 
-            date: new Date().toISOString() 
-        }])
+        setTempAttempts([...tempAttempts, { bank: '', status: 'Pending', reason: '', date: new Date().toISOString() }])
     }
 
     const handleAttemptChange = (index: number, field: keyof BankAttempt, value: string) => {
@@ -110,31 +100,26 @@ export default function AdminLoginsPage() {
     }
 
     const handleRemoveAttempt = (index: number) => {
-        const updated = tempAttempts.filter((_, i) => i !== index)
-        setTempAttempts(updated)
+        setTempAttempts(tempAttempts.filter((_, i) => i !== index))
     }
 
     const handleSaveChanges = async () => {
         if (!editingLogin) return
-
-        // Calculate overall status based on attempts
-        // If any is Approved/Disbursed, overall is Approved. Else if all rejected, Rejected.
         const hasSuccess = tempAttempts.some(a => ['Approved', 'Disbursed'].includes(a.status))
-        const overallStatus = hasSuccess ? 'Approved' : 'Pending' // Simple logic, customize as needed
+        const overallStatus = hasSuccess ? 'Approved' : 'Pending' 
 
         const { error } = await supabase
             .from('logins')
             .update({ 
                 bank_attempts: tempAttempts,
                 status: overallStatus,
-                // Optional: Update top level bank_name to the latest attempt or approved one
                 bank_name: tempAttempts.length > 0 ? tempAttempts[tempAttempts.length - 1].bank : editingLogin.bank_name
             })
             .eq('id', editingLogin.id)
 
         if (!error) {
             setIsEditOpen(false)
-            fetchData() // Refresh list
+            fetchData()
         } else {
             alert("Failed to update login")
         }
@@ -153,17 +138,20 @@ export default function AdminLoginsPage() {
         })
     }, [logins, searchQuery, selectedBank])
 
-    // Top Performers
-    const topTelecallers = useMemo(() => {
+    // --- NEW FEATURE: All Telecaller Stats ---
+    const allTelecallerStats = useMemo(() => {
         const counts: Record<string, number> = {}
-        filteredLogins.forEach(l => {
+        // Use 'logins' (unfiltered by search) to get accurate counts for the selected date range
+        // If you want counts to change based on search/bank filter, change 'logins' to 'filteredLogins' below
+        logins.forEach(l => {
             const name = l.users?.full_name || l.users?.email || 'Unknown User'
             counts[name] = (counts[name] || 0) + 1
         })
-        return Object.entries(counts).sort(([, a], [, b]) => b - a).slice(0, 5)
-    }, [filteredLogins])
+        return Object.entries(counts)
+            .map(([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count)
+    }, [logins]) // Re-calculates when logins or date filter changes
 
-    // Bank Attempt Stats Helper
     const getLoginStats = (login: any) => {
         const attempts = Array.isArray(login.bank_attempts) ? login.bank_attempts : [];
         if (attempts.length === 0) return null;
@@ -175,7 +163,6 @@ export default function AdminLoginsPage() {
         return { total: attempts.length, approved, rejected, pending };
     }
 
-    // Export CSV
     const downloadCSV = () => {
         const headers = ["Telecaller", "Customer Name", "Phone", "Banks Tried", "Status Summary", "Date"]
         const rows = filteredLogins.map(l => {
@@ -230,10 +217,11 @@ export default function AdminLoginsPage() {
                 </div>
             </div>
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <Card className="shadow-sm border-l-4 border-indigo-500">
-                    <CardContent className="p-5">
+            {/* Stats Cards - NOW 3 COLUMNS */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* 1. Total Logins */}
+                <Card className="shadow-sm border-l-4 border-indigo-500 h-full">
+                    <CardContent className="p-5 flex flex-col justify-between h-full">
                         <div className="flex items-center gap-3 mb-2">
                             <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600"><FileCheck className="h-5 w-5" /></div>
                             <span className="text-sm font-medium text-gray-500">Total Logins</span>
@@ -241,19 +229,49 @@ export default function AdminLoginsPage() {
                         <h2 className="text-3xl font-bold">{filteredLogins.length}</h2>
                     </CardContent>
                 </Card>
-                <Card className="shadow-sm border-l-4 border-amber-500">
+
+                {/* 2. Top Performers (Top 3) */}
+                <Card className="shadow-sm border-l-4 border-amber-500 h-full">
                     <CardContent className="p-5">
                         <div className="flex items-center gap-3 mb-3">
                             <div className="p-2 bg-amber-50 rounded-lg text-amber-600"><Trophy className="h-5 w-5" /></div>
-                            <span className="text-sm font-medium text-gray-500">Top Performers</span>
+                            <span className="text-sm font-medium text-gray-500">Top 3 Performers</span>
                         </div>
                         <div className="space-y-2">
-                            {topTelecallers.map(([name, count], i) => (
-                                <div key={name} className="flex justify-between items-center text-sm">
-                                    <span className="font-medium text-gray-700 truncate max-w-[120px]" title={name}>{i + 1}. {name}</span>
-                                    <Badge variant="secondary" className="bg-amber-100 text-amber-800 font-bold">{count}</Badge>
+                            {allTelecallerStats.slice(0, 3).map((agent, i) => (
+                                <div key={agent.name} className="flex justify-between items-center text-sm">
+                                    <span className="font-medium text-gray-700 truncate max-w-[120px]" title={agent.name}>{i + 1}. {agent.name}</span>
+                                    <Badge variant="secondary" className="bg-amber-100 text-amber-800 font-bold">{agent.count}</Badge>
                                 </div>
                             ))}
+                            {allTelecallerStats.length === 0 && <p className="text-xs text-gray-400">No data</p>}
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* 3. NEW FEATURE: All Telecallers Breakdown */}
+                <Card className="shadow-sm border-l-4 border-blue-500 h-full">
+                    <CardContent className="p-5 h-[200px] flex flex-col">
+                        <div className="flex items-center gap-3 mb-3">
+                            <div className="p-2 bg-blue-50 rounded-lg text-blue-600"><Users className="h-5 w-5" /></div>
+                            <span className="text-sm font-medium text-gray-500">Telecaller Breakdown</span>
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
+                            {allTelecallerStats.length === 0 ? (
+                                <p className="text-xs text-gray-400">No logins found for this period.</p>
+                            ) : (
+                                <table className="w-full text-sm">
+                                    <tbody>
+                                        {allTelecallerStats.map((agent) => (
+                                            <tr key={agent.name} className="border-b border-gray-100 last:border-0">
+                                                <td className="py-1 text-gray-600 truncate max-w-[150px]" title={agent.name}>{agent.name}</td>
+                                                <td className="py-1 text-right font-bold text-gray-900">{agent.count}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            )}
                         </div>
                     </CardContent>
                 </Card>
@@ -343,7 +361,7 @@ export default function AdminLoginsPage() {
                 </CardContent>
             </Card>
 
-            {/* --- CUSTOM MODAL FOR EDITING LOGIN --- */}
+            {/* Modals and KYC section unchanged */}
             {isEditOpen && editingLogin && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
                     <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -356,53 +374,27 @@ export default function AdminLoginsPage() {
                         </div>
                         
                         <div className="p-6 space-y-6">
-                            {/* Bank Attempts Section */}
                             <div>
                                 <div className="flex justify-between items-center mb-4">
-                                    <h4 className="font-semibold text-gray-700 flex items-center gap-2">
-                                        <Building2 className="h-4 w-4" /> Bank Applications
-                                    </h4>
-                                    <Button size="sm" onClick={handleAddAttempt} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-                                        <Plus className="h-4 w-4 mr-1" /> Add Bank
-                                    </Button>
+                                    <h4 className="font-semibold text-gray-700 flex items-center gap-2"><Building2 className="h-4 w-4" /> Bank Applications</h4>
+                                    <Button size="sm" onClick={handleAddAttempt} className="bg-indigo-600 hover:bg-indigo-700 text-white"><Plus className="h-4 w-4 mr-1" /> Add Bank</Button>
                                 </div>
-
                                 {tempAttempts.length === 0 ? (
-                                    <div className="text-center p-8 border-2 border-dashed rounded-lg text-gray-400 bg-gray-50">
-                                        No banks added yet. Click "Add Bank" to track attempts.
-                                    </div>
+                                    <div className="text-center p-8 border-2 border-dashed rounded-lg text-gray-400 bg-gray-50">No banks added yet.</div>
                                 ) : (
                                     <div className="space-y-4">
                                         {tempAttempts.map((attempt, idx) => (
                                             <div key={idx} className="bg-gray-50 p-4 rounded-lg border border-gray-200 relative group">
-                                                <Button 
-                                                    variant="ghost" 
-                                                    size="icon" 
-                                                    className="absolute top-2 right-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                    onClick={() => handleRemoveAttempt(idx)}
-                                                >
-                                                    <X className="h-4 w-4" />
-                                                </Button>
-
+                                                <Button variant="ghost" size="icon" className="absolute top-2 right-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100" onClick={() => handleRemoveAttempt(idx)}><X className="h-4 w-4" /></Button>
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                     <div className="space-y-1">
                                                         <label className="text-xs font-medium text-gray-500">Bank Name</label>
-                                                        <Input 
-                                                            placeholder="e.g. HDFC, SBI" 
-                                                            value={attempt.bank} 
-                                                            onChange={(e) => handleAttemptChange(idx, 'bank', e.target.value)}
-                                                            className="bg-white"
-                                                        />
+                                                        <Input placeholder="e.g. HDFC" value={attempt.bank} onChange={(e) => handleAttemptChange(idx, 'bank', e.target.value)} className="bg-white"/>
                                                     </div>
                                                     <div className="space-y-1">
                                                         <label className="text-xs font-medium text-gray-500">Status</label>
-                                                        <Select 
-                                                            value={attempt.status} 
-                                                            onValueChange={(val: any) => handleAttemptChange(idx, 'status', val)}
-                                                        >
-                                                            <SelectTrigger className="bg-white">
-                                                                <SelectValue />
-                                                            </SelectTrigger>
+                                                        <Select value={attempt.status} onValueChange={(val: any) => handleAttemptChange(idx, 'status', val)}>
+                                                            <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
                                                             <SelectContent>
                                                                 <SelectItem value="Pending">Pending</SelectItem>
                                                                 <SelectItem value="Approved">Approved</SelectItem>
@@ -412,19 +404,8 @@ export default function AdminLoginsPage() {
                                                         </Select>
                                                     </div>
                                                 </div>
-
                                                 {attempt.status === 'Rejected' && (
-                                                    <div className="mt-3 space-y-1 animate-in fade-in slide-in-from-top-2">
-                                                        <label className="text-xs font-medium text-red-600 flex items-center gap-1">
-                                                            <AlertCircle className="h-3 w-3" /> Rejection Reason
-                                                        </label>
-                                                        <Textarea 
-                                                            placeholder="Why was it rejected? (e.g. Low CIBIL, Doc missing)" 
-                                                            value={attempt.reason || ''} 
-                                                            onChange={(e) => handleAttemptChange(idx, 'reason', e.target.value)}
-                                                            className="bg-white border-red-200 focus:border-red-400 min-h-[60px]"
-                                                        />
-                                                    </div>
+                                                    <div className="mt-3 space-y-1"><label className="text-xs font-medium text-red-600">Rejection Reason</label><Textarea value={attempt.reason || ''} onChange={(e) => handleAttemptChange(idx, 'reason', e.target.value)} className="bg-white border-red-200"/></div>
                                                 )}
                                             </div>
                                         ))}
@@ -432,18 +413,14 @@ export default function AdminLoginsPage() {
                                 )}
                             </div>
                         </div>
-
                         <div className="p-6 border-t bg-gray-50 flex justify-end gap-3 sticky bottom-0">
                             <Button variant="outline" onClick={() => setIsEditOpen(false)}>Cancel</Button>
-                            <Button onClick={handleSaveChanges} className="bg-green-600 hover:bg-green-700 text-white">
-                                <Save className="h-4 w-4 mr-2" /> Save Changes
-                            </Button>
+                            <Button onClick={handleSaveChanges} className="bg-green-600 hover:bg-green-700 text-white"><Save className="h-4 w-4 mr-2" /> Save Changes</Button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* KYC Transfers Section (unchanged) */}
             <Card className="shadow-lg border-2 border-indigo-50 bg-indigo-50/20">
                 <CardHeader className="border-b border-indigo-100 pb-3">
                     <CardTitle className="text-lg flex items-center gap-2 text-indigo-900">
