@@ -35,7 +35,7 @@ export default async function TelecallerLeadsPage({
 
   // 2. Pagination Logic
   const page = Number(searchParams.page) || 1
-  const pageSize = 20
+  const pageSize = 100
   const from = (page - 1) * pageSize
   const to = from + pageSize - 1
 
