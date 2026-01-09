@@ -23,6 +23,7 @@ export function DailyWelcomeModal() {
   const [topPerformer, setTopPerformer] = useState<{ name: string; amount: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [prediction, setPrediction] = useState("")
+  const [userName, setUserName] = useState("") // State for current user name
   const supabase = createClient()
   const { toast } = useToast()
 
@@ -38,7 +39,21 @@ export function DailyWelcomeModal() {
         return
       }
 
-      // 2. Fetch Top Performer
+      // 2. Fetch Current User Details (Name)
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: userData } = await supabase
+          .from('users')
+          .select('full_name')
+          .eq('id', user.id)
+          .single()
+        
+        if (userData?.full_name) {
+          setUserName(userData.full_name)
+        }
+      }
+
+      // 3. Fetch Top Performer
       const { data, error } = await supabase.rpc('get_top_performer')
 
       if (data) {
@@ -47,7 +62,7 @@ export function DailyWelcomeModal() {
         setTopPerformer({ name: "No one yet", amount: 0 })
       }
 
-      // 3. Open Modal
+      // 4. Open Modal
       setIsOpen(true)
       setLoading(false)
     }
@@ -77,14 +92,12 @@ export function DailyWelcomeModal() {
     <Dialog open={isOpen} onOpenChange={() => {}}> 
       <DialogContent className="sm:max-w-md text-center bg-gradient-to-br from-indigo-50 to-white border-2 border-indigo-100 shadow-2xl">
         
-        {/* --- ACCESSIBILITY FIX START --- */}
         <DialogHeader>
           <DialogTitle className="sr-only">Daily Top Performer Announcement</DialogTitle>
           <DialogDescription className="sr-only">
             See the top performer of the month and enter your prediction for the next champion.
           </DialogDescription>
         </DialogHeader>
-        {/* --- ACCESSIBILITY FIX END --- */}
 
         {/* Floating Flowers Animation */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none z-0 opacity-40">
@@ -101,6 +114,17 @@ export function DailyWelcomeModal() {
         </div>
 
         <div className="relative z-10 py-6">
+          
+          {/* --- NEW GREETING TEXT --- */}
+          <div className="mb-8">
+            <h1 className="text-xl font-bold text-gray-800">
+              Good Morning, <span className="text-indigo-600">{userName || 'Champion'}</span>! ☀️
+            </h1>
+            <p className="text-sm font-medium text-gray-500 mt-1 uppercase tracking-wide">
+              It's your time to shine
+            </p>
+          </div>
+
           <div className="mx-auto w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mb-4 shadow-inner">
              <Trophy className="h-10 w-10 text-yellow-600 animate-pulse" />
           </div>
