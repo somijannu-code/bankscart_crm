@@ -55,6 +55,19 @@ const shuffleArray = <T,>(array: T[]): T[] => {
   return newArray;
 };
 
+// --- NEW HELPER: Check for Stale Leads ---
+const isStale = (lastContacted: string | null, status: string) => {
+  // Ignore closed/inactive statuses
+  if (['Disbursed', 'not_eligible', 'Not_Interested', 'nr'].includes(status)) return false; 
+  
+  // Never contacted is definitely stale
+  if (!lastContacted) return true; 
+  
+  // Check if more than 48 hours passed
+  const diffHours = (new Date().getTime() - new Date(lastContacted).getTime()) / (1000 * 60 * 60);
+  return diffHours > 48; 
+};
+
 interface KanbanColumn {
   id: string
   title: string
@@ -1797,27 +1810,44 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                             </div>
                         </TableCell>
                         )}
+                        
                         {visibleColumns.lastContacted && (
                         <TableCell>
                             {(() => {
+                            // Check latest timestamp from call logs first, fallback to leads.last_contacted
                             const lastContactTimestamp = lastCallTimestamps[lead.id] || lead.last_contacted;
-                            if (lastContactTimestamp) {
-                                return (
-                                <div className="flex items-center gap-1">
-                                    <Clock className="h-3 w-3 text-muted-foreground" />
-                                    <span className="text-sm">
-                                    {new Date(lastContactTimestamp).toLocaleString(undefined, {
-                                        year: 'numeric', month: 'numeric', day: 'numeric',
-                                        hour: '2-digit', minute: '2-digit', hour12: true
-                                    })}
-                                    </span>
+                            
+                            // Check Staleness
+                            const stale = isStale(lastContactTimestamp, lead.status);
+
+                            return (
+                                <div className="flex flex-col items-start gap-1">
+                                    {lastContactTimestamp ? (
+                                        <div className="flex items-center gap-1">
+                                            <Clock className="h-3 w-3 text-muted-foreground" />
+                                            <span className="text-sm">
+                                            {new Date(lastContactTimestamp).toLocaleString(undefined, {
+                                                year: 'numeric', month: 'numeric', day: 'numeric',
+                                                hour: '2-digit', minute: '2-digit', hour12: true
+                                            })}
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <span className="text-sm text-muted-foreground">Never</span>
+                                    )}
+
+                                    {/* STALE BADGE */}
+                                    {stale && (
+                                        <Badge variant="outline" className="bg-red-50 text-red-600 border-red-200 text-[10px] h-5 px-1 animate-pulse">
+                                            Stale
+                                        </Badge>
+                                    )}
                                 </div>
-                                );
-                            }
-                            return <span className="text-sm text-muted-foreground">Never</span>;
+                            );
                             })()}
                         </TableCell>
                         )}
+
                         {visibleColumns.loanAmount && (
                         <TableCell>
                             <InlineEditableCell 
