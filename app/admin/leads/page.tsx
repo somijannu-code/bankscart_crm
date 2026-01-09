@@ -11,7 +11,11 @@ interface SearchParams {
   priority?: string
   assigned_to?: string
   search?: string
-  // Page and limit params removed as we are fetching all data
+  source?: string
+  // New Date Params
+  date_range?: string
+  from?: string
+  to?: string
 }
 
 export default async function LeadsPage({
@@ -21,12 +25,7 @@ export default async function LeadsPage({
 }) {
   const supabase = await createClient()
   
-  // REMOVED: Pagination logic (page, limit, offset) to fetch ALL leads
-  // const page = parseInt(searchParams.page || "1")
-  // const limit = Math.min(parseInt(searchParams.limit || "1000"), 10000)
-  // const offset = (page - 1) * limit
-
-  // Build query with filters
+  // Build query
   let query = supabase
     .from("leads")
     .select(`
@@ -35,10 +34,8 @@ export default async function LeadsPage({
       assigner:users!leads_assigned_by_fkey(id, full_name)
     `)
     .order("created_at", { ascending: false })
-    // REMOVED: .range(offset, offset + limit - 1)
 
-  // Apply Server-Side Filters 
-  // (Optional: You can keep these to filter initially, or remove them to handle EVERYTHING on client)
+  // --- APPLY FILTERS ---
   if (searchParams.status) {
     query = query.eq("status", searchParams.status)
   }
@@ -48,12 +45,50 @@ export default async function LeadsPage({
   if (searchParams.assigned_to) {
     query = query.eq("assigned_to", searchParams.assigned_to)
   }
+  if (searchParams.source) {
+    query = query.ilike("source", `%${searchParams.source}%`)
+  }
   if (searchParams.search) {
     query = query.or(
       `name.ilike.%${searchParams.search}%,email.ilike.%${searchParams.search}%,phone.ilike.%${searchParams.search}%,company.ilike.%${searchParams.search}%`,
     )
   }
 
+  // --- DATE FILTER LOGIC ---
+  if (searchParams.date_range && searchParams.date_range !== 'all') {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0) // Start of today
+
+    if (searchParams.date_range === 'today') {
+      query = query.gte('created_at', today.toISOString())
+    } 
+    else if (searchParams.date_range === 'yesterday') {
+      const yesterday = new Date(today)
+      yesterday.setDate(yesterday.getDate() - 1)
+      // Greater than start of yesterday AND less than start of today
+      query = query
+        .gte('created_at', yesterday.toISOString())
+        .lt('created_at', today.toISOString())
+    } 
+    else if (searchParams.date_range === 'this_month') {
+      const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+      query = query.gte('created_at', startOfMonth.toISOString())
+    }
+    else if (searchParams.date_range === 'custom' && searchParams.from) {
+      const fromDate = new Date(searchParams.from)
+      // If 'to' is provided, use it, otherwise default to end of 'from' day
+      const toDate = searchParams.to ? new Date(searchParams.to) : new Date(fromDate)
+      
+      // Ensure 'to' covers the full day (23:59:59)
+      toDate.setHours(23, 59, 59, 999)
+      
+      query = query
+        .gte('created_at', fromDate.toISOString())
+        .lte('created_at', toDate.toISOString())
+    }
+  }
+
+  // Fetch Data
   const { data: leads } = await query
 
   // Get telecallers for assignment
@@ -63,7 +98,9 @@ export default async function LeadsPage({
     .eq("role", "telecaller")
     .eq("is_active", true)
 
-  // Get stats
+  // Get total stats (independent of filters for the "All Leads" count usually, 
+  // but usually dashboard stats want the *filtered* count or *total* count. 
+  // Here keeping total count as raw total)
   const { count: totalLeads } = await supabase.from("leads").select("*", { count: "exact", head: true })
 
   const { count: unassignedLeads } = await supabase
@@ -157,11 +194,11 @@ export default async function LeadsPage({
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <FileSpreadsheet className="h-5 w-5" />
-            All Leads ({totalLeads?.toLocaleString() || 0})
+            {/* Show filtered count if available, or total */}
+            {leads ? `Showing ${leads.length} Leads` : `All Leads (${totalLeads?.toLocaleString() || 0})`}
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {/* We pass all fetched leads to the client component */}
           <LeadsTable leads={leads || []} telecallers={telecallers || []} />
         </CardContent>
       </Card>
