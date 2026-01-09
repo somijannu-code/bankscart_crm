@@ -42,7 +42,6 @@ export default function AdminLoginsPage() {
     const fetchData = async () => {
         setLoading(true)
         
-        // A. Fetch Logins
         let loginsQuery = supabase
             .from('logins') 
             .select(`
@@ -52,7 +51,6 @@ export default function AdminLoginsPage() {
             `)
             .order('updated_at', { ascending: false })
 
-        // Date Logic
         const todayDate = new Date()
         const startOfToday = new Date(todayDate.setHours(0,0,0,0)).toISOString()
 
@@ -62,13 +60,11 @@ export default function AdminLoginsPage() {
             loginsQuery = loginsQuery.gte('updated_at', new Date(todayDate.getFullYear(), todayDate.getMonth(), 1).toISOString())
         }
 
-        // B. Fetch Today's KYC Transfers (UPDATED to fetch KYC Member Name)
         const transfersQuery = supabase
             .from('leads')
             .select(`
                 id, name, updated_at,
-                users:assigned_to ( full_name ),
-                kyc_member:users!kyc_member_id ( full_name )
+                users:assigned_to ( full_name )
             `)
             .eq('status', 'Transferred to KYC')
             .gte('updated_at', startOfToday)
@@ -142,9 +138,11 @@ export default function AdminLoginsPage() {
         })
     }, [logins, searchQuery, selectedBank])
 
-    // All Telecaller Stats
+    // --- NEW FEATURE: All Telecaller Stats ---
     const allTelecallerStats = useMemo(() => {
         const counts: Record<string, number> = {}
+        // Use 'logins' (unfiltered by search) to get accurate counts for the selected date range
+        // If you want counts to change based on search/bank filter, change 'logins' to 'filteredLogins' below
         logins.forEach(l => {
             const name = l.users?.full_name || l.users?.email || 'Unknown User'
             counts[name] = (counts[name] || 0) + 1
@@ -152,7 +150,7 @@ export default function AdminLoginsPage() {
         return Object.entries(counts)
             .map(([name, count]) => ({ name, count }))
             .sort((a, b) => b.count - a.count)
-    }, [logins])
+    }, [logins]) // Re-calculates when logins or date filter changes
 
     const getLoginStats = (login: any) => {
         const attempts = Array.isArray(login.bank_attempts) ? login.bank_attempts : [];
@@ -219,8 +217,9 @@ export default function AdminLoginsPage() {
                 </div>
             </div>
 
-            {/* Stats Cards */}
+            {/* Stats Cards - NOW 3 COLUMNS */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* 1. Total Logins */}
                 <Card className="shadow-sm border-l-4 border-indigo-500 h-full">
                     <CardContent className="p-5 flex flex-col justify-between h-full">
                         <div className="flex items-center gap-3 mb-2">
@@ -231,6 +230,7 @@ export default function AdminLoginsPage() {
                     </CardContent>
                 </Card>
 
+                {/* 2. Top Performers (Top 3) */}
                 <Card className="shadow-sm border-l-4 border-amber-500 h-full">
                     <CardContent className="p-5">
                         <div className="flex items-center gap-3 mb-3">
@@ -249,15 +249,17 @@ export default function AdminLoginsPage() {
                     </CardContent>
                 </Card>
 
+                {/* 3. NEW FEATURE: All Telecallers Breakdown */}
                 <Card className="shadow-sm border-l-4 border-blue-500 h-full">
                     <CardContent className="p-5 h-[200px] flex flex-col">
                         <div className="flex items-center gap-3 mb-3">
                             <div className="p-2 bg-blue-50 rounded-lg text-blue-600"><Users className="h-5 w-5" /></div>
                             <span className="text-sm font-medium text-gray-500">Telecaller Breakdown</span>
                         </div>
+                        
                         <div className="flex-1 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
                             {allTelecallerStats.length === 0 ? (
-                                <p className="text-xs text-gray-400">No logins found.</p>
+                                <p className="text-xs text-gray-400">No logins found for this period.</p>
                             ) : (
                                 <table className="w-full text-sm">
                                     <tbody>
@@ -359,7 +361,7 @@ export default function AdminLoginsPage() {
                 </CardContent>
             </Card>
 
-            {/* Edit Modal (unchanged) */}
+            {/* Modals and KYC section unchanged */}
             {isEditOpen && editingLogin && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
                     <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -419,7 +421,6 @@ export default function AdminLoginsPage() {
                 </div>
             )}
 
-            {/* KYC Transfers Section - WITH NEW KYC MEMBER COLUMN */}
             <Card className="shadow-lg border-2 border-indigo-50 bg-indigo-50/20">
                 <CardHeader className="border-b border-indigo-100 pb-3">
                     <CardTitle className="text-lg flex items-center gap-2 text-indigo-900">
@@ -435,27 +436,17 @@ export default function AdminLoginsPage() {
                                 <TableRow>
                                     <TableHead className="font-semibold text-indigo-800">Telecaller Name</TableHead>
                                     <TableHead className="font-semibold text-indigo-800">Lead Name</TableHead>
-                                    <TableHead className="font-semibold text-indigo-800">KYC Member</TableHead>
                                     <TableHead className="font-semibold text-indigo-800 text-right">Time</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {transfers.length === 0 ? (
-                                    <TableRow><TableCell colSpan={4} className="text-center h-24 text-gray-500 italic">No leads transferred today.</TableCell></TableRow>
+                                    <TableRow><TableCell colSpan={3} className="text-center h-24 text-gray-500 italic">No leads transferred today.</TableCell></TableRow>
                                 ) : (
                                     transfers.map((t) => (
                                         <TableRow key={t.id} className="hover:bg-indigo-50/60 border-b border-indigo-100">
                                             <TableCell className="font-medium text-gray-800">{t.users?.full_name || 'Unknown'}</TableCell>
                                             <TableCell className="text-gray-700">{t.name}</TableCell>
-                                            <TableCell>
-                                                {t.kyc_member?.full_name ? (
-                                                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                                                        {t.kyc_member.full_name}
-                                                    </Badge>
-                                                ) : (
-                                                    <span className="text-xs text-gray-400 italic">Pending Pickup</span>
-                                                )}
-                                            </TableCell>
                                             <TableCell className="text-right text-gray-500 font-mono text-sm">{new Date(t.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</TableCell>
                                         </TableRow>
                                     ))
