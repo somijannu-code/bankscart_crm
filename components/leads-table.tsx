@@ -289,10 +289,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [lastCallTimestamps, setLastCallTimestamps] = useState<Record<string, string | null>>({})
   const [telecallerStatus, setTelecallerStatus] = useState<Record<string, boolean>>({})
 
-  // --- UPDATED FETCH LOGIC: WITH BATCHING ---
   useEffect(() => {
     const fetchData = async () => {
-      // 1. Fetch Attendance (No changes needed, typically small data)
+      // 1. Fetch Attendance
       try {
         const today = new Date().toISOString().split('T')[0]
         const { data: attendanceRecords } = await supabase
@@ -311,19 +310,16 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         console.error("Error fetching telecaller status:", err)
       }
 
-      // 2. Fetch Call Logs (BATCHED)
+      // 2. Fetch Call Logs (Batch Logic)
       const leadIds = leads.map(l => l.id);
       if (leadIds.length === 0) return;
 
       try {
-        // --- FIX: Batch the call logs request to prevent URL Too Long errors ---
-        const BATCH_SIZE = 100; // Safe chunk size
+        const BATCH_SIZE = 100;
         const allCallLogs: any[] = [];
         
-        // Loop through leadIds in chunks
         for (let i = 0; i < leadIds.length; i += BATCH_SIZE) {
             const chunk = leadIds.slice(i, i + BATCH_SIZE);
-            
             const { data, error } = await supabase
                 .from("call_logs")
                 .select("lead_id, created_at")
@@ -332,7 +328,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
             if (error) {
                 console.error("Error fetching chunk of call logs:", error);
-                // Continue to next chunk even if one fails
                 continue;
             }
             if (data) {
@@ -340,7 +335,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
             }
         }
 
-        // Process combined logs
         const latestCalls: Record<string, string | null> = {};
         const seenLeadIds = new Set<string>();
 
@@ -392,7 +386,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     return leads.map(lead => ({
       ...lead,
       lead_score: calculateLeadScore(lead),
-      // --- CRITICAL FIX: Ensure tags is always an array ---
       tags: Array.isArray(lead.tags) ? lead.tags : [] 
     }))
   }, [leads])
@@ -541,11 +534,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     setShowDuplicatesDialog(true)
   }
 
-  // --- UPDATED EXPORT FUNCTION ---
   const exportToCSV = () => {
     const columnMapping: Record<string, { label: string; value: (l: Lead) => any }[]> = {
       name: [{ label: 'Name', value: l => l.name }],
-      // Split 'contact' into separate Phone and Email columns
       contact: [
         { label: 'Phone', value: l => l.phone },
         { label: 'Email', value: l => l.email }
@@ -650,13 +641,12 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     setSmsBody("")
   }
 
-  // --- UPDATED: BULK ASSIGN (API Based to prevent notification spam) ---
+  // --- UPDATED: BULK ASSIGN + AUTO STATUS RESET ---
   const handleBulkAssign = async () => {
     if (bulkAssignTo.length === 0 || selectedLeads.length === 0) return
 
     try {
       // 1. Group leads by assignee (Round Robin distribution)
-      // This ensures we respect your selection of multiple assignees
       const assignments: Record<string, string[]> = {}
       const telecallerIds = bulkAssignTo
 
@@ -668,9 +658,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         assignments[telecallerId].push(leadId)
       })
 
-      // 2. Call API for each assignee group
-      // This sends 1 notification per assignee (e.g., "You have 50 new leads")
-      // instead of 1 per lead, preventing phone spam.
+      // 2. Call API for assignment (Handles assignment + notification)
       const promises = Object.entries(assignments).map(async ([assigneeId, leadIds]) => {
         const response = await fetch('/api/admin/leads/bulk-assign', {
           method: 'POST',
@@ -678,7 +666,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
           body: JSON.stringify({
             leadIds: leadIds,
             assignedTo: assigneeId,
-            assignerName: 'Admin' // You can fetch real name if needed
+            assignerName: 'Admin' 
           })
         })
         
@@ -690,8 +678,22 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       })
 
       await Promise.all(promises)
+
+      // 3. FEATURE: Reset Status to 'New' for all manually assigned leads
+      const { error: statusUpdateError } = await supabase
+        .from("leads")
+        .update({
+            status: 'new',
+            last_contacted: new Date().toISOString()
+        })
+        .in("id", selectedLeads)
+
+      if (statusUpdateError) {
+          console.error("Warning: Leads assigned but failed to reset status to New:", statusUpdateError)
+          // Not throwing error to avoid confusion, as assignment succeeded.
+      }
       
-      setSuccessMessage(`Successfully assigned ${selectedLeads.length} leads.`)
+      setSuccessMessage(`Successfully assigned ${selectedLeads.length} leads and reset status to New.`)
       setSelectedLeads([])
       setBulkAssignTo([]) 
       window.location.reload()
@@ -843,8 +845,8 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       const shuffledTelecallers = shuffleArray(activeTelecallers);
 
       // --- Grouping Logic for Batch API Call ---
-      const assignments: Record<string, string[]> = {}; // Map telecallerId -> [leadId, leadId...]
-      const reassignedLeadIds: string[] = []; // Track leads that need status reset
+      const assignments: Record<string, string[]> = {}; 
+      const reassignedLeadIds: string[] = [];
 
       const leadCounts = activeTelecallers.map(tc => ({
           id: tc.id,
@@ -874,20 +876,18 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         }
 
         if (newTelecallerId) {
-            // Group by assignee
             if (!assignments[newTelecallerId]) {
                 assignments[newTelecallerId] = [];
             }
             assignments[newTelecallerId].push(lead.id);
 
-            // Track reassignments for status update
             if (isReassign) {
                 reassignedLeadIds.push(lead.id);
             }
         }
       });
 
-      // 1. Execute Bulk Assignment API Calls (Notification Safe)
+      // 1. Execute Bulk Assignment API Calls
       const assignmentPromises = Object.entries(assignments).map(async ([assigneeId, leadIds]) => {
           const response = await fetch('/api/admin/leads/bulk-assign', {
             method: 'POST',
@@ -906,7 +906,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
       await Promise.all(assignmentPromises);
 
-      // 2. Perform Status Reset for Reassigned Leads (Direct DB update, no notification trigger)
+      // 2. Perform Status Reset for Reassigned Leads
       if (reassignedLeadIds.length > 0) {
         const { error } = await supabase
             .from("leads")
