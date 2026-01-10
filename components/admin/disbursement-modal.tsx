@@ -275,6 +275,7 @@ export function DisbursementModal({ onSuccess }: DisbursementModalProps) {
                                             <SelectItem value="Axis Bank">Axis Bank</SelectItem>
                                             <SelectItem value="Finnable">Finnable</SelectItem>
                                             <SelectItem value="Incred">Incred</SelectItem>
+                                            <SelectItem value="L&T">L&T</SelectItem>
                                             <SelectItem value="Other">Other</SelectItem>
                                         </SelectContent>
                                     </Select>
