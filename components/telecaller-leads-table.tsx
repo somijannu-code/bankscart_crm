@@ -1,4 +1,4 @@
-// components/telecaller-leads-table.tsx
+1// components/telecaller-leads-table.tsx
 "use client"
 
 import { useState, useEffect } from "react"
@@ -64,7 +64,6 @@ export function TelecallerLeadsTable({
     company: true, // Added default true since toggle is gone
     status: true,
     priority: true,
-    created: true,
     loanAmount: true,
     lastContacted: true, // Added default true since toggle is gone
     actions: true // Added default true since toggle is gone
