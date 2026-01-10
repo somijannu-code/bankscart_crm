@@ -1,10 +1,10 @@
-1// components/telecaller-leads-table.tsx
+// components/telecaller-leads-table.tsx
 "use client"
 
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { 
-  User, Building, Calendar, Clock, Eye, Phone, Mail, 
+  User, Building, Clock, Eye, Phone, Mail, 
   Search, ChevronDown, ChevronUp, MessageSquare
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -53,20 +53,21 @@ export function TelecallerLeadsTable({
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [priorityFilter, setPriorityFilter] = useState<string>("all")
+  
+  // Default sorting remains by 'created_at' descending (Latest first)
   const [sortField, setSortField] = useState<string>("created_at")
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
   
-  // Note: Since the filter UI is removed, these defaults control what is visible.
-  // Add 'company', 'actions' etc. to true if you want them always shown.
+  // Removed 'created_at' from visible columns logic
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
     name: true,
     contact: true,
-    company: true, // Added default true since toggle is gone
+    company: true,
     status: true,
     priority: true,
     loanAmount: true,
-    lastContacted: true, // Added default true since toggle is gone
-    actions: true // Added default true since toggle is gone
+    lastContacted: true,
+    actions: true
   })
   const [isCallInitiated, setIsCallInitiated] = useState(false) 
   
@@ -310,8 +311,6 @@ Please share below documents.
               <SelectItem value="low">Low</SelectItem>
             </SelectContent>
           </Select>
-          
-          {/* Columns dropdown has been removed here */}
         </div>
       </div>
 
@@ -349,14 +348,7 @@ Please share below documents.
               )}
               {visibleColumns.loanType && <TableHead>Loan Type</TableHead>}
               {visibleColumns.source && <TableHead>Source</TableHead>}
-              {visibleColumns.created && (
-                <TableHead 
-                  className="cursor-pointer" 
-                  onClick={() => handleSort('created_at')}
-                >
-                  Created {sortField === 'created_at' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
-                </TableHead>
-              )}
+              {/* Removed "Created" TableHead */}
               {visibleColumns.lastContacted && (
                 <TableHead 
                   className="cursor-pointer" 
@@ -439,14 +431,7 @@ Please share below documents.
                     {getSafeValue(lead.source, 'N/A')}
                   </TableCell>
                 )}
-                {visibleColumns.created && (
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4" />
-                      {lead.created_at ? new Date(lead.created_at).toLocaleDateString() : 'Unknown date'}
-                    </div>
-                  </TableCell>
-                )}
+                {/* Removed "Created" TableCell */}
                 {visibleColumns.lastContacted && (
                   <TableCell>
                     <div className="flex items-center gap-2">
