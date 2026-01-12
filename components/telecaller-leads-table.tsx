@@ -1,4 +1,3 @@
-// components/telecaller-leads-table.tsx
 "use client"
 
 import { useState, useEffect } from "react"
@@ -54,11 +53,9 @@ export function TelecallerLeadsTable({
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [priorityFilter, setPriorityFilter] = useState<string>("all")
   
-  // Default sorting remains by 'created_at' descending (Latest first)
   const [sortField, setSortField] = useState<string>("created_at")
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
   
-  // Removed 'created_at' from visible columns logic
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
     name: true,
     contact: true,
@@ -93,6 +90,7 @@ export function TelecallerLeadsTable({
   }
 
   const getWhatsAppLink = (phoneNumber: string) => {
+    if (!phoneNumber) return "#";
     const cleanedPhone = phoneNumber.replace(/\D/g, '')
 
     const message = `Dear *Patron* Thank you for showing interest with the *ICICI Bank Personal Loan!* We’re excited to offer you one of the best deals with attractive *ROI (9.99 %) and Zero processing fee* and for a quick *approval*
@@ -107,12 +105,16 @@ Please share below documents.
     return `https://wa.me/${cleanedPhone}?text=${encodedMessage}`
   }
 
+  // --- FIX APPLIED HERE: Added null checks ---
   const filteredLeads = leads.filter(lead => {
+    const lowerSearch = searchTerm.toLowerCase();
+    
+    // We check if the field exists (&&) before calling .toLowerCase() or .includes()
     const matchesSearch = searchTerm === "" || 
-      lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      lead.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      lead.phone.includes(searchTerm) ||
-      lead.company.toLowerCase().includes(searchTerm.toLowerCase())
+      (lead.name && lead.name.toLowerCase().includes(lowerSearch)) ||
+      (lead.email && lead.email.toLowerCase().includes(lowerSearch)) ||
+      (lead.phone && lead.phone.includes(searchTerm)) ||
+      (lead.company && lead.company.toLowerCase().includes(lowerSearch));
     
     const matchesStatus = statusFilter === "all" || lead.status === statusFilter
     const matchesPriority = priorityFilter === "all" || lead.priority === priorityFilter
@@ -122,13 +124,14 @@ Please share below documents.
     let aValue = a[sortField as keyof Lead]
     let bValue = b[sortField as keyof Lead]
     
+    // Safety check for sorting as well
     if (typeof aValue === 'string' && typeof bValue === 'string') {
       aValue = aValue.toLowerCase()
       bValue = bValue.toLowerCase()
     }
     
-    if (aValue === null) return sortDirection === 'asc' ? -1 : 1
-    if (bValue === null) return sortDirection === 'asc' ? 1 : -1
+    if (aValue === null || aValue === undefined) return sortDirection === 'asc' ? -1 : 1
+    if (bValue === null || bValue === undefined) return sortDirection === 'asc' ? 1 : -1
     
     if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1
     if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1
@@ -206,43 +209,27 @@ Please share below documents.
 
   const getPriorityVariant = (priority: string) => {
     switch (priority) {
-      case "high":
-        return "destructive"
-      case "medium":
-        return "default"
-      case "low":
-        return "secondary"
-      default:
-        return "secondary"
+      case "high": return "destructive"
+      case "medium": return "default"
+      case "low": return "secondary"
+      default: return "secondary"
     }
   }
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "new":
-        return "bg-blue-100 text-blue-800"
-      case "contacted":
-        return "bg-yellow-100 text-yellow-800"
-      case "Interested":
-        return "bg-green-100 text-green-800"
-      case "Documents_Sent":
-        return "bg-purple-100 text-purple-800"
-      case "Login":
-        return "bg-orange-100 text-orange-800"
-      case "Disbursed":
-        return "bg-green-100 text-green-800"
-      case "Not_Interested":
-        return "bg-red-100 text-red-800"
-      case "Call_Back":
-        return "bg-indigo-100 text-indigo-800"
-      case "not_eligible":
-        return "bg-red-100 text-red-800"
-      case "nr":
-        return "bg-gray-100 text-gray-800"
-      case "self_employed":
-        return "bg-amber-100 text-amber-800"
-      default:
-        return "bg-gray-100 text-gray-800"
+      case "new": return "bg-blue-100 text-blue-800"
+      case "contacted": return "bg-yellow-100 text-yellow-800"
+      case "Interested": return "bg-green-100 text-green-800"
+      case "Documents_Sent": return "bg-purple-100 text-purple-800"
+      case "Login": return "bg-orange-100 text-orange-800"
+      case "Disbursed": return "bg-green-100 text-green-800"
+      case "Not_Interested": return "bg-red-100 text-red-800"
+      case "Call_Back": return "bg-indigo-100 text-indigo-800"
+      case "not_eligible": return "bg-red-100 text-red-800"
+      case "nr": return "bg-gray-100 text-gray-800"
+      case "self_employed": return "bg-amber-100 text-amber-800"
+      default: return "bg-gray-100 text-gray-800"
     }
   }
 
@@ -348,7 +335,6 @@ Please share below documents.
               )}
               {visibleColumns.loanType && <TableHead>Loan Type</TableHead>}
               {visibleColumns.source && <TableHead>Source</TableHead>}
-              {/* Removed "Created" TableHead */}
               {visibleColumns.lastContacted && (
                 <TableHead 
                   className="cursor-pointer" 
@@ -431,7 +417,6 @@ Please share below documents.
                     {getSafeValue(lead.source, 'N/A')}
                   </TableCell>
                 )}
-                {/* Removed "Created" TableCell */}
                 {visibleColumns.lastContacted && (
                   <TableCell>
                     <div className="flex items-center gap-2">
