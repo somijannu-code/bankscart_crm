@@ -125,6 +125,7 @@ export function LeadFilters({ telecallers }: LeadFiltersProps) {
             <SelectItem value="Not_Interested">Not Interested</SelectItem>
             <SelectItem value="follow_up">Follow Up</SelectItem>
             <SelectItem value="not_eligible">Not Eligible</SelectItem>
+            <SelectItem value="self_employed">Self Employed</SelectItem>
             <SelectItem value="nr">Not Reachable</SelectItem>
           </SelectContent>
         </Select>
