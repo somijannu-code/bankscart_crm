@@ -84,6 +84,7 @@ const KANBAN_COLUMNS: KanbanColumn[] = [
   { id: 'Disbursed', title: 'Disbursed', color: 'bg-green-600' },
   { id: 'nr', title: 'Not Reachable', color: 'bg-gray-400' },
   { id: 'Not_Interested', title: 'Not Interested', color: 'bg-red-500' },
+  { id: 'self_employed', title: 'Self Employed', color: 'bg-red-500' },
   { id: 'not_eligible', title: 'Not Eligible', color: 'bg-red-500' },
 ]
 
@@ -382,7 +383,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
     const statusScores: Record<string, number> = {
       'Interested': 20, 'Documents_Sent': 18, 'Login': 15, 'contacted': 12, 'follow_up': 10,
-      'nr':0, 'new': 8, 'Not_Interested': 2, 'not_eligible': 1
+      'nr':0, 'new': 8, 'Not_Interested': 2, 'not_eligible': 1, 'self_employed': 1
     }
     score += statusScores[lead.status] || 5
     if (lead.priority === 'high') score += 15
@@ -1486,6 +1487,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     <SelectItem value="Disbursed">Disbursed</SelectItem>
                     <SelectItem value="follow_up">follow_up</SelectItem>
                     <SelectItem value="Not_Interested">Not Interested</SelectItem>
+                    <SelectItem value="self_employed">Self Employed</SelectItem>
                     <SelectItem value="not_eligible">Not Eligible</SelectItem>
                   </SelectContent>
                 </Select>
