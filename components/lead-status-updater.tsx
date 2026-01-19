@@ -31,7 +31,6 @@ interface LeadStatusUpdaterProps {
 
 const statusOptions = [
   { value: "new", label: "New", color: "bg-blue-100 text-blue-800" },
-  { value: "contacted", label: "Contacted", color: "bg-yellow-100 text-yellow-800" },
   { value: "Interested", label: "Interested", color: "bg-green-100 text-green-800" },
   { value: "Documents_Sent", label: "Documents Sent", color: "bg-purple-100 text-purple-800" },
   { value: "Login", label: "Login", color: "bg-orange-100 text-orange-800" },
