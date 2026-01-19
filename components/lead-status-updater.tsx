@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils"
 
 // --- CONSTANTS ---
 // The specific User ID to hold Recycled/Dead leads (instead of null)
+// This ensures we satisfy RLS policies that might block 'null' assignments
 const RECYCLE_USER_ID = "7a20f468-4033-476c-9ba9-e2a1a6f5d258";
 
 interface LeadStatusUpdaterProps {
@@ -190,24 +191,40 @@ export function LeadStatusUpdater({
 
       // --- NEW LOGIC: TWO-STRIKE RULE IMPLEMENTATION ---
       if (status === "Not_Interested") {
-        // 1. Fetch current lead tags to check for existing Strike
+        // 1. Fetch current lead tags
         const { data: leadData } = await supabase
           .from("leads")
           .select("tags")
           .eq("id", leadId)
           .single()
         
-        const currentTags = leadData?.tags || []
+        // --- FIX: Robust Tag Parsing ---
+        let currentTags: string[] = [];
         
+        if (Array.isArray(leadData?.tags)) {
+             currentTags = leadData.tags;
+        } else if (typeof leadData?.tags === 'string') {
+             // If Supabase returns it as a string "['tag1']", parse it safely
+             try {
+                // Remove potential double quotes wrapping a JSON array
+                const rawTags = leadData.tags;
+                const parsed = JSON.parse(rawTags);
+                if (Array.isArray(parsed)) currentTags = parsed;
+             } catch (e) {
+                // Fallback: If it's a simple CSV string or malformed, treat as empty or reset
+                console.warn("Could not parse tags:", leadData.tags);
+                currentTags = []; 
+             }
+        }
+        
+        // --- STRIKE CHECK ---
         if (currentTags.includes("NI_STRIKE_1")) {
             // STRIKE 2: DEAD BUCKET
             finalStatus = "dead_bucket"
-            // Assign to the Recycle User instead of null to satisfy RLS/Constraints
             updateData.assigned_to = RECYCLE_USER_ID; 
         } else {
             // STRIKE 1: RECYCLE POOL
             finalStatus = "recycle_pool"
-            // Assign to the Recycle User instead of null to satisfy RLS/Constraints
             updateData.assigned_to = RECYCLE_USER_ID; 
             updateData.tags = [...currentTags, "NI_STRIKE_1"]
         }
