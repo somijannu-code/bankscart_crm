@@ -8,12 +8,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Phone, Clock, MessageSquare, IndianRupee, AlertCircle } from "lucide-react" 
+import { Clock, MessageSquare, IndianRupee, AlertCircle } from "lucide-react" 
 import { useCallTracking } from "@/context/call-tracking-context"
 import { toast } from "sonner"
 import { ScheduleFollowUpModal } from "./schedule-follow-up-modal" 
-import { format } from "date-fns"
 import { cn } from "@/lib/utils"
+
+// --- CONSTANT: The Recycle Bin User ID ---
+const RECYCLE_USER_ID = "7a20f468-4033-476c-9ba9-e2a1a6f5d258";
 
 interface LeadStatusUpdaterProps {
   leadId: string
@@ -63,7 +65,7 @@ export function LeadStatusUpdater({
   const [notEligibleReason, setNotEligibleReason] = useState<string>("")
 
   const supabase = createClient()
-  const { activeCall, startCall, endCall, updateCallDuration, formatDuration } = useCallTracking()
+  const { activeCall, endCall, updateCallDuration, formatDuration } = useCallTracking()
 
   const WHATSAPP_MESSAGE_BASE = "hi sir this side {telecaller_name} from ICICI bank kindly share following documents";
   const cleanedPhoneNumber = String(leadPhoneNumber || "").replace(/[^0-9]/g, '');
@@ -135,9 +137,6 @@ export function LeadStatusUpdater({
   }
 
   const updateLeadStatusToFollowUp = async () => {
-    // ... [Follow Up Logic remains same] ...
-    // Copy existing logic or keep as is, it doesn't affect the Recycle Pool issue
-    // Just ensuring we don't break it. 
     try {
       const updateData: any = { 
         status: "follow_up",
@@ -149,6 +148,16 @@ export function LeadStatusUpdater({
       const { error } = await supabase.from("leads").update(updateData).eq("id", leadId)
       if (error) throw error
       
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+         await supabase.from("notes").insert({
+            lead_id: leadId,
+            user_id: user.id,
+            content: "Status changed to: Call Back (Follow-up scheduled)",
+            note_type: "status_change", 
+          })
+      }
+
       setStatus("follow_up")
       onStatusUpdate?.("follow_up", note) 
       setRemarks("")
@@ -156,11 +165,11 @@ export function LeadStatusUpdater({
       toast.success("Lead status set to Call Back.");
     } catch (error) {
       console.error("Error", error)
+      toast.error("Error setting lead status")
     }
   }
 
   const handleStatusUpdate = async () => {
-    // --- VALIDATION CHECKS ---
     const isNotEligible = status === "not_eligible"
     const isNoteEmpty = !note.trim()
     const isNRStatus = status === 'nr'
@@ -175,7 +184,7 @@ export function LeadStatusUpdater({
     
     setIsUpdating(true)
     try {
-      let finalStatus = status; // This might change if logic triggers (e.g. Recycle Pool)
+      let finalStatus = status; 
       const updateData: any = { 
         last_contacted: new Date().toISOString()
       }
@@ -186,9 +195,8 @@ export function LeadStatusUpdater({
         updateData.notes = updateData.notes ? `${updateData.notes}\n\nReason for Not Eligible: ${note}` : `Reason for Not Eligible: ${note}`
       }
 
-      // --- NEW LOGIC: TWO-STRIKE RULE IMPLEMENTATION ---
+      // --- TWO-STRIKE RULE LOGIC ---
       if (status === "Not_Interested") {
-        // 1. Fetch current lead tags to check for existing Strike
         const { data: leadData } = await supabase
           .from("leads")
           .select("tags")
@@ -198,23 +206,19 @@ export function LeadStatusUpdater({
         const currentTags = leadData?.tags || []
         
         if (currentTags.includes("NI_STRIKE_1")) {
-            // STRIKE 2: DEAD BUCKET
+            // STRIKE 2: DEAD BUCKET (Assigned to Recycle User)
             finalStatus = "dead_bucket"
-            updateData.assigned_to = null // Unassign
-            // We do NOT add logic here to add a system note, 
-            // because we do that below in the "status change" note block for cleaner code
+            updateData.assigned_to = RECYCLE_USER_ID // <--- CHANGED HERE
         } else {
-            // STRIKE 1: RECYCLE POOL
+            // STRIKE 1: RECYCLE POOL (Assigned to Recycle User)
             finalStatus = "recycle_pool"
-            updateData.assigned_to = null // Unassign
+            updateData.assigned_to = RECYCLE_USER_ID // <--- CHANGED HERE
             updateData.tags = [...currentTags, "NI_STRIKE_1"]
         }
       }
       
-      // Update the status in our payload
       updateData.status = finalStatus;
 
-      // --- EXECUTE UPDATE ---
       if (status !== currentStatus || isCallInitiated) {
           const { error } = await supabase
             .from("leads")
@@ -223,13 +227,11 @@ export function LeadStatusUpdater({
 
           if (error) throw error
           
-          // Notify Parent with the FINAL calculated status
           onStatusUpdate?.(finalStatus, note) 
           
           const { data: { user } } = await supabase.auth.getUser()
 
           if (user && status !== currentStatus) {
-            // Log System Note about the automation
             let logContent = `Status changed to: ${statusOptions.find(o => o.value === status)?.label || status}`;
             
             if (finalStatus === "recycle_pool") {
@@ -238,16 +240,12 @@ export function LeadStatusUpdater({
                 logContent = "System: Lead marked 'Not Interested' twice. Moved to Dead Bucket.";
             }
 
-            const { error: noteError } = await supabase
-              .from("notes")
-              .insert({
+            await supabase.from("notes").insert({
                 lead_id: leadId,
                 user_id: user.id,
                 content: logContent,
                 note_type: "status_change", 
-              })
-            
-            if (noteError) console.error("Error logging note:", noteError)
+            })
           }
       }
 
@@ -255,7 +253,6 @@ export function LeadStatusUpdater({
         await logCall(callDuration as number)
       }
       
-      // Cleanup
       setNote("")
       setRemarks("")
       setCallDuration(null)
@@ -265,21 +262,22 @@ export function LeadStatusUpdater({
       setStatus("")
       
       if (finalStatus === "recycle_pool" || finalStatus === "dead_bucket") {
-        toast.success("Lead processed and removed from your list (Recycled/Dead).")
+        toast.success("Lead processed and removed from your list.")
       } else {
         toast.success("Lead status updated successfully!")
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error updating lead status:", error)
-      toast.error("Error updating lead status")
+      toast.error("Error updating lead status", {
+        description: error.message || "Unknown error"
+      })
     } finally {
       setIsUpdating(false)
     }
   }
 
   const logCall = async (finalCallDuration: number) => {
-    // ... [Log Call logic remains exactly the same] ...
     try {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
