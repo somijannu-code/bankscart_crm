@@ -12,7 +12,7 @@ import {
   BarChart3, Users, DollarSign, Target, Zap,
   Layout, Table as TableIcon, Settings, Save,
   AlertTriangle, CheckCircle2, XCircle, Sparkles, Upload,
-  Pencil
+  Pencil, RefreshCw, Skull
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -44,7 +44,8 @@ import { Switch } from "@/components/ui/switch"
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination"
 import { cn } from "@/lib/utils"
 
-// --- Helper Functions & Constants ---
+// --- CONSTANTS ---
+const MAX_LEAD_CAP = 450; // Maximum leads an agent can hold before auto-assign skips them
 
 const shuffleArray = <T,>(array: T[]): T[] => {
   const newArray = [...array];
@@ -55,15 +56,10 @@ const shuffleArray = <T,>(array: T[]): T[] => {
   return newArray;
 };
 
-// --- NEW HELPER: Check for Stale Leads ---
+// --- HELPER: Check for Stale Leads ---
 const isStale = (lastContacted: string | null, status: string) => {
-  // Ignore closed/inactive statuses
-  if (['Disbursed', 'not_eligible', 'Not_Interested', 'nr'].includes(status)) return false; 
-  
-  // Never contacted is definitely stale
+  if (['Disbursed', 'not_eligible', 'Not_Interested', 'nr', 'dead_bucket', 'recycle_pool'].includes(status)) return false; 
   if (!lastContacted) return true; 
-  
-  // Check if more than 48 hours passed
   const diffHours = (new Date().getTime() - new Date(lastContacted).getTime()) / (1000 * 60 * 60);
   return diffHours > 48; 
 };
@@ -84,8 +80,10 @@ const KANBAN_COLUMNS: KanbanColumn[] = [
   { id: 'Disbursed', title: 'Disbursed', color: 'bg-green-600' },
   { id: 'nr', title: 'Not Reachable', color: 'bg-gray-400' },
   { id: 'Not_Interested', title: 'Not Interested', color: 'bg-red-500' },
-  { id: 'self_employed', title: 'Self Employed', color: 'bg-red-500' },
-  { id: 'not_eligible', title: 'Not Eligible', color: 'bg-red-500' },
+  { id: 'recycle_pool', title: 'Recycle Pool', color: 'bg-cyan-500' }, // New Bucket for Strike 1
+  { id: 'dead_bucket', title: 'Dead Bucket', color: 'bg-slate-700' },   // New Bucket for Strike 2
+  { id: 'self_employed', title: 'Self Employed', color: 'bg-amber-500' },
+  { id: 'not_eligible', title: 'Not Eligible', color: 'bg-red-900' },
 ]
 
 const parseCSV = (text: string) => {
@@ -383,7 +381,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
     const statusScores: Record<string, number> = {
       'Interested': 20, 'Documents_Sent': 18, 'Login': 15, 'contacted': 12, 'follow_up': 10,
-      'nr':0, 'new': 8, 'Not_Interested': 2, 'not_eligible': 1, 'self_employed': 1
+      'nr':0, 'new': 8, 'Not_Interested': 2, 'not_eligible': 1, 'self_employed': 1, 'recycle_pool': 5, 'dead_bucket': 0
     }
     score += statusScores[lead.status] || 5
     if (lead.priority === 'high') score += 15
@@ -655,12 +653,10 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     setSmsBody("")
   }
 
-  // --- UPDATED: BULK ASSIGN + AUTO STATUS RESET ---
   const handleBulkAssign = async () => {
     if (bulkAssignTo.length === 0 || selectedLeads.length === 0) return
 
     try {
-      // 1. Group leads by assignee (Round Robin distribution)
       const assignments: Record<string, string[]> = {}
       const telecallerIds = bulkAssignTo
 
@@ -672,7 +668,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         assignments[telecallerId].push(leadId)
       })
 
-      // 2. Call API for assignment (Handles assignment + notification)
       const promises = Object.entries(assignments).map(async ([assigneeId, leadIds]) => {
         const response = await fetch('/api/admin/leads/bulk-assign', {
           method: 'POST',
@@ -693,7 +688,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
       await Promise.all(promises)
 
-      // 3. FEATURE: Reset Status to 'New' for all manually assigned leads
       const { error: statusUpdateError } = await supabase
         .from("leads")
         .update({
@@ -704,7 +698,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
       if (statusUpdateError) {
           console.error("Warning: Leads assigned but failed to reset status to New:", statusUpdateError)
-          // Not throwing error to avoid confusion, as assignment succeeded.
       }
       
       setSuccessMessage(`Successfully assigned ${selectedLeads.length} leads and reset status to New.`)
@@ -718,30 +711,39 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   }
 
+  // --- UPDATED: BULK STATUS UPDATE (TWO-STRIKE RULE) ---
   const handleBulkStatusUpdate = async () => {
     if (!bulkStatus || selectedLeads.length === 0) return
 
     try {
-      const updates = selectedLeads.map(leadId => 
-        supabase
-          .from("leads")
-          .update({ 
-            status: bulkStatus,
-            last_contacted: new Date().toISOString()
-          })
-          .eq("id", leadId)
-      )
+      const updates = selectedLeads.map(async (leadId) => {
+         const lead = enrichedLeads.find(l => l.id === leadId);
+         if (!lead) return;
 
-      const results = await Promise.all(updates)
-      const errors = results.filter(result => result.error)
-      if (errors.length > 0) throw new Error(`Failed to update status for ${errors.length} leads`)
+         let updateData: any = { status: bulkStatus, last_contacted: new Date().toISOString() };
+         const currentTags = lead.tags || [];
 
+         if (bulkStatus === "Not_Interested") {
+            if (currentTags.includes("NI_STRIKE_1")) {
+                // Strike 2: Dead Bucket
+                updateData.status = "dead_bucket";
+                updateData.assigned_to = null;
+            } else {
+                // Strike 1: Recycle Pool
+                updateData.status = "recycle_pool";
+                updateData.assigned_to = null;
+                updateData.tags = [...currentTags, "NI_STRIKE_1"];
+            }
+         }
+
+         return supabase.from("leads").update(updateData).eq("id", leadId);
+      })
+
+      await Promise.all(updates)
       setSelectedLeads([])
       setBulkStatus("")
       window.location.reload()
-    } catch (error) {
-      console.error("Error bulk updating lead status:", error)
-    }
+    } catch (error) { console.error("Error bulk updating lead status:", error) }
   }
 
   const handleBulkAddTag = async (tag: string) => {
@@ -799,25 +801,27 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   }
 
-  // --- UPDATED: AUTO ASSIGN (API Based to prevent notification spam) ---
+  // --- UPDATED: AUTO ASSIGN WITH BUCKET CAPS ---
   const handleAutoAssignLeads = async () => {
     if (!autoAssignRules.enabled || telecallers.length === 0) return
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      const assignedById = user?.id
       const now = new Date()
 
+      // 1. FILTER TELECALLERS: Must be Online AND Under Cap
       const activeTelecallers = telecallers.filter(tc => {
-        return telecallerStatus[tc.id] === true
+        const isOnline = telecallerStatus[tc.id] === true
+        const currentLoad = enrichedLeads.filter(l => l.assigned_to === tc.id).length
+        return isOnline && currentLoad < MAX_LEAD_CAP
       })
 
       if (activeTelecallers.length === 0) {
-        alert('No ACTIVE telecallers found online. Please ensure agents are logged in.')
+        alert(`No available telecallers found (Online and <${MAX_LEAD_CAP} leads).`)
         return
       }
 
-      const unassignedLeads = enrichedLeads.filter(l => !l.assigned_to)
+      const unassignedLeads = enrichedLeads.filter(l => !l.assigned_to && l.status !== 'dead_bucket')
 
       let leadsToReassign: Lead[] = []
       
@@ -857,11 +861,10 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       }
       
       const shuffledTelecallers = shuffleArray(activeTelecallers);
-
-      // --- Grouping Logic for Batch API Call ---
       const assignments: Record<string, string[]> = {}; 
       const reassignedLeadIds: string[] = [];
 
+      // Count tracking for local loop to ensure we don't breach cap during this very batch
       const leadCounts = activeTelecallers.map(tc => ({
           id: tc.id,
           count: enrichedLeads.filter(l => l.assigned_to === tc.id).length
@@ -871,22 +874,24 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
       uniqueLeadsToProcess.forEach((lead) => {
         let newTelecallerId: string | null = null;
-        const isReassign = !!lead.assigned_to; 
         
-        if (autoAssignRules.method === 'round-robin') {
+        // Find a candidate who is not the previous owner and under cap
+        let attempts = 0;
+        while (attempts < shuffledTelecallers.length) {
             let candidate = shuffledTelecallers[roundRobinIndex % shuffledTelecallers.length];
-            if (isReassign && candidate.id === lead.assigned_to && shuffledTelecallers.length > 1) {
-                roundRobinIndex++;
-                candidate = shuffledTelecallers[roundRobinIndex % shuffledTelecallers.length];
+            const candidateStats = leadCounts.find(c => c.id === candidate.id);
+
+            if (candidateStats && candidateStats.count < MAX_LEAD_CAP) {
+                // Check if this is a reassign and we are trying to give it back to the same person
+                if (!lead.assigned_to || lead.assigned_to !== candidate.id) {
+                    newTelecallerId = candidate.id;
+                    candidateStats.count++; // Increment local counter
+                    roundRobinIndex++;
+                    break;
+                }
             }
-            newTelecallerId = candidate.id;
-            roundRobinIndex++; 
-        } else if (autoAssignRules.method === 'workload') {
-            const minTelecaller = leadCounts.reduce((min, tc) => 
-                tc.count < min.count ? tc : min
-            );
-            newTelecallerId = minTelecaller.id;
-            minTelecaller.count++; 
+            roundRobinIndex++;
+            attempts++;
         }
 
         if (newTelecallerId) {
@@ -895,7 +900,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
             }
             assignments[newTelecallerId].push(lead.id);
 
-            if (isReassign) {
+            if (lead.assigned_to) {
                 reassignedLeadIds.push(lead.id);
             }
         }
@@ -933,8 +938,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         if (error) console.error("Error resetting status for reassigned leads:", error);
       }
 
-      const msg = `Processed: ${unassignedLeads.length} initial assignments, ${leadsToReassign.length} re-assignments.`
-      alert(`Success! ${msg}`)
+      alert(`Auto-assign complete. Leads distributed to ${activeTelecallers.length} agents under capacity.`)
       window.location.reload()
       
     } catch (error) {
@@ -985,24 +989,50 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     setIsCallInitiated(false)
   }
 
+  // --- UPDATED: HANDLE STATUS UPDATE (TWO-STRIKE RULE) ---
   const handleStatusUpdate = async (newStatus: string, note?: string, callbackDate?: string) => {
     try {
       if (!selectedLead?.id) return
       
-      const updateData: any = { 
+      const currentTags = selectedLead.tags || [];
+      let updateData: any = { 
         status: newStatus,
         last_contacted: new Date().toISOString()
       }
 
+      // --- TWO STRIKE LOGIC ---
+      if (newStatus === "Not_Interested") {
+          if (currentTags.includes("NI_STRIKE_1")) {
+              // STRIKE TWO: Move to Dead Bucket
+              updateData.status = "dead_bucket";
+              updateData.assigned_to = null; // Unassign completely
+              // Add a system note
+              await supabase.from("notes").insert({
+                lead_id: selectedLead.id,
+                note: "System: Lead marked 'Not Interested' twice. Moved to Dead Bucket.",
+                note_type: "status_change"
+              })
+          } else {
+              // STRIKE ONE: Move to Recycle Pool
+              updateData.status = "recycle_pool"; 
+              updateData.assigned_to = null; // Remove from current agent
+              // Add Strike 1 Tag
+              updateData.tags = [...currentTags, "NI_STRIKE_1"];
+              
+              await supabase.from("notes").insert({
+                lead_id: selectedLead.id,
+                note: "System: Lead marked 'Not Interested' (Strike 1). Recycled to pool.",
+                note_type: "status_change"
+              })
+          }
+      }
+
       if (newStatus === "not_eligible" && note) {
-        const { error: noteError } = await supabase
-          .from("notes")
-          .insert({
+        await supabase.from("notes").insert({
             lead_id: selectedLead.id,
             note: note,
             note_type: "status_change"
           })
-        if (noteError) throw noteError
       }
 
       if (newStatus === "follow_up" && callbackDate) {
@@ -1029,15 +1059,33 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   }
 
+  // --- UPDATED: HANDLE STATUS CHANGE VIA DROPDOWN ---
   const handleStatusChange = async (leadId: string, newStatus: string) => {
     try {
+        const lead = enrichedLeads.find(l => l.id === leadId);
+        if(!lead) return;
+
+        let updateData: any = { status: newStatus, last_contacted: new Date().toISOString() };
+        const currentTags = lead.tags || [];
+
+         if (newStatus === "Not_Interested") {
+            if (currentTags.includes("NI_STRIKE_1")) {
+                updateData.status = "dead_bucket";
+                updateData.assigned_to = null;
+                await supabase.from("notes").insert({ lead_id: leadId, note: "System: Strike 2. Moved to Dead Bucket.", note_type: "status_change" });
+            } else {
+                updateData.status = "recycle_pool";
+                updateData.assigned_to = null;
+                updateData.tags = [...currentTags, "NI_STRIKE_1"];
+                await supabase.from("notes").insert({ lead_id: leadId, note: "System: Strike 1. Recycled.", note_type: "status_change" });
+            }
+         }
+
       const { error } = await supabase
         .from("leads")
-        .update({ 
-          status: newStatus,
-          last_contacted: new Date().toISOString()
-        })
+        .update(updateData)
         .eq("id", leadId)
+
       if (error) throw error
       window.location.reload()
     } catch (error) {
@@ -1711,7 +1759,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     </TableRow>
                 ) : (
                     paginatedLeads.map((lead) => (
-                    <TableRow key={lead.id} className="group">
+                    <TableRow key={lead.id} className={`group ${lead.status === 'dead_bucket' ? 'bg-gray-50 opacity-60' : ''}`}>
                         <TableCell>
                         <input
                             type="checkbox"
@@ -1722,11 +1770,21 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                         </TableCell>
                         {visibleColumns.name && (
                         <TableCell>
-                             <div className="font-medium">
+                             <div className="font-medium flex items-center gap-2">
                                 <InlineEditableCell 
                                     value={lead.name} 
                                     onSave={(val) => handleInlineUpdate(lead.id, 'name', val)} 
                                 />
+                                {(lead.tags || []).includes("NI_STRIKE_1") && (
+                                    <Badge variant="outline" className="text-[10px] bg-cyan-50 text-cyan-700 border-cyan-200 px-1 py-0 h-5">
+                                        <RefreshCw className="h-3 w-3 mr-1" /> Recycled
+                                    </Badge>
+                                )}
+                                {lead.status === 'dead_bucket' && (
+                                    <Badge variant="outline" className="text-[10px] bg-slate-100 text-slate-700 border-slate-300 px-1 py-0 h-5">
+                                        <Skull className="h-3 w-3 mr-1" /> Dead
+                                    </Badge>
+                                )}
                              </div>
                             <div className="text-xs text-muted-foreground">ID: {lead.id.slice(-8)}</div>
                         </TableCell>
@@ -2059,8 +2117,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                       >
                         <CardContent className="p-3 space-y-2">
                           <div className="flex justify-between items-start">
-                            <Link href={`/admin/leads/${lead.id}`} className="font-medium text-sm hover:underline hover:text-blue-600 truncate">
+                            <Link href={`/admin/leads/${lead.id}`} className="font-medium text-sm hover:underline hover:text-blue-600 truncate flex items-center gap-1">
                               {lead.name}
+                              {(lead.tags || []).includes("NI_STRIKE_1") && <RefreshCw className="h-3 w-3 text-cyan-600" />}
                             </Link>
                             {lead.priority === 'high' && <div className="h-2 w-2 rounded-full bg-red-500" title="High Priority" />}
                           </div>
