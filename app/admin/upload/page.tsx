@@ -87,7 +87,6 @@ export default function UploadPage() {
   const [selectedTelecaller, setSelectedTelecaller] = useState<string | null>(null)
   const [autoDistribute, setAutoDistribute] = useState(false)
   const [activeCount, setActiveCount] = useState<number>(0)
-  // Removed "duplicateAction" state as we are now enforcing smart logic
   const [globalSource, setGlobalSource] = useState("other") 
   const [globalTags, setGlobalTags] = useState("")
   
@@ -280,7 +279,9 @@ export default function UploadPage() {
                 }
             } else {
                 // INSERT: New Lead
-                leadsToUpsert.push(row)
+                // Ensure NO 'id' is passed for new leads so DB generates it
+                const { id, ...newLead } = row
+                leadsToUpsert.push(newLead)
             }
         })
 
@@ -303,6 +304,7 @@ export default function UploadPage() {
                     currentBatchAssignments[assigneeId] = (currentBatchAssignments[assigneeId] || 0) + 1
                  }
 
+                 // CLEANUP: Remove ANY UI-specific fields or undefined IDs before sending to DB
                  const { _originalIndex, _id, ...cleanLeadData } = lead;
 
                  return {
@@ -321,9 +323,11 @@ export default function UploadPage() {
             })
 
             // Use upsert to handle both inserts and updates (based on ID presence)
+            // Explicitly excluding 'id' for new rows ensures Postgres generates UUID
             const { error } = await supabase.from("leads").upsert(finalLeads)
             
             if (error) {
+                console.error("Batch Upload Error:", error)
                 failCount += leadsToUpsert.length
                 leadsToUpsert.forEach(l => errors.push({ ...l, error: error.message }))
                 // If failed, revert the updated count guess
@@ -340,10 +344,10 @@ export default function UploadPage() {
                 })
             }
         }
-
-        const processed = Math.min(i + BATCH_SIZE, uniqueRows.length)
-        setProgress(Math.round((processed / uniqueRows.length) * 100))
     }
+
+    const processed = Math.min(uniqueRows.length, uniqueRows.length)
+    setProgress(100)
 
     setUploadStats({
         total: uniqueRows.length + (lines.length - uniqueRows.length),
