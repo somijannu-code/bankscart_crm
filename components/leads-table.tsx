@@ -12,7 +12,7 @@ import {
   BarChart3, Users, DollarSign, Target, Zap,
   Layout, Table as TableIcon, Settings, Save,
   AlertTriangle, CheckCircle2, XCircle, Sparkles, Upload,
-  Pencil
+  Pencil, RefreshCw, Skull
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -44,7 +44,8 @@ import { Switch } from "@/components/ui/switch"
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination"
 import { cn } from "@/lib/utils"
 
-// --- Helper Functions & Constants ---
+// --- CONSTANTS ---
+const MAX_LEAD_CAP = 450; 
 
 const shuffleArray = <T,>(array: T[]): T[] => {
   const newArray = [...array];
@@ -53,6 +54,14 @@ const shuffleArray = <T,>(array: T[]): T[] => {
     [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
   }
   return newArray;
+};
+
+// --- HELPER: Check for Stale Leads ---
+const isStale = (lastContacted: string | null, status: string) => {
+  if (['Disbursed', 'not_eligible', 'Not_Interested', 'nr', 'dead_bucket', 'recycle_pool'].includes(status)) return false; 
+  if (!lastContacted) return true; 
+  const diffHours = (new Date().getTime() - new Date(lastContacted).getTime()) / (1000 * 60 * 60);
+  return diffHours > 48; 
 };
 
 interface KanbanColumn {
@@ -71,7 +80,10 @@ const KANBAN_COLUMNS: KanbanColumn[] = [
   { id: 'Disbursed', title: 'Disbursed', color: 'bg-green-600' },
   { id: 'nr', title: 'Not Reachable', color: 'bg-gray-400' },
   { id: 'Not_Interested', title: 'Not Interested', color: 'bg-red-500' },
-  { id: 'not_eligible', title: 'Not Eligible', color: 'bg-red-500' },
+  { id: 'recycle_pool', title: 'Recycle Pool', color: 'bg-cyan-500' },
+  { id: 'dead_bucket', title: 'Dead Bucket', color: 'bg-slate-700' },
+  { id: 'self_employed', title: 'Self Employed', color: 'bg-amber-500' },
+  { id: 'not_eligible', title: 'Not Eligible', color: 'bg-red-900' },
 ]
 
 const parseCSV = (text: string) => {
@@ -289,10 +301,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [lastCallTimestamps, setLastCallTimestamps] = useState<Record<string, string | null>>({})
   const [telecallerStatus, setTelecallerStatus] = useState<Record<string, boolean>>({})
 
-  // --- UPDATED FETCH LOGIC: WITH BATCHING ---
   useEffect(() => {
     const fetchData = async () => {
-      // 1. Fetch Attendance (No changes needed, typically small data)
+      // 1. Fetch Attendance
       try {
         const today = new Date().toISOString().split('T')[0]
         const { data: attendanceRecords } = await supabase
@@ -311,19 +322,16 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         console.error("Error fetching telecaller status:", err)
       }
 
-      // 2. Fetch Call Logs (BATCHED)
+      // 2. Fetch Call Logs
       const leadIds = leads.map(l => l.id);
       if (leadIds.length === 0) return;
 
       try {
-        // --- FIX: Batch the call logs request to prevent URL Too Long errors ---
-        const BATCH_SIZE = 100; // Safe chunk size
+        const BATCH_SIZE = 100;
         const allCallLogs: any[] = [];
         
-        // Loop through leadIds in chunks
         for (let i = 0; i < leadIds.length; i += BATCH_SIZE) {
             const chunk = leadIds.slice(i, i + BATCH_SIZE);
-            
             const { data, error } = await supabase
                 .from("call_logs")
                 .select("lead_id, created_at")
@@ -332,7 +340,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
             if (error) {
                 console.error("Error fetching chunk of call logs:", error);
-                // Continue to next chunk even if one fails
                 continue;
             }
             if (data) {
@@ -340,7 +347,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
             }
         }
 
-        // Process combined logs
         const latestCalls: Record<string, string | null> = {};
         const seenLeadIds = new Set<string>();
 
@@ -358,8 +364,10 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     fetchData();
   }, [leads, supabase]);
 
+  // ... (Lead Score calculation omitted for brevity) ...
   const calculateLeadScore = (lead: Lead): number => {
     let score = 0
+    // ... same as previous ...
     if (lead.loan_amount) {
       if (lead.loan_amount >= 5000000) score += 30
       else if (lead.loan_amount >= 2000000) score += 20
@@ -375,7 +383,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
     const statusScores: Record<string, number> = {
       'Interested': 20, 'Documents_Sent': 18, 'Login': 15, 'contacted': 12, 'follow_up': 10,
-      'nr':0, 'new': 8, 'Not_Interested': 2, 'not_eligible': 1
+      'nr':0, 'new': 8, 'Not_Interested': 2, 'not_eligible': 1, 'self_employed': 1, 'recycle_pool': 5, 'dead_bucket': 0
     }
     score += statusScores[lead.status] || 5
     if (lead.priority === 'high') score += 15
@@ -392,11 +400,11 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     return leads.map(lead => ({
       ...lead,
       lead_score: calculateLeadScore(lead),
-      // --- CRITICAL FIX: Ensure tags is always an array ---
       tags: Array.isArray(lead.tags) ? lead.tags : [] 
     }))
   }, [leads])
 
+  // ... (Stats and filtering logic same as previous) ...
   const dashboardStats = useMemo(() => {
     const total = enrichedLeads.length
     const today = new Date()
@@ -517,82 +525,90 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   };
 
+  // --- DUPLICATE DETECTION LOGIC ---
   const detectDuplicates = () => {
     const phoneMap = new Map<string, Lead[]>()
     const emailMap = new Map<string, Lead[]>()
+    
     enrichedLeads.forEach(lead => {
+      // Normalize values if possible (trim spaces)
       if (lead.phone) {
-        if (!phoneMap.has(lead.phone)) phoneMap.set(lead.phone, [])
-        phoneMap.get(lead.phone)!.push(lead)
+        const p = lead.phone.trim();
+        if (!phoneMap.has(p)) phoneMap.set(p, [])
+        phoneMap.get(p)!.push(lead)
       }
       if (lead.email) {
-        if (!emailMap.has(lead.email)) emailMap.set(lead.email, [])
-        emailMap.get(lead.email)!.push(lead)
+        const e = lead.email.trim();
+        if (!emailMap.has(e)) emailMap.set(e, [])
+        emailMap.get(e)!.push(lead)
       }
     })
+    
     const dups: any[] = []
+    
     phoneMap.forEach((leads, phone) => {
       if (leads.length > 1) dups.push({ type: 'phone', value: phone, leads })
     })
+    
     emailMap.forEach((leads, email) => {
-      if (leads.length > 1) dups.push({ type: 'email', value: email, leads })
+      if (leads.length > 1) {
+        // Prevent double counting if already caught by phone
+        const existingPhones = new Set(dups.map(d => d.value));
+        const hasPhoneOverlap = leads.some(l => l.phone && existingPhones.has(l.phone));
+        if (!hasPhoneOverlap) {
+             dups.push({ type: 'email', value: email, leads })
+        }
+      }
     })
+    
     setDuplicates(dups)
     setShowDuplicatesDialog(true)
   }
 
-  // --- NEW: BULK RESOLVE DUPLICATES ---
-  const handleBulkResolveDuplicates = async () => {
-    if (duplicates.length === 0) return
+  // --- NEW FEATURE: AUTO FIX DUPLICATES ---
+  const handleAutoFixDuplicates = async () => {
+    if (duplicates.length === 0) return;
 
-    if (!confirm("This will permanently delete duplicate entries, keeping only the oldest record in each set. Are you sure?")) {
-      return
+    // We collect IDs of leads to delete
+    // Strategy: For each duplicate group, sort by created_at (ascending). Keep the first one. Delete the rest.
+    const idsToDelete: string[] = [];
+
+    duplicates.forEach(dup => {
+        // Sort: Oldest first
+        const sorted = [...dup.leads].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+        
+        // Keep index 0, delete indices 1 to end
+        const extras = sorted.slice(1);
+        extras.forEach(l => idsToDelete.push(l.id));
+    });
+
+    if (idsToDelete.length === 0) {
+        alert("No duplicates to delete (duplicate groups contain only 1 lead?)");
+        return;
+    }
+
+    if (!confirm(`This will permanently delete ${idsToDelete.length} duplicate leads, keeping only the oldest record for each group. Continue?`)) {
+        return;
     }
 
     try {
-      setImporting(true) // Show loading state (reusing existing state for simplicity)
-      const idsToDelete = new Set<string>()
-
-      duplicates.forEach((group) => {
-        // Sort leads by created_at (Oldest first)
-        const sortedLeads = [...group.leads].sort((a: Lead, b: Lead) => 
-          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        )
+        const { error } = await supabase.from('leads').delete().in('id', idsToDelete);
         
-        // Keep the first one (index 0), mark others for deletion
-        const duplicatesToRemove = sortedLeads.slice(1)
-        duplicatesToRemove.forEach((l: Lead) => idsToDelete.add(l.id))
-      })
+        if (error) throw error;
 
-      if (idsToDelete.size === 0) {
-        alert("No duplicates found to remove.")
-        setImporting(false)
-        return
-      }
-
-      const { error } = await supabase
-        .from('leads')
-        .delete()
-        .in('id', Array.from(idsToDelete))
-
-      if (error) throw error
-
-      setSuccessMessage(`Successfully removed ${idsToDelete.size} duplicate leads.`)
-      setShowDuplicatesDialog(false)
-      window.location.reload()
+        setSuccessMessage(`Successfully removed ${idsToDelete.length} duplicate leads.`);
+        setShowDuplicatesDialog(false);
+        window.location.reload();
     } catch (error) {
-      console.error("Error removing duplicates:", error)
-      setErrorMessage("Failed to remove duplicates")
-    } finally {
-      setImporting(false)
+        console.error("Error deleting duplicates:", error);
+        setErrorMessage("Failed to delete duplicates.");
     }
   }
 
-  // --- UPDATED EXPORT FUNCTION ---
+  // ... (Other handlers unchanged) ...
   const exportToCSV = () => {
     const columnMapping: Record<string, { label: string; value: (l: Lead) => any }[]> = {
       name: [{ label: 'Name', value: l => l.name }],
-      // Split 'contact' into separate Phone and Email columns
       contact: [
         { label: 'Phone', value: l => l.phone },
         { label: 'Email', value: l => l.email }
@@ -697,13 +713,10 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     setSmsBody("")
   }
 
-  // --- UPDATED: BULK ASSIGN (API Based to prevent notification spam) ---
   const handleBulkAssign = async () => {
     if (bulkAssignTo.length === 0 || selectedLeads.length === 0) return
 
     try {
-      // 1. Group leads by assignee (Round Robin distribution)
-      // This ensures we respect your selection of multiple assignees
       const assignments: Record<string, string[]> = {}
       const telecallerIds = bulkAssignTo
 
@@ -715,9 +728,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         assignments[telecallerId].push(leadId)
       })
 
-      // 2. Call API for each assignee group
-      // This sends 1 notification per assignee (e.g., "You have 50 new leads")
-      // instead of 1 per lead, preventing phone spam.
       const promises = Object.entries(assignments).map(async ([assigneeId, leadIds]) => {
         const response = await fetch('/api/admin/leads/bulk-assign', {
           method: 'POST',
@@ -725,7 +735,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
           body: JSON.stringify({
             leadIds: leadIds,
             assignedTo: assigneeId,
-            assignerName: 'Admin' // You can fetch real name if needed
+            assignerName: 'Admin' 
           })
         })
         
@@ -737,8 +747,20 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       })
 
       await Promise.all(promises)
+
+      const { error: statusUpdateError } = await supabase
+        .from("leads")
+        .update({
+            status: 'new',
+            last_contacted: new Date().toISOString()
+        })
+        .in("id", selectedLeads)
+
+      if (statusUpdateError) {
+          console.error("Warning: Leads assigned but failed to reset status to New:", statusUpdateError)
+      }
       
-      setSuccessMessage(`Successfully assigned ${selectedLeads.length} leads.`)
+      setSuccessMessage(`Successfully assigned ${selectedLeads.length} leads and reset status to New.`)
       setSelectedLeads([])
       setBulkAssignTo([]) 
       window.location.reload()
@@ -753,26 +775,32 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     if (!bulkStatus || selectedLeads.length === 0) return
 
     try {
-      const updates = selectedLeads.map(leadId => 
-        supabase
-          .from("leads")
-          .update({ 
-            status: bulkStatus,
-            last_contacted: new Date().toISOString()
-          })
-          .eq("id", leadId)
-      )
+      const updates = selectedLeads.map(async (leadId) => {
+         const lead = enrichedLeads.find(l => l.id === leadId);
+         if (!lead) return;
 
-      const results = await Promise.all(updates)
-      const errors = results.filter(result => result.error)
-      if (errors.length > 0) throw new Error(`Failed to update status for ${errors.length} leads`)
+         let updateData: any = { status: bulkStatus, last_contacted: new Date().toISOString() };
+         const currentTags = lead.tags || [];
 
+         if (bulkStatus === "Not_Interested") {
+            if (currentTags.includes("NI_STRIKE_1")) {
+                updateData.status = "dead_bucket";
+                updateData.assigned_to = null;
+            } else {
+                updateData.status = "recycle_pool";
+                updateData.assigned_to = null;
+                updateData.tags = [...currentTags, "NI_STRIKE_1"];
+            }
+         }
+
+         return supabase.from("leads").update(updateData).eq("id", leadId);
+      })
+
+      await Promise.all(updates)
       setSelectedLeads([])
       setBulkStatus("")
       window.location.reload()
-    } catch (error) {
-      console.error("Error bulk updating lead status:", error)
-    }
+    } catch (error) { console.error("Error bulk updating lead status:", error) }
   }
 
   const handleBulkAddTag = async (tag: string) => {
@@ -830,25 +858,25 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   }
 
-  // --- UPDATED: AUTO ASSIGN (API Based to prevent notification spam) ---
   const handleAutoAssignLeads = async () => {
     if (!autoAssignRules.enabled || telecallers.length === 0) return
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
-      const assignedById = user?.id
       const now = new Date()
 
       const activeTelecallers = telecallers.filter(tc => {
-        return telecallerStatus[tc.id] === true
+        const isOnline = telecallerStatus[tc.id] === true
+        const currentLoad = enrichedLeads.filter(l => l.assigned_to === tc.id).length
+        return isOnline && currentLoad < MAX_LEAD_CAP
       })
 
       if (activeTelecallers.length === 0) {
-        alert('No ACTIVE telecallers found online. Please ensure agents are logged in.')
+        alert(`No available telecallers found (Online and <${MAX_LEAD_CAP} leads).`)
         return
       }
 
-      const unassignedLeads = enrichedLeads.filter(l => !l.assigned_to)
+      const unassignedLeads = enrichedLeads.filter(l => !l.assigned_to && l.status !== 'dead_bucket')
 
       let leadsToReassign: Lead[] = []
       
@@ -888,10 +916,8 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       }
       
       const shuffledTelecallers = shuffleArray(activeTelecallers);
-
-      // --- Grouping Logic for Batch API Call ---
-      const assignments: Record<string, string[]> = {}; // Map telecallerId -> [leadId, leadId...]
-      const reassignedLeadIds: string[] = []; // Track leads that need status reset
+      const assignments: Record<string, string[]> = {}; 
+      const reassignedLeadIds: string[] = [];
 
       const leadCounts = activeTelecallers.map(tc => ({
           id: tc.id,
@@ -902,39 +928,36 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
       uniqueLeadsToProcess.forEach((lead) => {
         let newTelecallerId: string | null = null;
-        const isReassign = !!lead.assigned_to; 
         
-        if (autoAssignRules.method === 'round-robin') {
+        let attempts = 0;
+        while (attempts < shuffledTelecallers.length) {
             let candidate = shuffledTelecallers[roundRobinIndex % shuffledTelecallers.length];
-            if (isReassign && candidate.id === lead.assigned_to && shuffledTelecallers.length > 1) {
-                roundRobinIndex++;
-                candidate = shuffledTelecallers[roundRobinIndex % shuffledTelecallers.length];
+            const candidateStats = leadCounts.find(c => c.id === candidate.id);
+
+            if (candidateStats && candidateStats.count < MAX_LEAD_CAP) {
+                if (!lead.assigned_to || lead.assigned_to !== candidate.id) {
+                    newTelecallerId = candidate.id;
+                    candidateStats.count++; 
+                    roundRobinIndex++;
+                    break;
+                }
             }
-            newTelecallerId = candidate.id;
-            roundRobinIndex++; 
-        } else if (autoAssignRules.method === 'workload') {
-            const minTelecaller = leadCounts.reduce((min, tc) => 
-                tc.count < min.count ? tc : min
-            );
-            newTelecallerId = minTelecaller.id;
-            minTelecaller.count++; 
+            roundRobinIndex++;
+            attempts++;
         }
 
         if (newTelecallerId) {
-            // Group by assignee
             if (!assignments[newTelecallerId]) {
                 assignments[newTelecallerId] = [];
             }
             assignments[newTelecallerId].push(lead.id);
 
-            // Track reassignments for status update
-            if (isReassign) {
+            if (lead.assigned_to) {
                 reassignedLeadIds.push(lead.id);
             }
         }
       });
 
-      // 1. Execute Bulk Assignment API Calls (Notification Safe)
       const assignmentPromises = Object.entries(assignments).map(async ([assigneeId, leadIds]) => {
           const response = await fetch('/api/admin/leads/bulk-assign', {
             method: 'POST',
@@ -953,7 +976,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
       await Promise.all(assignmentPromises);
 
-      // 2. Perform Status Reset for Reassigned Leads (Direct DB update, no notification trigger)
       if (reassignedLeadIds.length > 0) {
         const { error } = await supabase
             .from("leads")
@@ -966,8 +988,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         if (error) console.error("Error resetting status for reassigned leads:", error);
       }
 
-      const msg = `Processed: ${unassignedLeads.length} initial assignments, ${leadsToReassign.length} re-assignments.`
-      alert(`Success! ${msg}`)
+      alert(`Auto-assign complete. Leads distributed to ${activeTelecallers.length} agents under capacity.`)
       window.location.reload()
       
     } catch (error) {
@@ -1006,8 +1027,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   }
 
-  const [isCallInitiated, setIsCallInitiated] = useState(false)
-
   const handleCallInitiated = (lead: Lead) => {
     setSelectedLead(lead)
     setIsStatusDialogOpen(true)
@@ -1022,20 +1041,39 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     try {
       if (!selectedLead?.id) return
       
-      const updateData: any = { 
+      const currentTags = selectedLead.tags || [];
+      let updateData: any = { 
         status: newStatus,
         last_contacted: new Date().toISOString()
       }
 
+      if (newStatus === "Not_Interested") {
+          if (currentTags.includes("NI_STRIKE_1")) {
+              updateData.status = "dead_bucket";
+              updateData.assigned_to = null;
+              await supabase.from("notes").insert({
+                lead_id: selectedLead.id,
+                note: "System: Lead marked 'Not Interested' twice. Moved to Dead Bucket.",
+                note_type: "status_change"
+              })
+          } else {
+              updateData.status = "recycle_pool"; 
+              updateData.assigned_to = null; 
+              updateData.tags = [...currentTags, "NI_STRIKE_1"];
+              await supabase.from("notes").insert({
+                lead_id: selectedLead.id,
+                note: "System: Lead marked 'Not Interested' (Strike 1). Recycled to pool.",
+                note_type: "status_change"
+              })
+          }
+      }
+
       if (newStatus === "not_eligible" && note) {
-        const { error: noteError } = await supabase
-          .from("notes")
-          .insert({
+        await supabase.from("notes").insert({
             lead_id: selectedLead.id,
             note: note,
             note_type: "status_change"
           })
-        if (noteError) throw noteError
       }
 
       if (newStatus === "follow_up" && callbackDate) {
@@ -1064,13 +1102,30 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
   const handleStatusChange = async (leadId: string, newStatus: string) => {
     try {
+        const lead = enrichedLeads.find(l => l.id === leadId);
+        if(!lead) return;
+
+        let updateData: any = { status: newStatus, last_contacted: new Date().toISOString() };
+        const currentTags = lead.tags || [];
+
+         if (newStatus === "Not_Interested") {
+            if (currentTags.includes("NI_STRIKE_1")) {
+                updateData.status = "dead_bucket";
+                updateData.assigned_to = null;
+                await supabase.from("notes").insert({ lead_id: leadId, note: "System: Strike 2. Moved to Dead Bucket.", note_type: "status_change" });
+            } else {
+                updateData.status = "recycle_pool";
+                updateData.assigned_to = null;
+                updateData.tags = [...currentTags, "NI_STRIKE_1"];
+                await supabase.from("notes").insert({ lead_id: leadId, note: "System: Strike 1. Recycled.", note_type: "status_change" });
+            }
+         }
+
       const { error } = await supabase
         .from("leads")
-        .update({ 
-          status: newStatus,
-          last_contacted: new Date().toISOString()
-        })
+        .update(updateData)
         .eq("id", leadId)
+
       if (error) throw error
       window.location.reload()
     } catch (error) {
@@ -1100,6 +1155,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   }
 
+  // ... (Drag & Drop, Toggle Selection, etc.) ...
   const handleDragStart = (e: React.DragEvent, leadId: string) => {
     e.dataTransfer.setData("leadId", leadId);
     e.dataTransfer.effectAllowed = "move";
@@ -1197,7 +1253,8 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
   return (
     <div className="space-y-6">
-      {/* Success/Error Messages */}
+      {/* ... (Existing UI sections: Success/Error messages, Stats, Filters) ... */}
+      
       {successMessage && (
         <Card className="border-green-500 bg-green-50">
           <CardContent className="p-4">
@@ -1270,6 +1327,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       {/* Controls Bar */}
       <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center w-full lg:w-auto">
+          {/* ... (Search and filter Selects remain the same) ... */}
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
@@ -1342,7 +1400,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                 <Upload className="h-4 w-4 mr-2" /> Import
             </Button>
 
-          {/* Fixed Dropdown Trigger */}
+          {/* ... (Dropdowns for More Filters, Columns, Actions remain same) ... */}
           <DropdownMenu>
             <DropdownMenuTrigger className={triggerButtonClass}>
               <Filter className="h-4 w-4 mr-2" />
@@ -1350,82 +1408,83 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               <ChevronDown className="h-4 w-4 ml-2" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>Advanced Filters</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <div className="p-2">
-                <Label className="text-xs">Source</Label>
-                <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                  <SelectTrigger className="w-full mt-1">
-                    <SelectValue placeholder="All Sources" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Sources</SelectItem>
-                    {uniqueSources.map((source) => (
-                      <SelectItem key={source} value={source || ''}>{source}</SelectItem>
+                {/* ... (Filter Content) ... */}
+                <DropdownMenuLabel>Advanced Filters</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <div className="p-2">
+                    <Label className="text-xs">Source</Label>
+                    <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                    <SelectTrigger className="w-full mt-1">
+                        <SelectValue placeholder="All Sources" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">All Sources</SelectItem>
+                        {uniqueSources.map((source) => (
+                        <SelectItem key={source} value={source || ''}>{source}</SelectItem>
+                        ))}
+                    </SelectContent>
+                    </Select>
+                </div>
+                {/* ... (Rest of filters) ... */}
+                <div className="p-2">
+                    <Label className="text-xs">Lead Score</Label>
+                    <Select value={scoreFilter} onValueChange={setScoreFilter}>
+                        <SelectTrigger className="w-full mt-1">
+                            <SelectValue placeholder="All Scores" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All Scores</SelectItem>
+                            <SelectItem value="hot">Hot (80+)</SelectItem>
+                            <SelectItem value="warm">Warm (50-79)</SelectItem>
+                            <SelectItem value="cold">Cold (0-49)</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div className="p-2">
+                    <Label className="text-xs">Tags</Label>
+                    <Select value={tagFilter} onValueChange={setTagFilter}>
+                        <SelectTrigger className="w-full mt-1">
+                            <SelectValue placeholder="All Tags" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All Tags</SelectItem>
+                            {uniqueTags.map((tag) => (
+                            <SelectItem key={tag} value={tag}>{tag}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Date Filters</DropdownMenuLabel>
+                <div className="p-2 space-y-2">
+                    <Label className="text-xs font-semibold">Lead Creation Date</Label>
+                    <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-8 text-xs" />
+                    <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-8 text-xs" />
+                </div>
+                <div className="p-2 space-y-2">
+                    <Label className="text-xs font-semibold">Last Call Date</Label>
+                    <Input type="date" value={lastCallFrom} onChange={(e) => setLastCallFrom(e.target.value)} className="h-8 text-xs" />
+                    <Input type="date" value={lastCallTo} onChange={(e) => setLastCallTo(e.target.value)} className="h-8 text-xs" />
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setShowSaveFilterDialog(true)}>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save Current Filter
+                </DropdownMenuItem>
+                {savedFilters.length > 0 && (
+                    <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel>Saved Filters</DropdownMenuLabel>
+                    {savedFilters.map((filter) => (
+                        <DropdownMenuItem key={filter.id} onClick={() => loadFilter(filter)}>
+                        {filter.name}
+                        </DropdownMenuItem>
                     ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="p-2">
-                <Label className="text-xs">Lead Score</Label>
-                <Select value={scoreFilter} onValueChange={setScoreFilter}>
-                  <SelectTrigger className="w-full mt-1">
-                    <SelectValue placeholder="All Scores" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Scores</SelectItem>
-                    <SelectItem value="hot">Hot (80+)</SelectItem>
-                    <SelectItem value="warm">Warm (50-79)</SelectItem>
-                    <SelectItem value="cold">Cold (0-49)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="p-2">
-                <Label className="text-xs">Tags</Label>
-                <Select value={tagFilter} onValueChange={setTagFilter}>
-                  <SelectTrigger className="w-full mt-1">
-                    <SelectValue placeholder="All Tags" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Tags</SelectItem>
-                    {uniqueTags.map((tag) => (
-                      <SelectItem key={tag} value={tag}>{tag}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel>Date Filters</DropdownMenuLabel>
-              <div className="p-2 space-y-2">
-                <Label className="text-xs font-semibold">Lead Creation Date</Label>
-                <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-8 text-xs" />
-                <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-8 text-xs" />
-              </div>
-              <div className="p-2 space-y-2">
-                <Label className="text-xs font-semibold">Last Call Date</Label>
-                <Input type="date" value={lastCallFrom} onChange={(e) => setLastCallFrom(e.target.value)} className="h-8 text-xs" />
-                <Input type="date" value={lastCallTo} onChange={(e) => setLastCallTo(e.target.value)} className="h-8 text-xs" />
-              </div>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setShowSaveFilterDialog(true)}>
-                <Save className="h-4 w-4 mr-2" />
-                Save Current Filter
-              </DropdownMenuItem>
-              {savedFilters.length > 0 && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel>Saved Filters</DropdownMenuLabel>
-                  {savedFilters.map((filter) => (
-                    <DropdownMenuItem key={filter.id} onClick={() => loadFilter(filter)}>
-                      {filter.name}
-                    </DropdownMenuItem>
-                  ))}
-                </>
-              )}
+                    </>
+                )}
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Fixed Dropdown Trigger */}
           <DropdownMenu>
             <DropdownMenuTrigger className={triggerButtonClass}>
               <Layout className="h-4 w-4 mr-2" />
@@ -1441,7 +1500,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     setVisibleColumns(prev => ({ ...prev, [key]: checked }))
                   }
                 >
-                   {/* Improved label formatting (e.g. "loanAmount" -> "Loan Amount") */}
                   {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
                 </DropdownMenuCheckboxItem>
               ))}
@@ -1458,7 +1516,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
             Duplicates
           </Button>
 
-          {/* Fixed Dropdown Trigger */}
           <DropdownMenu>
             <DropdownMenuTrigger className={triggerButtonClass}>
               <Zap className="h-4 w-4 mr-2" />
@@ -1520,6 +1577,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     <SelectItem value="Disbursed">Disbursed</SelectItem>
                     <SelectItem value="follow_up">follow_up</SelectItem>
                     <SelectItem value="Not_Interested">Not Interested</SelectItem>
+                    <SelectItem value="self_employed">Self Employed</SelectItem>
                     <SelectItem value="not_eligible">Not Eligible</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1568,7 +1626,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     </DropdownMenuContent>
                 </DropdownMenu>
 
-                {/* Manual Bulk Assignment with Status Dots */}
+                {/* Manual Bulk Assignment */}
                 <DropdownMenu>
                   <DropdownMenuTrigger className={`${triggerButtonClass} w-[200px] justify-between border-dashed`}>
                       {bulkAssignTo.length === 0 ? (
@@ -1665,6 +1723,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         <Card>
             <CardContent className="p-0">
             <Table>
+                {/* ... (TableHeader) ... */}
                 <TableHeader>
                 <TableRow>
                     <TableHead className="w-12">
@@ -1854,13 +1913,10 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                             </div>
                         </TableCell>
                         )}
-                        
                         {visibleColumns.lastContacted && (
                         <TableCell>
                             {(() => {
-                            // Check latest timestamp from call logs first, fallback to leads.last_contacted
                             const lastContactTimestamp = lastCallTimestamps[lead.id] || lead.last_contacted;
-                            
                             // Check Staleness
                             const stale = isStale(lastContactTimestamp, lead.status);
 
@@ -1891,7 +1947,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                             })()}
                         </TableCell>
                         )}
-
                         {visibleColumns.loanAmount && (
                         <TableCell>
                             <InlineEditableCell 
@@ -1943,7 +1998,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                         {visibleColumns.tags && (
                         <TableCell>
                             <div className="flex flex-wrap gap-1">
-                            {/* --- ADDED SAFETY CHECK HERE TOO --- */}
                             {(Array.isArray(lead.tags) ? lead.tags : []).slice(0, 2).map((tag) => (
                                 <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
                             ))}
@@ -1964,7 +2018,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                                 onStatusChange={(status) => handleStatusChange(lead.id, status)}
                             />
                             
-                            {/* Fixed Dropdown Trigger */}
                             <DropdownMenu>
                                 <DropdownMenuTrigger className={triggerGhostClass}>
                                 <MoreHorizontal className="h-4 w-4" />
@@ -2006,6 +2059,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
             </CardContent>
             {/* Pagination */}
             <div className="flex items-center justify-between px-4 py-3 border-t">
+                {/* ... (Pagination controls unchanged) ... */}
                 <div className="text-sm text-muted-foreground">
                     Showing {((currentPage - 1) * pageSize) + 1} - {Math.min(currentPage * pageSize, filteredLeads.length)} of {filteredLeads.length} results.
                 </div>
@@ -2066,7 +2120,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         <div className="h-[calc(100vh-220px)] overflow-x-auto pb-4">
           <div className="flex gap-4 h-full min-w-[1200px]">
             {KANBAN_COLUMNS.map(col => {
-              // Note: We use filteredLeads here so the Kanban respects the search/filter inputs!
               const colLeads = filteredLeads.filter(l => l.status === col.id);
               const totalAmount = colLeads.reduce((sum, l) => sum + (l.loan_amount || 0), 0);
               
@@ -2077,7 +2130,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, col.id)}
                 >
-                  {/* Column Header */}
                   <div className={`p-3 border-b border-l-4 ${col.color.replace('bg-', 'border-')} flex justify-between items-start`}>
                     <div>
                       <h3 className="font-semibold text-sm flex items-center gap-2">
@@ -2090,7 +2142,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     </div>
                   </div>
 
-                  {/* Draggable Cards Area */}
                   <div className="flex-1 overflow-y-auto p-2 space-y-2">
                     {colLeads.map(lead => (
                       <Card 
@@ -2142,6 +2193,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       )}
 
       {/* Dialogs */}
+      {/* ... (Existing Dialogs) ... */}
       <LeadStatusDialog
         open={isStatusDialogOpen}
         onOpenChange={setIsStatusDialogOpen}
@@ -2152,6 +2204,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       />
 
       <Dialog open={showSaveFilterDialog} onOpenChange={setShowSaveFilterDialog}>
+        {/* ... (Save Filter Dialog Content) ... */}
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Save Filter</DialogTitle>
@@ -2171,6 +2224,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       </Dialog>
 
       <Dialog open={showEmailDialog} onOpenChange={setShowEmailDialog}>
+        {/* ... (Email Dialog Content) ... */}
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Send Bulk Email</DialogTitle>
@@ -2194,6 +2248,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       </Dialog>
 
       <Dialog open={showSMSDialog} onOpenChange={setShowSMSDialog}>
+        {/* ... (SMS Dialog Content) ... */}
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Send Bulk SMS</DialogTitle>
@@ -2234,6 +2289,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
       <Dialog open={showAutoAssignDialog} onOpenChange={setShowAutoAssignDialog}>
         <DialogContent>
+          {/* ... (Auto Assign Content) ... */}
           <DialogHeader>
             <DialogTitle>Auto-Assign Rules</DialogTitle>
             <DialogDescription>Configure automatic lead assignment rules.</DialogDescription>
@@ -2323,15 +2379,13 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               </Card>
             ))}
           </div>
-          <DialogFooter className="flex justify-between sm:justify-between">
-            <div className="text-xs text-muted-foreground self-center">
-              * Resolving will keep the oldest record and delete others.
-            </div>
-            <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setShowDuplicatesDialog(false)}>Close</Button>
-                <Button variant="destructive" onClick={handleBulkResolveDuplicates} disabled={importing}>
-                    {importing ? "Processing..." : "Remove All Duplicates"}
+          <DialogFooter>
+            <div className="flex w-full justify-between items-center">
+                <Button variant="destructive" onClick={handleAutoFixDuplicates}>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Clean Up Duplicates (Keep Oldest)
                 </Button>
+                <Button variant="outline" onClick={() => setShowDuplicatesDialog(false)}>Close</Button>
             </div>
           </DialogFooter>
         </DialogContent>
