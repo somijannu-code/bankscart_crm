@@ -224,12 +224,12 @@ const triggerButtonClass = "inline-flex items-center justify-center whitespace-n
 const triggerGhostClass = "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-9 px-3";
 
 export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
-  // --- STATE DECLARATIONS (MOVED TO TOP) ---
+  // --- STATE DECLARATIONS ---
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [viewMode, setViewMode] = useState<'table' | 'board'>('table')
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
-  const [isCallInitiated, setIsCallInitiated] = useState(false) // <--- FIXED: Moved here
+  const [isCallInitiated, setIsCallInitiated] = useState(false)
   
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all")
@@ -549,6 +549,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     setShowDuplicatesDialog(true)
   }
 
+  // --- NEW: Bulk Resolve Duplicates ---
   const handleBulkResolveDuplicates = async () => {
     if (duplicates.length === 0) return;
 
@@ -576,19 +577,24 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
 
     try {
-        const { error } = await supabase
+        const { error, count } = await supabase
             .from('leads')
-            .delete()
+            .delete({ count: 'exact' }) // Request count from Supabase
             .in('id', Array.from(idsToDelete));
 
         if (error) throw error;
 
-        setSuccessMessage(`Successfully removed ${idsToDelete.size} duplicate leads.`);
-        setShowDuplicatesDialog(false);
-        window.location.reload();
+        // Check if rows were actually deleted
+        if (count === 0) {
+            setErrorMessage("Operation successful but 0 leads were deleted. Check Row-Level Security (RLS) policies.");
+        } else {
+            setSuccessMessage(`Successfully removed ${count} duplicate leads.`);
+            setShowDuplicatesDialog(false);
+            window.location.reload();
+        }
     } catch (error) {
         console.error("Error deleting duplicates:", error);
-        setErrorMessage("Failed to delete duplicates");
+        setErrorMessage("Failed to delete duplicates. Check permissions.");
     }
   }
 
@@ -828,22 +834,27 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
 
     try {
-        const { error } = await supabase
+        const { error, count } = await supabase
             .from('leads')
-            .delete()
+            .delete({ count: 'exact' }) // Fix: Verify count
             .in('id', selectedLeads)
 
         if (error) throw error
 
-        setSelectedLeads([])
-        setSuccessMessage(`Successfully deleted ${selectedLeads.length} leads.`)
-        window.location.reload()
+        if (count === 0) {
+            setErrorMessage("Operation successful but 0 leads were deleted. Check permissions.");
+        } else {
+            setSelectedLeads([])
+            setSuccessMessage(`Successfully deleted ${count} leads.`)
+            window.location.reload()
+        }
     } catch (error) {
         console.error("Error deleting leads:", error)
         setErrorMessage("Failed to delete leads")
     }
   }
 
+  // ... (handleAutoAssignLeads, handleAddTag, etc... remain exactly as they were) ...
   const handleAutoAssignLeads = async () => {
     if (!autoAssignRules.enabled || telecallers.length === 0) return
 
