@@ -322,7 +322,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         console.error("Error fetching telecaller status:", err)
       }
 
-      // 2. Fetch Call Logs
+      // 2. Fetch Call Logs (Batch Logic)
       const leadIds = leads.map(l => l.id);
       if (leadIds.length === 0) return;
 
@@ -364,10 +364,9 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     fetchData();
   }, [leads, supabase]);
 
-  // ... (Lead Score calculation omitted for brevity) ...
+  // ... (calculateLeadScore, enrichedLeads, dashboardStats, uniqueSources, uniqueTags, filteredLeads, sorting, pagination logic same as before) ...
   const calculateLeadScore = (lead: Lead): number => {
     let score = 0
-    // ... same as previous ...
     if (lead.loan_amount) {
       if (lead.loan_amount >= 5000000) score += 30
       else if (lead.loan_amount >= 2000000) score += 20
@@ -404,7 +403,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }))
   }, [leads])
 
-  // ... (Stats and filtering logic same as previous) ...
   const dashboardStats = useMemo(() => {
     const total = enrichedLeads.length
     const today = new Date()
@@ -525,87 +523,76 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   };
 
-  // --- DUPLICATE DETECTION LOGIC ---
   const detectDuplicates = () => {
     const phoneMap = new Map<string, Lead[]>()
     const emailMap = new Map<string, Lead[]>()
-    
     enrichedLeads.forEach(lead => {
-      // Normalize values if possible (trim spaces)
       if (lead.phone) {
-        const p = lead.phone.trim();
-        if (!phoneMap.has(p)) phoneMap.set(p, [])
-        phoneMap.get(p)!.push(lead)
+        if (!phoneMap.has(lead.phone)) phoneMap.set(lead.phone, [])
+        phoneMap.get(lead.phone)!.push(lead)
       }
       if (lead.email) {
-        const e = lead.email.trim();
-        if (!emailMap.has(e)) emailMap.set(e, [])
-        emailMap.get(e)!.push(lead)
+        if (!emailMap.has(lead.email)) emailMap.set(lead.email, [])
+        emailMap.get(lead.email)!.push(lead)
       }
     })
-    
     const dups: any[] = []
-    
     phoneMap.forEach((leads, phone) => {
       if (leads.length > 1) dups.push({ type: 'phone', value: phone, leads })
     })
-    
     emailMap.forEach((leads, email) => {
-      if (leads.length > 1) {
-        // Prevent double counting if already caught by phone
-        const existingPhones = new Set(dups.map(d => d.value));
-        const hasPhoneOverlap = leads.some(l => l.phone && existingPhones.has(l.phone));
-        if (!hasPhoneOverlap) {
-             dups.push({ type: 'email', value: email, leads })
-        }
-      }
+      if (leads.length > 1) dups.push({ type: 'email', value: email, leads })
     })
-    
     setDuplicates(dups)
     setShowDuplicatesDialog(true)
   }
 
-  // --- NEW FEATURE: AUTO FIX DUPLICATES ---
-  const handleAutoFixDuplicates = async () => {
+  // --- NEW: Bulk Resolve Duplicates ---
+  const handleBulkResolveDuplicates = async () => {
     if (duplicates.length === 0) return;
 
-    // We collect IDs of leads to delete
-    // Strategy: For each duplicate group, sort by created_at (ascending). Keep the first one. Delete the rest.
-    const idsToDelete: string[] = [];
+    const idsToDelete = new Set<string>();
 
-    duplicates.forEach(dup => {
-        // Sort: Oldest first
-        const sorted = [...dup.leads].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    // Logic: In each group, keep the oldest created lead, mark rest for deletion
+    duplicates.forEach(group => {
+        // Sort leads by created_at ascending (Oldest first)
+        const sortedLeads = [...group.leads].sort((a: Lead, b: Lead) => 
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
         
-        // Keep index 0, delete indices 1 to end
-        const extras = sorted.slice(1);
-        extras.forEach(l => idsToDelete.push(l.id));
+        // Skip the first one (Index 0), add the rest to deletion list
+        for (let i = 1; i < sortedLeads.length; i++) {
+            idsToDelete.add(sortedLeads[i].id);
+        }
     });
 
-    if (idsToDelete.length === 0) {
-        alert("No duplicates to delete (duplicate groups contain only 1 lead?)");
+    if (idsToDelete.size === 0) {
+        alert("No duplicates to remove (Each group only has 1 unique record?).");
         return;
     }
 
-    if (!confirm(`This will permanently delete ${idsToDelete.length} duplicate leads, keeping only the oldest record for each group. Continue?`)) {
+    if (!confirm(`This will keep the OLDEST record in each group and permanently DELETE ${idsToDelete.size} redundant leads. Continue?`)) {
         return;
     }
 
     try {
-        const { error } = await supabase.from('leads').delete().in('id', idsToDelete);
-        
+        const { error } = await supabase
+            .from('leads')
+            .delete()
+            .in('id', Array.from(idsToDelete));
+
         if (error) throw error;
 
-        setSuccessMessage(`Successfully removed ${idsToDelete.length} duplicate leads.`);
+        setSuccessMessage(`Successfully removed ${idsToDelete.size} duplicate leads.`);
         setShowDuplicatesDialog(false);
         window.location.reload();
     } catch (error) {
         console.error("Error deleting duplicates:", error);
-        setErrorMessage("Failed to delete duplicates.");
+        setErrorMessage("Failed to delete duplicates");
     }
   }
 
-  // ... (Other handlers unchanged) ...
+  // ... (exportToCSV, saveCurrentFilter, loadFilter, etc. - keep existing) ...
   const exportToCSV = () => {
     const columnMapping: Record<string, { label: string; value: (l: Lead) => any }[]> = {
       name: [{ label: 'Name', value: l => l.name }],
@@ -1050,7 +1037,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       if (newStatus === "Not_Interested") {
           if (currentTags.includes("NI_STRIKE_1")) {
               updateData.status = "dead_bucket";
-              updateData.assigned_to = null;
+              updateData.assigned_to = null; 
               await supabase.from("notes").insert({
                 lead_id: selectedLead.id,
                 note: "System: Lead marked 'Not Interested' twice. Moved to Dead Bucket.",
@@ -1060,6 +1047,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               updateData.status = "recycle_pool"; 
               updateData.assigned_to = null; 
               updateData.tags = [...currentTags, "NI_STRIKE_1"];
+              
               await supabase.from("notes").insert({
                 lead_id: selectedLead.id,
                 note: "System: Lead marked 'Not Interested' (Strike 1). Recycled to pool.",
@@ -1155,7 +1143,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   }
 
-  // ... (Drag & Drop, Toggle Selection, etc.) ...
   const handleDragStart = (e: React.DragEvent, leadId: string) => {
     e.dataTransfer.setData("leadId", leadId);
     e.dataTransfer.effectAllowed = "move";
@@ -1253,8 +1240,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
   return (
     <div className="space-y-6">
-      {/* ... (Existing UI sections: Success/Error messages, Stats, Filters) ... */}
-      
+      {/* Success/Error Messages */}
       {successMessage && (
         <Card className="border-green-500 bg-green-50">
           <CardContent className="p-4">
@@ -1327,7 +1313,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       {/* Controls Bar */}
       <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center w-full lg:w-auto">
-          {/* ... (Search and filter Selects remain the same) ... */}
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
@@ -1400,7 +1385,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                 <Upload className="h-4 w-4 mr-2" /> Import
             </Button>
 
-          {/* ... (Dropdowns for More Filters, Columns, Actions remain same) ... */}
+          {/* Fixed Dropdown Trigger */}
           <DropdownMenu>
             <DropdownMenuTrigger className={triggerButtonClass}>
               <Filter className="h-4 w-4 mr-2" />
@@ -1408,83 +1393,82 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               <ChevronDown className="h-4 w-4 ml-2" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-                {/* ... (Filter Content) ... */}
-                <DropdownMenuLabel>Advanced Filters</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <div className="p-2">
-                    <Label className="text-xs">Source</Label>
-                    <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                    <SelectTrigger className="w-full mt-1">
-                        <SelectValue placeholder="All Sources" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">All Sources</SelectItem>
-                        {uniqueSources.map((source) => (
-                        <SelectItem key={source} value={source || ''}>{source}</SelectItem>
-                        ))}
-                    </SelectContent>
-                    </Select>
-                </div>
-                {/* ... (Rest of filters) ... */}
-                <div className="p-2">
-                    <Label className="text-xs">Lead Score</Label>
-                    <Select value={scoreFilter} onValueChange={setScoreFilter}>
-                        <SelectTrigger className="w-full mt-1">
-                            <SelectValue placeholder="All Scores" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">All Scores</SelectItem>
-                            <SelectItem value="hot">Hot (80+)</SelectItem>
-                            <SelectItem value="warm">Warm (50-79)</SelectItem>
-                            <SelectItem value="cold">Cold (0-49)</SelectItem>
-                        </SelectContent>
-                    </Select>
-                </div>
-                <div className="p-2">
-                    <Label className="text-xs">Tags</Label>
-                    <Select value={tagFilter} onValueChange={setTagFilter}>
-                        <SelectTrigger className="w-full mt-1">
-                            <SelectValue placeholder="All Tags" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">All Tags</SelectItem>
-                            {uniqueTags.map((tag) => (
-                            <SelectItem key={tag} value={tag}>{tag}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>Date Filters</DropdownMenuLabel>
-                <div className="p-2 space-y-2">
-                    <Label className="text-xs font-semibold">Lead Creation Date</Label>
-                    <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-8 text-xs" />
-                    <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-8 text-xs" />
-                </div>
-                <div className="p-2 space-y-2">
-                    <Label className="text-xs font-semibold">Last Call Date</Label>
-                    <Input type="date" value={lastCallFrom} onChange={(e) => setLastCallFrom(e.target.value)} className="h-8 text-xs" />
-                    <Input type="date" value={lastCallTo} onChange={(e) => setLastCallTo(e.target.value)} className="h-8 text-xs" />
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setShowSaveFilterDialog(true)}>
-                    <Save className="h-4 w-4 mr-2" />
-                    Save Current Filter
-                </DropdownMenuItem>
-                {savedFilters.length > 0 && (
-                    <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel>Saved Filters</DropdownMenuLabel>
-                    {savedFilters.map((filter) => (
-                        <DropdownMenuItem key={filter.id} onClick={() => loadFilter(filter)}>
-                        {filter.name}
-                        </DropdownMenuItem>
+              <DropdownMenuLabel>Advanced Filters</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <div className="p-2">
+                <Label className="text-xs">Source</Label>
+                <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                  <SelectTrigger className="w-full mt-1">
+                    <SelectValue placeholder="All Sources" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Sources</SelectItem>
+                    {uniqueSources.map((source) => (
+                      <SelectItem key={source} value={source || ''}>{source}</SelectItem>
                     ))}
-                    </>
-                )}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="p-2">
+                <Label className="text-xs">Lead Score</Label>
+                <Select value={scoreFilter} onValueChange={setScoreFilter}>
+                  <SelectTrigger className="w-full mt-1">
+                    <SelectValue placeholder="All Scores" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Scores</SelectItem>
+                    <SelectItem value="hot">Hot (80+)</SelectItem>
+                    <SelectItem value="warm">Warm (50-79)</SelectItem>
+                    <SelectItem value="cold">Cold (0-49)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="p-2">
+                <Label className="text-xs">Tags</Label>
+                <Select value={tagFilter} onValueChange={setTagFilter}>
+                  <SelectTrigger className="w-full mt-1">
+                    <SelectValue placeholder="All Tags" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Tags</SelectItem>
+                    {uniqueTags.map((tag) => (
+                      <SelectItem key={tag} value={tag}>{tag}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Date Filters</DropdownMenuLabel>
+              <div className="p-2 space-y-2">
+                <Label className="text-xs font-semibold">Lead Creation Date</Label>
+                <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-8 text-xs" />
+                <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-8 text-xs" />
+              </div>
+              <div className="p-2 space-y-2">
+                <Label className="text-xs font-semibold">Last Call Date</Label>
+                <Input type="date" value={lastCallFrom} onChange={(e) => setLastCallFrom(e.target.value)} className="h-8 text-xs" />
+                <Input type="date" value={lastCallTo} onChange={(e) => setLastCallTo(e.target.value)} className="h-8 text-xs" />
+              </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setShowSaveFilterDialog(true)}>
+                <Save className="h-4 w-4 mr-2" />
+                Save Current Filter
+              </DropdownMenuItem>
+              {savedFilters.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>Saved Filters</DropdownMenuLabel>
+                  {savedFilters.map((filter) => (
+                    <DropdownMenuItem key={filter.id} onClick={() => loadFilter(filter)}>
+                      {filter.name}
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {/* Fixed Dropdown Trigger */}
           <DropdownMenu>
             <DropdownMenuTrigger className={triggerButtonClass}>
               <Layout className="h-4 w-4 mr-2" />
@@ -1500,6 +1484,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     setVisibleColumns(prev => ({ ...prev, [key]: checked }))
                   }
                 >
+                   {/* Improved label formatting (e.g. "loanAmount" -> "Loan Amount") */}
                   {key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}
                 </DropdownMenuCheckboxItem>
               ))}
@@ -1516,6 +1501,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
             Duplicates
           </Button>
 
+          {/* Fixed Dropdown Trigger */}
           <DropdownMenu>
             <DropdownMenuTrigger className={triggerButtonClass}>
               <Zap className="h-4 w-4 mr-2" />
@@ -1626,7 +1612,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     </DropdownMenuContent>
                 </DropdownMenu>
 
-                {/* Manual Bulk Assignment */}
+                {/* Manual Bulk Assignment with Status Dots */}
                 <DropdownMenu>
                   <DropdownMenuTrigger className={`${triggerButtonClass} w-[200px] justify-between border-dashed`}>
                       {bulkAssignTo.length === 0 ? (
@@ -1723,7 +1709,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         <Card>
             <CardContent className="p-0">
             <Table>
-                {/* ... (TableHeader) ... */}
                 <TableHeader>
                 <TableRow>
                     <TableHead className="w-12">
@@ -1913,10 +1898,13 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                             </div>
                         </TableCell>
                         )}
+                        
                         {visibleColumns.lastContacted && (
                         <TableCell>
                             {(() => {
+                            // Check latest timestamp from call logs first, fallback to leads.last_contacted
                             const lastContactTimestamp = lastCallTimestamps[lead.id] || lead.last_contacted;
+                            
                             // Check Staleness
                             const stale = isStale(lastContactTimestamp, lead.status);
 
@@ -1947,6 +1935,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                             })()}
                         </TableCell>
                         )}
+
                         {visibleColumns.loanAmount && (
                         <TableCell>
                             <InlineEditableCell 
@@ -1998,6 +1987,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                         {visibleColumns.tags && (
                         <TableCell>
                             <div className="flex flex-wrap gap-1">
+                            {/* --- ADDED SAFETY CHECK HERE TOO --- */}
                             {(Array.isArray(lead.tags) ? lead.tags : []).slice(0, 2).map((tag) => (
                                 <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
                             ))}
@@ -2018,6 +2008,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                                 onStatusChange={(status) => handleStatusChange(lead.id, status)}
                             />
                             
+                            {/* Fixed Dropdown Trigger */}
                             <DropdownMenu>
                                 <DropdownMenuTrigger className={triggerGhostClass}>
                                 <MoreHorizontal className="h-4 w-4" />
@@ -2059,7 +2050,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
             </CardContent>
             {/* Pagination */}
             <div className="flex items-center justify-between px-4 py-3 border-t">
-                {/* ... (Pagination controls unchanged) ... */}
                 <div className="text-sm text-muted-foreground">
                     Showing {((currentPage - 1) * pageSize) + 1} - {Math.min(currentPage * pageSize, filteredLeads.length)} of {filteredLeads.length} results.
                 </div>
@@ -2120,6 +2110,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
         <div className="h-[calc(100vh-220px)] overflow-x-auto pb-4">
           <div className="flex gap-4 h-full min-w-[1200px]">
             {KANBAN_COLUMNS.map(col => {
+              // Note: We use filteredLeads here so the Kanban respects the search/filter inputs!
               const colLeads = filteredLeads.filter(l => l.status === col.id);
               const totalAmount = colLeads.reduce((sum, l) => sum + (l.loan_amount || 0), 0);
               
@@ -2130,6 +2121,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, col.id)}
                 >
+                  {/* Column Header */}
                   <div className={`p-3 border-b border-l-4 ${col.color.replace('bg-', 'border-')} flex justify-between items-start`}>
                     <div>
                       <h3 className="font-semibold text-sm flex items-center gap-2">
@@ -2142,6 +2134,7 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
                     </div>
                   </div>
 
+                  {/* Draggable Cards Area */}
                   <div className="flex-1 overflow-y-auto p-2 space-y-2">
                     {colLeads.map(lead => (
                       <Card 
@@ -2193,7 +2186,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       )}
 
       {/* Dialogs */}
-      {/* ... (Existing Dialogs) ... */}
       <LeadStatusDialog
         open={isStatusDialogOpen}
         onOpenChange={setIsStatusDialogOpen}
@@ -2204,7 +2196,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       />
 
       <Dialog open={showSaveFilterDialog} onOpenChange={setShowSaveFilterDialog}>
-        {/* ... (Save Filter Dialog Content) ... */}
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Save Filter</DialogTitle>
@@ -2224,7 +2215,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       </Dialog>
 
       <Dialog open={showEmailDialog} onOpenChange={setShowEmailDialog}>
-        {/* ... (Email Dialog Content) ... */}
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Send Bulk Email</DialogTitle>
@@ -2248,7 +2238,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
       </Dialog>
 
       <Dialog open={showSMSDialog} onOpenChange={setShowSMSDialog}>
-        {/* ... (SMS Dialog Content) ... */}
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Send Bulk SMS</DialogTitle>
@@ -2289,7 +2278,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
 
       <Dialog open={showAutoAssignDialog} onOpenChange={setShowAutoAssignDialog}>
         <DialogContent>
-          {/* ... (Auto Assign Content) ... */}
           <DialogHeader>
             <DialogTitle>Auto-Assign Rules</DialogTitle>
             <DialogDescription>Configure automatic lead assignment rules.</DialogDescription>
@@ -2379,13 +2367,16 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
               </Card>
             ))}
           </div>
-          <DialogFooter>
-            <div className="flex w-full justify-between items-center">
-                <Button variant="destructive" onClick={handleAutoFixDuplicates}>
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Clean Up Duplicates (Keep Oldest)
-                </Button>
+          <DialogFooter className="sm:justify-between">
+            <div className="text-xs text-muted-foreground self-center">
+                Review carefully before bulk deleting.
+            </div>
+            <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setShowDuplicatesDialog(false)}>Close</Button>
+                <Button variant="destructive" onClick={handleBulkResolveDuplicates}>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Remove All Duplicates (Keep Oldest)
+                </Button>
             </div>
           </DialogFooter>
         </DialogContent>
