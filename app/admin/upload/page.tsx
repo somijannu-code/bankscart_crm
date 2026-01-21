@@ -87,6 +87,7 @@ export default function UploadPage() {
   const [selectedTelecaller, setSelectedTelecaller] = useState<string | null>(null)
   const [autoDistribute, setAutoDistribute] = useState(false)
   const [activeCount, setActiveCount] = useState<number>(0)
+  // Removed "duplicateAction" state as we are now enforcing smart logic
   const [globalSource, setGlobalSource] = useState("other") 
   const [globalTags, setGlobalTags] = useState("")
   
@@ -271,17 +272,17 @@ export default function UploadPage() {
                     // SKIP: Status is in the protected list
                     skipCount++
                 } else {
-                    // UPDATE: Status is NOT protected (e.g. New, Follow Up, NR)
-                    // Attach ID to force update
+                    // UPDATE: Status is NOT protected
                     row.id = existing.id 
                     leadsToUpsert.push(row)
                     updatedCount++ 
                 }
             } else {
                 // INSERT: New Lead
-                // Ensure NO 'id' is passed for new leads so DB generates it
-                const { id, ...newLead } = row
-                leadsToUpsert.push(newLead)
+                // --- FIX: GENERATE ID CLIENT SIDE ---
+                // This prevents the "null value in column id" error if the DB doesn't have a default value
+                row.id = self.crypto.randomUUID() 
+                leadsToUpsert.push(row)
             }
         })
 
@@ -291,9 +292,7 @@ export default function UploadPage() {
             const finalLeads = leadsToUpsert.map((lead, idx) => {
                  let assigneeId = null
                  
-                 // Logic: If it's an update, we might re-assign or keep old assignment. 
-                 // The prompt implies "update these new leads" which usually means treating them as fresh input.
-                 // So we apply assignment logic to updates as well.
+                 // Assignment Logic
                  if (autoDistribute && distributionList.length > 0) {
                      assigneeId = distributionList[(successCount + idx) % distributionList.length]
                  } else if (selectedTelecaller && selectedTelecaller !== "unassigned") {
@@ -304,7 +303,8 @@ export default function UploadPage() {
                     currentBatchAssignments[assigneeId] = (currentBatchAssignments[assigneeId] || 0) + 1
                  }
 
-                 // CLEANUP: Remove ANY UI-specific fields or undefined IDs before sending to DB
+                 // Destructure to remove internal UI keys
+                 // IMPORTANT: We keep 'id' (which we ensured exists)
                  const { _originalIndex, _id, ...cleanLeadData } = lead;
 
                  return {
@@ -317,21 +317,19 @@ export default function UploadPage() {
                     email: lead.email || null,
                     company: lead.company || null,
                     priority: 'medium',
-                    status: 'new', // Reset status to new for imported leads (even updates)
-                    last_contacted: new Date().toISOString() // Mark as fresh
+                    status: 'new', // Reset status to new for imported leads
+                    last_contacted: new Date().toISOString()
                  }
             })
 
-            // Use upsert to handle both inserts and updates (based on ID presence)
-            // Explicitly excluding 'id' for new rows ensures Postgres generates UUID
+            // Use upsert to handle both inserts and updates
             const { error } = await supabase.from("leads").upsert(finalLeads)
             
             if (error) {
                 console.error("Batch Upload Error:", error)
                 failCount += leadsToUpsert.length
                 leadsToUpsert.forEach(l => errors.push({ ...l, error: error.message }))
-                // If failed, revert the updated count guess
-                updatedCount -= leadsToUpsert.filter(l => l.id).length
+                updatedCount -= leadsToUpsert.filter(l => existingMap.has(l.phone)).length
             } else {
                 successCount += leadsToUpsert.length
                 
@@ -344,10 +342,10 @@ export default function UploadPage() {
                 })
             }
         }
-    }
 
-    const processed = Math.min(uniqueRows.length, uniqueRows.length)
-    setProgress(100)
+        const processed = Math.min(i + BATCH_SIZE, uniqueRows.length)
+        setProgress(Math.round((processed / uniqueRows.length) * 100))
+    }
 
     setUploadStats({
         total: uniqueRows.length + (lines.length - uniqueRows.length),
