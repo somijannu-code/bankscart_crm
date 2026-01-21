@@ -224,10 +224,12 @@ const triggerButtonClass = "inline-flex items-center justify-center whitespace-n
 const triggerGhostClass = "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-9 px-3";
 
 export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
+  // --- STATE DECLARATIONS (MOVED TO TOP) ---
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [viewMode, setViewMode] = useState<'table' | 'board'>('table')
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
+  const [isCallInitiated, setIsCallInitiated] = useState(false) // <--- FIXED: Moved here
   
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all")
@@ -297,9 +299,10 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
   const [errorMessage, setErrorMessage] = useState<string>("")
   const [duplicates, setDuplicates] = useState<any[]>([])
   const [showDuplicatesDialog, setShowDuplicatesDialog] = useState(false)
-  const supabase = createClient()
   const [lastCallTimestamps, setLastCallTimestamps] = useState<Record<string, string | null>>({})
   const [telecallerStatus, setTelecallerStatus] = useState<Record<string, boolean>>({})
+
+  const supabase = createClient()
 
   useEffect(() => {
     const fetchData = async () => {
@@ -364,7 +367,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     fetchData();
   }, [leads, supabase]);
 
-  // ... (calculateLeadScore, enrichedLeads, dashboardStats, uniqueSources, uniqueTags, filteredLeads, sorting, pagination logic same as before) ...
   const calculateLeadScore = (lead: Lead): number => {
     let score = 0
     if (lead.loan_amount) {
@@ -547,31 +549,29 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     setShowDuplicatesDialog(true)
   }
 
-  // --- NEW: Bulk Resolve Duplicates ---
   const handleBulkResolveDuplicates = async () => {
     if (duplicates.length === 0) return;
 
     const idsToDelete = new Set<string>();
 
-    // Logic: In each group, keep the oldest created lead, mark rest for deletion
     duplicates.forEach(group => {
-        // Sort leads by created_at ascending (Oldest first)
+        // Sort by created_at (Keep Oldest)
         const sortedLeads = [...group.leads].sort((a: Lead, b: Lead) => 
             new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
         );
         
-        // Skip the first one (Index 0), add the rest to deletion list
+        // Keep index 0, delete the rest
         for (let i = 1; i < sortedLeads.length; i++) {
             idsToDelete.add(sortedLeads[i].id);
         }
     });
 
     if (idsToDelete.size === 0) {
-        alert("No duplicates to remove (Each group only has 1 unique record?).");
+        alert("No duplicates to remove.");
         return;
     }
 
-    if (!confirm(`This will keep the OLDEST record in each group and permanently DELETE ${idsToDelete.size} redundant leads. Continue?`)) {
+    if (!confirm(`This will permanently DELETE ${idsToDelete.size} redundant leads. Continue?`)) {
         return;
     }
 
@@ -592,7 +592,6 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     }
   }
 
-  // ... (exportToCSV, saveCurrentFilter, loadFilter, etc. - keep existing) ...
   const exportToCSV = () => {
     const columnMapping: Record<string, { label: string; value: (l: Lead) => any }[]> = {
       name: [{ label: 'Name', value: l => l.name }],
