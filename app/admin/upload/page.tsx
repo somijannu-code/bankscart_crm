@@ -87,14 +87,14 @@ export default function UploadPage() {
   const [selectedTelecaller, setSelectedTelecaller] = useState<string | null>(null)
   const [autoDistribute, setAutoDistribute] = useState(false)
   const [activeCount, setActiveCount] = useState<number>(0)
-  const [duplicateAction, setDuplicateAction] = useState<'skip' | 'allow'>('skip')
-  const [globalSource, setGlobalSource] = useState("other") // Default to "other" to match DB constraints
+  // Removed "duplicateAction" state as we are now enforcing smart logic
+  const [globalSource, setGlobalSource] = useState("other") 
   const [globalTags, setGlobalTags] = useState("")
   
   // --- State: Step 4 (Upload & Progress) ---
   const [isUploading, setIsUploading] = useState(false)
   const [progress, setProgress] = useState(0)
-  const [uploadStats, setUploadStats] = useState({ total: 0, success: 0, failed: 0, skipped: 0 })
+  const [uploadStats, setUploadStats] = useState({ total: 0, success: 0, failed: 0, skipped: 0, updated: 0 })
   const [failedRows, setFailedRows] = useState<any[]>([])
   
   // --- NEW STATE: Assignment Summary ---
@@ -185,19 +185,23 @@ export default function UploadPage() {
     setPreviewData(prev => prev.map(row => row._id === rowId ? { ...row, [field]: value } : row))
   }
 
+  // --- MODIFIED: PROCESS UPLOAD WITH SMART DUPLICATE LOGIC ---
   const processUpload = async () => {
     setIsUploading(true)
-    setUploadStats({ total: 0, success: 0, failed: 0, skipped: 0 })
+    setUploadStats({ total: 0, success: 0, failed: 0, skipped: 0, updated: 0 })
     setFailedRows([])
-    setAssignmentSummary({}) // Reset summary
+    setAssignmentSummary({})
     
     // 1. Parse ALL Data
     const lines = rawFileContent.split("\n").filter(line => line.trim()).slice(1)
     
+    // Statuses that prevent overwriting/uploading
+    const RESTRICTED_STATUSES = new Set(['interested', 'login', 'documents_sent', 'disbursed'])
+
     let tempSkipCount = 0;
     const seenPhonesInFile = new Set<string>();
     
-    // Parse and Deduplicate within the file immediately
+    // Deduplicate within the file immediately
     const uniqueRows = lines.reduce((acc: any[], line, idx) => {
         const values = line.split(",").map(v => v.trim())
         const row: any = {}
@@ -211,17 +215,12 @@ export default function UploadPage() {
             }
         })
 
-        // Ensure we preserve the row number for error reporting
         row._originalIndex = idx + 2; 
 
-        // Deduplication Logic
         if (row.phone) {
             if (seenPhonesInFile.has(row.phone)) {
-                // Duplicate inside the file, skip it
-                if (duplicateAction === 'skip') {
-                    tempSkipCount++;
-                    return acc;
-                }
+                tempSkipCount++;
+                return acc;
             } else {
                 seenPhonesInFile.add(row.phone);
             }
@@ -233,7 +232,8 @@ export default function UploadPage() {
 
     const BATCH_SIZE = 50
     let successCount = 0
-    let skipCount = tempSkipCount; // Start with in-file duplicates
+    let updatedCount = 0
+    let skipCount = tempSkipCount;
     let failCount = 0
     const errors: any[] = []
 
@@ -248,31 +248,51 @@ export default function UploadPage() {
     // 3. Batch Process
     for (let i = 0; i < uniqueRows.length; i += BATCH_SIZE) {
         const batch = uniqueRows.slice(i, i + BATCH_SIZE)
-        const leadsToInsert: any[] = []
+        const phones = batch.map(r => r.phone).filter(Boolean)
+        
+        // Fetch existing leads to check status
+        const { data: existingDBLeads } = await supabase
+            .from("leads")
+            .select("id, phone, status")
+            .in("phone", phones)
+        
+        const existingMap = new Map()
+        existingDBLeads?.forEach(lead => {
+            existingMap.set(lead.phone, { id: lead.id, status: lead.status?.toLowerCase() || '' })
+        })
 
-        // Database-Check for Duplicates
-        if (duplicateAction === 'skip') {
-            const phones = batch.map(r => r.phone).filter(Boolean)
-            const { data: existing } = await supabase.from("leads").select("phone").in("phone", phones)
-            const existingPhones = new Set(existing?.map(e => e.phone) || [])
+        const leadsToUpsert: any[] = []
 
-            batch.forEach(row => {
-                if (existingPhones.has(row.phone)) {
+        batch.forEach(row => {
+            const existing = existingMap.get(row.phone)
+            
+            if (existing) {
+                // Check if restricted
+                if (RESTRICTED_STATUSES.has(existing.status)) {
+                    // SKIP: Status is in the protected list
                     skipCount++
-                    // errors.push({ ...row, error: "Duplicate Phone Number (In DB)" }) // Optional: log as error or just skip silently
                 } else {
-                    leadsToInsert.push(row)
+                    // UPDATE: Status is NOT protected (e.g. New, Follow Up, NR)
+                    // Attach ID to force update
+                    row.id = existing.id 
+                    leadsToUpsert.push(row)
+                    updatedCount++ 
                 }
-            })
-        } else {
-            leadsToInsert.push(...batch)
-        }
+            } else {
+                // INSERT: New Lead
+                leadsToUpsert.push(row)
+            }
+        })
 
-        if (leadsToInsert.length > 0) {
+        if (leadsToUpsert.length > 0) {
             const currentBatchAssignments: Record<string, number> = {} 
 
-            const finalLeads = leadsToInsert.map((lead, idx) => {
+            const finalLeads = leadsToUpsert.map((lead, idx) => {
                  let assigneeId = null
+                 
+                 // Logic: If it's an update, we might re-assign or keep old assignment. 
+                 // The prompt implies "update these new leads" which usually means treating them as fresh input.
+                 // So we apply assignment logic to updates as well.
                  if (autoDistribute && distributionList.length > 0) {
                      assigneeId = distributionList[(successCount + idx) % distributionList.length]
                  } else if (selectedTelecaller && selectedTelecaller !== "unassigned") {
@@ -283,13 +303,10 @@ export default function UploadPage() {
                     currentBatchAssignments[assigneeId] = (currentBatchAssignments[assigneeId] || 0) + 1
                  }
 
-                 // --- IMPORTANT FIX: Destructure to remove _originalIndex and _id ---
-                 // We remove internal fields so Supabase doesn't throw "Column not found" error
                  const { _originalIndex, _id, ...cleanLeadData } = lead;
 
                  return {
                     ...cleanLeadData,
-                    // --- IMPORTANT FIX: Use "other" instead of "import" and lowercase to match Check Constraint ---
                     source: (globalSource || lead.source || "other").toLowerCase(),
                     tags: globalTags ? globalTags.split(",").map(t => t.trim()) : [],
                     assigned_to: assigneeId,
@@ -298,24 +315,22 @@ export default function UploadPage() {
                     email: lead.email || null,
                     company: lead.company || null,
                     priority: 'medium',
-                    status: 'new',
-                    // created_at is usually automatic, but we can send it if needed
-                    // created_at: new Date().toISOString() 
+                    status: 'new', // Reset status to new for imported leads (even updates)
+                    last_contacted: new Date().toISOString() // Mark as fresh
                  }
             })
 
-            const { error } = await supabase.from("leads").insert(finalLeads)
+            // Use upsert to handle both inserts and updates (based on ID presence)
+            const { error } = await supabase.from("leads").upsert(finalLeads)
             
             if (error) {
-                // If the batch fails, we need to know which rows failed.
-                // Since we don't know exactly which row caused it (unless we do single inserts),
-                // we mark the whole batch as failed.
-                failCount += leadsToInsert.length
-                leadsToInsert.forEach(l => errors.push({ ...l, error: error.message }))
+                failCount += leadsToUpsert.length
+                leadsToUpsert.forEach(l => errors.push({ ...l, error: error.message }))
+                // If failed, revert the updated count guess
+                updatedCount -= leadsToUpsert.filter(l => l.id).length
             } else {
-                successCount += leadsToInsert.length
+                successCount += leadsToUpsert.length
                 
-                // Update Global Assignment Summary
                 setAssignmentSummary(prev => {
                     const next = { ...prev }
                     Object.entries(currentBatchAssignments).forEach(([id, count]) => {
@@ -331,8 +346,9 @@ export default function UploadPage() {
     }
 
     setUploadStats({
-        total: uniqueRows.length + (lines.length - uniqueRows.length), // Total rows in file
-        success: successCount,
+        total: uniqueRows.length + (lines.length - uniqueRows.length),
+        success: successCount - updatedCount, // Fresh inserts
+        updated: updatedCount, // Overwritten leads
         skipped: skipCount,
         failed: failCount
     })
@@ -505,20 +521,6 @@ export default function UploadPage() {
                     </CardHeader>
                     <CardContent className="space-y-6">
                         
-                        {/* Duplicate Handling */}
-                        <div className="space-y-2">
-                            <Label>Duplicate Handling</Label>
-                            <Select value={duplicateAction} onValueChange={(val: any) => setDuplicateAction(val)}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="skip">Skip duplicates (Check Phone)</SelectItem>
-                                    <SelectItem value="allow">Allow duplicates</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-
                         {/* Global Attributes */}
                         <div className="space-y-3 pt-4 border-t">
                             <Label>Global Attributes</Label>
@@ -616,11 +618,17 @@ export default function UploadPage() {
                         </div>
                         <div className="bg-green-50 p-4 rounded-lg">
                             <div className="text-2xl font-bold text-green-700">{uploadStats.success}</div>
-                            <div className="text-sm text-green-600">Imported</div>
+                            <div className="text-sm text-green-600">Added New</div>
                         </div>
-                        <div className="bg-amber-50 p-4 rounded-lg">
+                        <div className="bg-blue-50 p-4 rounded-lg">
+                            <div className="text-2xl font-bold text-blue-700">{uploadStats.updated}</div>
+                            <div className="text-sm text-blue-600">Updated</div>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1">
+                         <div className="bg-amber-50 p-4 rounded-lg">
                             <div className="text-2xl font-bold text-amber-700">{uploadStats.skipped}</div>
-                            <div className="text-sm text-amber-600">Skipped (Dupes)</div>
+                            <div className="text-sm text-amber-600">Skipped (Active Leads)</div>
                         </div>
                     </div>
 
