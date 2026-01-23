@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Loader2, IndianRupee, BarChart3, TrendingUp, Filter, Calendar, Trash2, MapPin, Search, RefreshCw, X } from "lucide-react"
+import { Loader2, IndianRupee, BarChart3, TrendingUp, Filter, Calendar, Trash2, MapPin, Search, RefreshCw, X, Users } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
@@ -128,7 +128,6 @@ export default function TelecallerDisbursementReport() {
                 const startDate = new Date(Number(selectedYear), monthIndex, 1);
                 const endDate = new Date(Number(selectedYear), monthIndex + 1, 0); // Last day of month
                 
-                // Adjust to IST/Local if needed, keeping simple UTC ISO for DB
                 // Creating simplified ISO strings
                 const y = startDate.getFullYear();
                 const m = String(startDate.getMonth() + 1).padStart(2, '0');
@@ -238,6 +237,26 @@ export default function TelecallerDisbursementReport() {
             displayLabel: label
         };
     }, [disbursements, searchTerm, userMap, filterMode, selectedYear, selectedMonth, customStart, customEnd]);
+
+    // --- NEW: TELECALLER AGGREGATION ---
+    const telecallerStats = useMemo(() => {
+        const stats: Record<string, number> = {};
+        
+        // We use 'disbursements' (the full date-filtered list) instead of 'filteredData'
+        // so the leaderboard remains visible even when searching for a specific customer in the table.
+        disbursements.forEach(d => {
+            const id = d.assigned_to;
+            stats[id] = (stats[id] || 0) + (d.disbursed_amount || 0);
+        });
+
+        return Object.entries(stats)
+            .map(([id, amount]) => ({
+                id,
+                name: userMap[id] || 'Unknown',
+                amount
+            }))
+            .sort((a, b) => b.amount - a.amount); // Descending Order
+    }, [disbursements, userMap]);
 
     const availableYears = useMemo(() => {
         const years = [];
@@ -368,23 +387,63 @@ export default function TelecallerDisbursementReport() {
                 </CardContent>
             </Card>
 
-            {/* Stats Summary */}
-            <Card className="shadow-sm border-l-4 border-l-green-600 bg-white">
-                <CardContent className="p-6">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <p className="text-sm font-medium text-gray-500 flex items-center gap-1">
-                                <TrendingUp className="h-4 w-4 text-green-600" />
-                                {displayLabel}
-                            </p>
-                            <p className="text-3xl font-extrabold text-gray-900 mt-2">
-                                {loading ? <Loader2 className="h-6 w-6 animate-spin text-gray-400" /> : formatCurrency(grandTotal)}
-                            </p>
+            {/* --- STATS GRID --- */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                
+                {/* 1. Grand Total Card */}
+                <Card className="shadow-sm border-l-4 border-l-green-600 bg-white md:col-span-1 flex flex-col justify-center">
+                    <CardContent className="p-6">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-sm font-medium text-gray-500 flex items-center gap-1">
+                                    <TrendingUp className="h-4 w-4 text-green-600" />
+                                    {displayLabel}
+                                </p>
+                                <p className="text-3xl font-extrabold text-gray-900 mt-2">
+                                    {loading ? <Loader2 className="h-6 w-6 animate-spin text-gray-400" /> : formatCurrency(grandTotal)}
+                                </p>
+                            </div>
                         </div>
-                        {/* Optional: Add export button here */}
-                    </div>
-                </CardContent>
-            </Card>
+                    </CardContent>
+                </Card>
+
+                {/* 2. Telecaller Breakdown Card */}
+                <Card className="shadow-sm border-gray-200 md:col-span-2">
+                    <CardHeader className="py-4 border-b border-gray-100 bg-gray-50/50">
+                        <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                            <Users className="h-4 w-4 text-indigo-600"/>
+                            Telecaller Performance (Ranked)
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                        <div className="max-h-[150px] overflow-y-auto">
+                            {loading ? (
+                                <div className="p-4 text-center text-xs text-gray-400">Loading stats...</div>
+                            ) : telecallerStats.length === 0 ? (
+                                <div className="p-4 text-center text-xs text-gray-400">No data available</div>
+                            ) : (
+                                <Table>
+                                    <TableBody>
+                                        {telecallerStats.map((stat, idx) => (
+                                            <TableRow key={stat.id} className="border-b-0 hover:bg-gray-50">
+                                                <TableCell className="py-2 text-xs font-medium text-gray-500 w-[50px]">
+                                                    #{idx + 1}
+                                                </TableCell>
+                                                <TableCell className="py-2 text-sm font-medium text-gray-800">
+                                                    {stat.name}
+                                                </TableCell>
+                                                <TableCell className="py-2 text-sm font-bold text-green-700 text-right">
+                                                    {formatCurrency(stat.amount)}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
 
             {/* Data Table */}
             <Card className="shadow-lg border-gray-200">
