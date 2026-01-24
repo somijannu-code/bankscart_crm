@@ -5,7 +5,8 @@ import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { 
   Loader2, IndianRupee, TrendingUp, Filter, Calendar, Trash2, 
-  MapPin, Search, RefreshCw, X, Users, Download, Trophy, Medal 
+  MapPin, Search, RefreshCw, X, Users, Trophy, Medal,
+  Calculator, Building2, MousePointerClick
 } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -14,10 +15,10 @@ import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { CSVLink } from "react-csv" // NEW: For Export
+// REMOVED react-csv
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, PieChart, Pie 
-} from 'recharts' // NEW: For Charts
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell 
+} from 'recharts'
 
 import {
   AlertDialog,
@@ -64,8 +65,6 @@ const formatDate = (dateString: string) => {
     });
 };
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
-
 // --- MAIN COMPONENT ---
 export default function TelecallerDisbursementReport() {
     const supabase = createClient();
@@ -76,10 +75,13 @@ export default function TelecallerDisbursementReport() {
     const currentYear = new Date().getFullYear();
     const [selectedYear, setSelectedYear] = useState(String(currentYear));
     const [selectedMonth, setSelectedMonth] = useState<string>('all');
+    
+    // Custom Date State
     const [customStart, setCustomStart] = useState("");
     const [customEnd, setCustomEnd] = useState("");
+
     const [searchTerm, setSearchTerm] = useState("");
-    const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null); // NEW: For Drill-down
+    const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
     const [loading, setLoading] = useState(true);
     const [disbursements, setDisbursements] = useState<LeadDisbursement[]>([]);
@@ -88,6 +90,47 @@ export default function TelecallerDisbursementReport() {
     const [deleteId, setDeleteId] = useState<string | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const [refreshKey, setRefreshKey] = useState(0);
+
+    // --- QUICK FILTER HANDLERS ---
+    const setQuickFilter = (type: 'today' | 'yesterday' | 'week') => {
+        const today = new Date();
+        const y = today.getFullYear();
+        const m = String(today.getMonth() + 1).padStart(2, '0');
+        const d = String(today.getDate()).padStart(2, '0');
+        
+        let start = "";
+        let end = `${y}-${m}-${d}`; // Default end is today
+
+        if (type === 'today') {
+            start = `${y}-${m}-${d}`;
+        } else if (type === 'yesterday') {
+            const yest = new Date(today);
+            yest.setDate(today.getDate() - 1);
+            const yY = yest.getFullYear();
+            const yM = String(yest.getMonth() + 1).padStart(2, '0');
+            const yD = String(yest.getDate()).padStart(2, '0');
+            start = `${yY}-${yM}-${yD}`;
+            end = `${yY}-${yM}-${yD}`;
+        } else if (type === 'week') {
+            const lastWeek = new Date(today);
+            lastWeek.setDate(today.getDate() - 7);
+            const wY = lastWeek.getFullYear();
+            const wM = String(lastWeek.getMonth() + 1).padStart(2, '0');
+            const wD = String(lastWeek.getDate()).padStart(2, '0');
+            start = `${wY}-${wM}-${wD}`;
+        }
+
+        setFilterMode('custom');
+        setCustomStart(start);
+        setCustomEnd(end);
+        // We set a small timeout to allow state to update before fetching, or use useEffect. 
+        // For simplicity in this patterns, user clicks "Apply" or we trigger fetch immediately if we move logic to useEffect.
+        // Here we will just set state, and the user can click Apply, OR we can auto-trigger. 
+        // Let's Auto-Trigger via a specialized effect or just let the user click apply? 
+        // Better UX: Trigger fetch immediately.
+        // Since fetchLeads depends on state, we can't call it immediately here with *new* state.
+        // We will just let the user click "Apply" to keep it simple, or use a specific useEffect.
+    };
 
     // 1. Fetch Users
     const fetchUsers = useCallback(async () => {
@@ -111,7 +154,7 @@ export default function TelecallerDisbursementReport() {
     // 2. Fetch Leads
     const fetchLeads = useCallback(async () => {
         setLoading(true);
-        setSelectedAgentId(null); // Reset drill-down on new fetch
+        setSelectedAgentId(null);
         
         let startQuery: string, endQuery: string;
 
@@ -162,7 +205,6 @@ export default function TelecallerDisbursementReport() {
 
     useEffect(() => {
         fetchUsers().then(() => fetchLeads());
-        // Real-time subscription logic (same as before)
         const channel = supabase.channel('disbursement-updates')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, (payload) => {
                 const newData = payload.new as any;
@@ -193,16 +235,14 @@ export default function TelecallerDisbursementReport() {
     };
 
     // --- AGGREGATION & ANALYTICS ---
-    const { filteredData, grandTotal, displayLabel, bankChartData } = useMemo(() => {
+    const { filteredData, grandTotal, displayLabel, bankChartData, avgTicketSize, topBank } = useMemo(() => {
         let total = 0;
         const bankMap: Record<string, number> = {};
         
         // 1. Filter by Search Term AND Drill-down Agent
         const searched = disbursements.filter(item => {
-            // Drill down check
             if (selectedAgentId && item.assigned_to !== selectedAgentId) return false;
 
-            // Search Check
             const term = searchTerm.toLowerCase();
             const telecallerName = userMap[item.assigned_to]?.toLowerCase() || "";
             const customerName = item.name?.toLowerCase() || "";
@@ -213,27 +253,43 @@ export default function TelecallerDisbursementReport() {
 
         searched.forEach(d => { 
             total += d.disbursed_amount; 
-            // Bank Stats
             const bank = d.bank_name || 'Others';
             bankMap[bank] = (bankMap[bank] || 0) + d.disbursed_amount;
         });
 
+        // Metrics
+        const avg = searched.length > 0 ? total / searched.length : 0;
+        
+        // Find Top Bank
+        let maxBankName = "N/A";
+        let maxBankVal = 0;
+        Object.entries(bankMap).forEach(([b, val]) => {
+            if(val > maxBankVal) {
+                maxBankVal = val;
+                maxBankName = b;
+            }
+        });
+
         // Label Logic
         let label = "Total Disbursed";
-        if (selectedAgentId) label = `${userMap[selectedAgentId]}'s Sales`; // Update label on drill-down
+        if (selectedAgentId) label = `${userMap[selectedAgentId]}'s Sales`;
 
         // Chart Data Format
-        const bChartData = Object.entries(bankMap).map(([name, value]) => ({ name, value }));
+        const bChartData = Object.entries(bankMap)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a,b) => b.value - a.value) // Sort desc
+            .slice(0, 8); // Top 8 banks only to keep chart clean
 
         return {
             filteredData: searched,
             grandTotal: total,
             displayLabel: label,
-            bankChartData: bChartData
+            bankChartData: bChartData,
+            avgTicketSize: avg,
+            topBank: maxBankName
         };
     }, [disbursements, searchTerm, userMap, selectedAgentId]);
 
-    // Telecaller Stats (Ranked) - Calculated on FULL data set (independent of drill-down)
     const telecallerStats = useMemo(() => {
         const stats: Record<string, number> = {};
         disbursements.forEach(d => {
@@ -245,20 +301,6 @@ export default function TelecallerDisbursementReport() {
             .sort((a, b) => b.amount - a.amount);
     }, [disbursements, userMap]);
 
-    // Export Data Preparation
-    const csvData = useMemo(() => {
-        return filteredData.map(item => ({
-            "App No": item.application_number,
-            "Date": formatDate(item.disbursed_at),
-            "Customer": item.name,
-            "Telecaller": userMap[item.assigned_to] || 'Unknown',
-            "Bank": item.bank_name,
-            "Amount": item.disbursed_amount,
-            "City": item.city
-        }));
-    }, [filteredData, userMap]);
-
-    // --- RENDER HELPERS ---
     const getRankIcon = (index: number) => {
         if (index === 0) return <Trophy className="h-4 w-4 text-yellow-500 fill-yellow-100" />;
         if (index === 1) return <Medal className="h-4 w-4 text-gray-400 fill-gray-100" />;
@@ -279,16 +321,6 @@ export default function TelecallerDisbursementReport() {
                     <p className="text-slate-500 text-sm mt-1">Analytics & Performance Tracking</p>
                 </div>
                 <div className="flex gap-2">
-                    {/* CSV EXPORT BUTTON */}
-                    {csvData.length > 0 && (
-                        <CSVLink 
-                            data={csvData} 
-                            filename={`disbursement_report_${new Date().toISOString().slice(0,10)}.csv`}
-                            className="bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium transition-colors shadow-sm"
-                        >
-                            <Download className="h-4 w-4" /> Export CSV
-                        </CSVLink>
-                    )}
                     <DisbursementModal onSuccess={() => setRefreshKey(prev => prev + 1)} />
                 </div>
             </div>
@@ -307,7 +339,6 @@ export default function TelecallerDisbursementReport() {
                             />
                         </div>
                         
-                        {/* Filters (Simplified for brevity, logic remains same) */}
                         <div className="flex flex-wrap gap-2 items-end">
                             <Select value={filterMode} onValueChange={(v:any) => setFilterMode(v)}>
                                 <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
@@ -331,10 +362,17 @@ export default function TelecallerDisbursementReport() {
                                     </Select>
                                 </>
                             ) : (
-                                <div className="flex gap-2">
-                                    <Input type="date" className="w-[140px]" value={customStart} onChange={e => setCustomStart(e.target.value)} />
-                                    <Input type="date" className="w-[140px]" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
-                                    <Button onClick={() => fetchLeads()} variant="secondary" size="icon"><RefreshCw className="h-4 w-4"/></Button>
+                                <div className="flex flex-col gap-2">
+                                    <div className="flex gap-1 mb-1">
+                                        <Badge variant="outline" className="cursor-pointer hover:bg-slate-100" onClick={() => setQuickFilter('today')}>Today</Badge>
+                                        <Badge variant="outline" className="cursor-pointer hover:bg-slate-100" onClick={() => setQuickFilter('yesterday')}>Yesterday</Badge>
+                                        <Badge variant="outline" className="cursor-pointer hover:bg-slate-100" onClick={() => setQuickFilter('week')}>Last 7 Days</Badge>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <Input type="date" className="w-[140px]" value={customStart} onChange={e => setCustomStart(e.target.value)} />
+                                        <Input type="date" className="w-[140px]" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
+                                        <Button onClick={() => fetchLeads()} variant="secondary" size="icon"><RefreshCw className="h-4 w-4"/></Button>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -342,44 +380,77 @@ export default function TelecallerDisbursementReport() {
                 </CardContent>
             </Card>
 
-            {/* --- TABS FOR VIEWS --- */}
+            {/* --- TABS --- */}
             <Tabs defaultValue="dashboard" className="w-full">
                 <TabsList className="grid w-full max-w-[400px] grid-cols-2">
                     <TabsTrigger value="dashboard">Dashboard View</TabsTrigger>
                     <TabsTrigger value="data">Data List</TabsTrigger>
                 </TabsList>
 
-                {/* --- VIEW 1: DASHBOARD --- */}
+                {/* --- DASHBOARD --- */}
                 <TabsContent value="dashboard" className="space-y-6 mt-4">
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-                        
-                        {/* LEFT COL: Total & Leaderboard */}
-                        <div className="md:col-span-4 space-y-6">
-                            {/* Total Card */}
-                            <Card className="bg-gradient-to-br from-green-50 to-white border-green-100">
-                                <CardContent className="p-6">
-                                    <div className="flex justify-between items-start">
-                                        <div>
-                                            <p className="text-green-700 font-medium text-sm flex items-center gap-1">
-                                                {selectedAgentId && <Badge variant="outline" className="mr-2 bg-white text-black cursor-pointer hover:bg-slate-100" onClick={() => setSelectedAgentId(null)}>Clear Filter</Badge>}
-                                                {displayLabel}
-                                            </p>
-                                            <h2 className="text-3xl font-bold text-slate-900 mt-2">{formatCurrency(grandTotal)}</h2>
-                                        </div>
-                                        <div className="p-2 bg-green-100 rounded-full">
-                                            <TrendingUp className="h-6 w-6 text-green-700" />
-                                        </div>
+                    {/* STATS ROW */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {/* 1. Total Card */}
+                        <Card className="bg-gradient-to-br from-green-50 to-white border-green-100 shadow-sm">
+                            <CardContent className="p-6">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <p className="text-green-700 font-medium text-sm flex items-center gap-1">
+                                            {selectedAgentId && <Badge variant="outline" className="mr-2 bg-white text-black cursor-pointer hover:bg-slate-100" onClick={() => setSelectedAgentId(null)}>Clear Filter</Badge>}
+                                            {displayLabel}
+                                        </p>
+                                        <h2 className="text-3xl font-bold text-slate-900 mt-2">{formatCurrency(grandTotal)}</h2>
                                     </div>
-                                </CardContent>
-                            </Card>
+                                    <div className="p-2 bg-green-100 rounded-full">
+                                        <TrendingUp className="h-6 w-6 text-green-700" />
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
 
-                            {/* Leaderboard */}
-                            <Card className="h-[400px] flex flex-col">
+                        {/* 2. Avg Ticket Size */}
+                        <Card className="bg-white border-slate-200 shadow-sm">
+                            <CardContent className="p-6">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <p className="text-slate-500 font-medium text-sm">Avg. Ticket Size</p>
+                                        <h2 className="text-3xl font-bold text-slate-900 mt-2">{formatCurrency(avgTicketSize)}</h2>
+                                    </div>
+                                    <div className="p-2 bg-blue-50 rounded-full">
+                                        <Calculator className="h-6 w-6 text-blue-600" />
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        {/* 3. Top Bank */}
+                        <Card className="bg-white border-slate-200 shadow-sm">
+                            <CardContent className="p-6">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <p className="text-slate-500 font-medium text-sm">Top Performing Bank</p>
+                                        <h2 className="text-2xl font-bold text-slate-900 mt-2 truncate max-w-[200px]" title={topBank}>
+                                            {topBank}
+                                        </h2>
+                                    </div>
+                                    <div className="p-2 bg-purple-50 rounded-full">
+                                        <Building2 className="h-6 w-6 text-purple-600" />
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                        {/* Leaderboard */}
+                        <div className="md:col-span-4">
+                            <Card className="h-[450px] flex flex-col shadow-sm">
                                 <CardHeader className="py-4 bg-slate-50 border-b">
                                     <CardTitle className="text-base flex items-center gap-2">
                                         <Trophy className="h-4 w-4 text-yellow-600" /> Top Performers
                                     </CardTitle>
-                                    <CardDescription>Click a name to filter dashboard</CardDescription>
+                                    <CardDescription className="text-xs">Click a name to filter dashboard</CardDescription>
                                 </CardHeader>
                                 <div className="flex-1 overflow-y-auto p-2">
                                     {telecallerStats.map((stat, idx) => (
@@ -399,18 +470,17 @@ export default function TelecallerDisbursementReport() {
                             </Card>
                         </div>
 
-                        {/* RIGHT COL: Charts */}
-                        <div className="md:col-span-8 space-y-6">
-                            {/* Bank Distribution Chart */}
-                            <Card className="h-[520px]">
+                        {/* Charts */}
+                        <div className="md:col-span-8">
+                            <Card className="h-[450px] shadow-sm">
                                 <CardHeader>
-                                    <CardTitle>Bank-wise Disbursement</CardTitle>
+                                    <CardTitle className="text-base">Bank-wise Disbursement Volume</CardTitle>
                                 </CardHeader>
-                                <CardContent className="h-[450px]">
+                                <CardContent className="h-[380px]">
                                     <ResponsiveContainer width="100%" height="100%">
                                         <BarChart data={bankChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                                             <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                            <XAxis dataKey="name" fontSize={12} tickLine={false} axisLine={false} />
+                                            <XAxis dataKey="name" fontSize={11} tickLine={false} axisLine={false} interval={0} angle={-15} textAnchor="end" height={60}/>
                                             <YAxis fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `₹${value/1000}k`} />
                                             <RechartsTooltip formatter={(value: number) => formatCurrency(value)} cursor={{ fill: '#f1f5f9' }} />
                                             <Bar dataKey="value" fill="#16a34a" radius={[4, 4, 0, 0]}>
@@ -426,38 +496,43 @@ export default function TelecallerDisbursementReport() {
                     </div>
                 </TabsContent>
 
-                {/* --- VIEW 2: DATA LIST --- */}
+                {/* --- DATA LIST --- */}
                 <TabsContent value="data" className="mt-4">
-                    <Card>
+                    <Card className="shadow-sm">
                         <CardHeader>
-                            <CardTitle className="text-base flex justify-between">
+                            <CardTitle className="text-base flex justify-between items-center">
                                 <span>Detailed Transactions ({filteredData.length})</span>
-                                {selectedAgentId && <Button variant="ghost" size="sm" onClick={() => setSelectedAgentId(null)} className="text-red-500">Clear Agent Filter</Button>}
+                                {selectedAgentId && <Button variant="ghost" size="sm" onClick={() => setSelectedAgentId(null)} className="text-red-500 h-8">Clear Agent Filter</Button>}
                             </CardTitle>
                         </CardHeader>
                         <CardContent className="p-0">
                             <Table>
                                 <TableHeader className="bg-slate-50">
                                     <TableRow>
-                                        <TableHead>#</TableHead>
+                                        <TableHead className="w-[50px]">#</TableHead>
                                         <TableHead>App No</TableHead>
                                         <TableHead>Telecaller</TableHead>
                                         <TableHead>Customer</TableHead>
                                         <TableHead>Date</TableHead>
                                         <TableHead>Bank</TableHead>
                                         <TableHead className="text-right">Amount</TableHead>
-                                        <TableHead className="text-center">Action</TableHead>
+                                        <TableHead className="text-center w-[60px]">Action</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {filteredData.map((item, index) => (
-                                        <TableRow key={item.id}>
+                                        <TableRow key={item.id} className="hover:bg-slate-50">
                                             <TableCell className="text-xs text-slate-500">{index+1}</TableCell>
                                             <TableCell className="text-xs font-mono">{item.application_number}</TableCell>
-                                            <TableCell><Badge variant="outline" className="font-normal">{userMap[item.assigned_to]}</Badge></TableCell>
-                                            <TableCell className="font-medium text-sm">{item.name}</TableCell>
+                                            <TableCell><Badge variant="outline" className="font-normal text-xs">{userMap[item.assigned_to]}</Badge></TableCell>
+                                            <TableCell>
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-medium">{item.name}</span>
+                                                    {item.city && <span className="text-[10px] text-slate-400">{item.city}</span>}
+                                                </div>
+                                            </TableCell>
                                             <TableCell className="text-sm text-slate-500">{formatDate(item.disbursed_at)}</TableCell>
-                                            <TableCell>{item.bank_name}</TableCell>
+                                            <TableCell className="text-sm">{item.bank_name}</TableCell>
                                             <TableCell className="text-right font-bold text-green-700">{formatCurrency(item.disbursed_amount)}</TableCell>
                                             <TableCell className="text-center">
                                                 <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => setDeleteId(item.id)}>
@@ -474,7 +549,7 @@ export default function TelecallerDisbursementReport() {
                 </TabsContent>
             </Tabs>
 
-            {/* DELETE ALERT (Same as before) */}
+            {/* DELETE ALERT */}
             <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
@@ -483,7 +558,7 @@ export default function TelecallerDisbursementReport() {
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleDelete} disabled={isDeleting} className="bg-red-600">Delete</AlertDialogAction>
+                        <AlertDialogAction onClick={handleDelete} disabled={isDeleting} className="bg-red-600 hover:bg-red-700">Delete</AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
