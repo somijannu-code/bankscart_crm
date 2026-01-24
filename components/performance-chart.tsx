@@ -1,9 +1,8 @@
 "use client"
 
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts"
-// 
 
 interface PerformanceChartProps {
   startDate: string
@@ -20,7 +19,7 @@ export function PerformanceChart({ startDate, endDate, telecallerId }: Performan
     const fetchData = async () => {
       setIsLoading(true)
       try {
-        // 1. Fetch ALL data for the range in ONE query (select only created_at to save bandwidth)
+        // 1. Fetch data for ENTIRE range (Select ONLY timestamp to save bandwidth)
         let leadsQuery = supabase
           .from("leads")
           .select("created_at")
@@ -34,42 +33,37 @@ export function PerformanceChart({ startDate, endDate, telecallerId }: Performan
           .lte("created_at", `${endDate}T23:59:59`)
 
         if (telecallerId) {
-          leadsQuery = leadsQuery.eq("assigned_to", telecallerId)
-          callsQuery = callsQuery.eq("user_id", telecallerId)
+          const ids = telecallerId.split(',')
+          leadsQuery = leadsQuery.in("assigned_to", ids)
+          callsQuery = callsQuery.in("user_id", ids)
         }
 
-        // Execute parallel
+        // Execute queries in parallel
         const [{ data: leadsRaw }, { data: callsRaw }] = await Promise.all([leadsQuery, callsQuery])
 
-        // 2. Aggregate in Memory
+        // 2. Initialize Date Map (to ensure days with 0 data still show up on chart)
         const dateMap = new Map<string, { leads: number; calls: number }>()
-
-        // Initialize all dates in range with 0 to ensure continuity in chart
         const start = new Date(startDate)
         const end = new Date(endDate)
+        
         for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
           dateMap.set(d.toISOString().split("T")[0], { leads: 0, calls: 0 })
         }
 
-        // Fill Lead Counts
+        // 3. Aggregate Data
         leadsRaw?.forEach((item) => {
           const dateKey = item.created_at.split("T")[0]
-          if (dateMap.has(dateKey)) {
-            dateMap.get(dateKey)!.leads += 1
-          }
+          if (dateMap.has(dateKey)) dateMap.get(dateKey)!.leads += 1
         })
 
-        // Fill Call Counts
         callsRaw?.forEach((item) => {
           const dateKey = item.created_at.split("T")[0]
-          if (dateMap.has(dateKey)) {
-            dateMap.get(dateKey)!.calls += 1
-          }
+          if (dateMap.has(dateKey)) dateMap.get(dateKey)!.calls += 1
         })
 
-        // Convert to Array
+        // 4. Format for Recharts
         const chartData = Array.from(dateMap.entries()).map(([date, counts]) => ({
-          date: new Date(date).toLocaleDateString(),
+          date: new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
           ...counts,
         }))
 
@@ -84,7 +78,9 @@ export function PerformanceChart({ startDate, endDate, telecallerId }: Performan
     fetchData()
   }, [startDate, endDate, telecallerId, supabase])
 
-  if (isLoading) return <div className="h-64 flex items-center justify-center text-sm text-gray-500">Loading chart data...</div>
+  if (isLoading) {
+    return <div className="h-64 flex items-center justify-center text-sm text-gray-500">Loading chart data...</div>
+  }
 
   return (
     <div className="h-64">
@@ -95,11 +91,10 @@ export function PerformanceChart({ startDate, endDate, telecallerId }: Performan
           <YAxis fontSize={12} tickLine={false} axisLine={false} />
           <Tooltip 
             contentStyle={{ backgroundColor: "#fff", borderRadius: "8px", border: "1px solid #e5e7eb" }}
-            cursor={{ stroke: "#9ca3af", strokeDasharray: "3 3" }}
           />
-          <Legend wrapperStyle={{ paddingTop: "10px" }} />
-          <Line type="monotone" dataKey="leads" stroke="#3B82F6" strokeWidth={3} dot={false} activeDot={{ r: 6 }} name="New Leads" />
-          <Line type="monotone" dataKey="calls" stroke="#10B981" strokeWidth={3} dot={false} activeDot={{ r: 6 }} name="Calls Made" />
+          <Legend />
+          <Line type="monotone" dataKey="leads" stroke="#3B82F6" strokeWidth={2} dot={false} activeDot={{ r: 6 }} name="New Leads" />
+          <Line type="monotone" dataKey="calls" stroke="#10B981" strokeWidth={2} dot={false} activeDot={{ r: 6 }} name="Calls Made" />
         </LineChart>
       </ResponsiveContainer>
     </div>
