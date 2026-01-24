@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { format, startOfMonth, endOfMonth, subMonths, addMonths, parseISO, isSameDay, setHours, setMinutes, isAfter, differenceInMinutes } from "date-fns";
+import { format, startOfMonth, endOfMonth, subMonths, addMonths, parseISO, isSameDay, setHours, setMinutes, isAfter } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
@@ -41,7 +41,7 @@ type AttendanceRecord = {
   check_out: string | null;
   total_hours: number | null;
   overtime_hours: number | null;
-  status?: string; // 'present' | 'late' | 'absent'
+  status?: string; 
   location_check_in?: any;
   ip_check_in?: string;
   on_break?: boolean;
@@ -58,8 +58,8 @@ type ActivityItem = {
   location?: any;
 };
 
-// --- MAIN COMPONENT ---
-export default function AdminAttendanceDashboard() {
+// --- MAIN COMPONENT (Named Export) ---
+export function AdminAttendanceDashboard() {
   const supabase = createClient();
 
   // --- STATE ---
@@ -78,7 +78,7 @@ export default function AdminAttendanceDashboard() {
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all"); // New Filter
+  const [statusFilter, setStatusFilter] = useState("all");
 
   // Stats
   const [activeEmployees, setActiveEmployees] = useState<number>(0);
@@ -90,12 +90,12 @@ export default function AdminAttendanceDashboard() {
     const channel = supabase
       .channel('attendance-dashboard-updates')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
-        loadData(); // Auto-refresh on change
+        loadData(); 
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [dateRange, view]); // Reload when date or view changes
+  }, [dateRange, view]);
 
   // --- DATA LOADING ---
   const loadData = async () => {
@@ -103,7 +103,7 @@ export default function AdminAttendanceDashboard() {
     try {
       const startDateStr = format(dateRange.start, "yyyy-MM-dd");
       const endDateStr = format(dateRange.end, "yyyy-MM-dd");
-      const feedDateStr = format(new Date(), "yyyy-MM-dd"); // Always show today's feed
+      const feedDateStr = format(new Date(), "yyyy-MM-dd"); 
 
       // PARALLEL FETCHING
       const [usersRes, attendanceRes, feedRes] = await Promise.all([
@@ -117,14 +117,12 @@ export default function AdminAttendanceDashboard() {
 
       setUsers(usersRes.data || []);
 
-      // Process Status for Attendance
       const processedAttendance = (attendanceRes.data || []).map(record => ({
         ...record,
         status: determineStatus(record)
       }));
       setAttendanceData(processedAttendance);
 
-      // Process Activity Feed & Live Stats
       if (feedRes.data) {
         let feed: ActivityItem[] = [];
         let activeCount = 0;
@@ -142,7 +140,7 @@ export default function AdminAttendanceDashboard() {
           }
         });
 
-        feed.sort((a, b) => b.timestamp - a.timestamp); // Newest first
+        feed.sort((a, b) => b.timestamp - a.timestamp);
         setActivityFeed(feed);
         setActiveEmployees(activeCount);
         setEmployeesOnBreak(breakCount);
@@ -159,12 +157,9 @@ export default function AdminAttendanceDashboard() {
   const determineStatus = (record: any) => {
     if (!record.check_in) return "absent";
     const checkInTime = parseISO(record.check_in);
-    // Late threshold: 9:30 AM
-    const lateThreshold = setMinutes(setHours(parseISO(record.date), 9), 30); 
-    // Need to combine record.date with 9:30am logic properly if check_in is full ISO
-    // Simplified: Just check if check_in time part is > 09:30:00
     const hours = checkInTime.getHours();
     const minutes = checkInTime.getMinutes();
+    // Late if after 9:30 AM
     if (hours > 9 || (hours === 9 && minutes > 30)) return "late";
     return "present";
   };
@@ -172,12 +167,11 @@ export default function AdminAttendanceDashboard() {
   const getLocationUrl = (data: any) => {
     if (!data) return null;
     try {
-      // Handle both JSON object and stringified JSON
       const loc = typeof data === 'string' ? JSON.parse(data) : data;
       if (loc.latitude && loc.longitude) {
         return `https://www.google.com/maps/search/?api=1&query=${loc.latitude},${loc.longitude}`;
       }
-      if (loc.coordinates) { // If stored as "lat,lng" string
+      if (loc.coordinates) {
          return `https://www.google.com/maps/search/?api=1&query=${loc.coordinates}`;
       }
     } catch (e) { return null; }
@@ -193,19 +187,14 @@ export default function AdminAttendanceDashboard() {
 
   // --- FILTERING ---
   const filteredUsers = users.filter(user => {
-    // 1. Text Search
     const matchesSearch = user.full_name.toLowerCase().includes(searchTerm.toLowerCase()) || user.email.toLowerCase().includes(searchTerm.toLowerCase());
-    // 2. Department Filter
     const matchesDept = departmentFilter === "all" || user.department === departmentFilter;
     
-    // 3. Status Filter (Tricky: Status is on Attendance Record, not User)
     if (statusFilter === "all") return matchesSearch && matchesDept;
 
     const userRecord = attendanceData.find(a => a.user_id === user.id && isSameDay(parseISO(a.date), dateRange.start));
     const status = userRecord ? userRecord.status : 'absent';
-    const matchesStatus = status === statusFilter;
-
-    return matchesSearch && matchesDept && matchesStatus;
+    return matchesSearch && matchesDept && status === statusFilter;
   });
 
   const departments = Array.from(new Set(users.map(u => u.department).filter(Boolean)));
@@ -264,18 +253,17 @@ export default function AdminAttendanceDashboard() {
     finally { setIsExporting(false); }
   };
 
-  // --- STATS CALCULATION ---
+  // --- STATS ---
   const stats = useMemo(() => {
-    if (view === 'monthly') return { present: 0, late: 0, absent: 0 }; // Stats only relevant for Daily
+    if (view === 'monthly') return { present: 0, late: 0, absent: 0 };
     const dailyRecords = attendanceData.filter(r => isSameDay(parseISO(r.date), dateRange.start));
     return {
       present: dailyRecords.filter(r => r.status === 'present').length,
       late: dailyRecords.filter(r => r.status === 'late').length,
-      absent: users.length - dailyRecords.length // Rough estimate
+      absent: users.length - dailyRecords.length 
     };
   }, [attendanceData, users.length, view, dateRange]);
 
-  // --- NAVIGATION ---
   const navigate = (dir: 'prev' | 'next') => {
     if (view === 'daily') {
       const d = new Date(dateRange.start);
@@ -307,7 +295,7 @@ export default function AdminAttendanceDashboard() {
           </Select>
 
           <div className="flex items-center bg-white rounded-md border shadow-sm">
-            <Button variant="ghost" size="icon" onClick={() => navigate('prev')}>&lt;</Button>
+            <Button variant="ghost" size="icon" onClick={() => navigate('prev')}><</Button>
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" className="w-40 font-medium">
@@ -319,7 +307,7 @@ export default function AdminAttendanceDashboard() {
                 <Calendar mode="single" selected={dateRange.start} onSelect={(d) => d && setDateRange(view === 'daily' ? {start: d, end: d} : {start: startOfMonth(d), end: endOfMonth(d)})} />
               </PopoverContent>
             </Popover>
-            <Button variant="ghost" size="icon" onClick={() => navigate('next')}>&gt;</Button>
+            <Button variant="ghost" size="icon" onClick={() => navigate('next')}>></Button>
           </div>
 
           <Button variant="outline" onClick={handleExport} disabled={isExporting} className="bg-white">
