@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { format, startOfMonth, endOfMonth, subMonths, addMonths, parseISO, isSameDay, setHours, setMinutes, isAfter } from "date-fns";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { format, startOfMonth, endOfMonth, subMonths, addMonths, parseISO, isSameDay, setHours, setMinutes, isAfter, differenceInMinutes } from "date-fns";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
   Calendar as CalendarIcon, Users, Clock, CheckCircle, XCircle, AlertCircle, 
   MapPin, Wifi, Coffee, TrendingUp, Activity, UserCheck, LogOut, 
-  FileSpreadsheet, Search 
+  FileSpreadsheet, ExternalLink, Search, Filter, Settings, ChevronRight, Building2
 } from "lucide-react";
 import { 
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue 
@@ -20,6 +20,10 @@ import { Badge } from "@/components/ui/badge";
 import { 
   Popover, PopoverContent, PopoverTrigger 
 } from "@/components/ui/popover";
+import { 
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription 
+} from "@/components/ui/dialog";
+import { Slider } from "@/components/ui/slider";
 import { Calendar } from "@/components/ui/calendar"; 
 import { createClient } from "@/lib/supabase/client";
 
@@ -75,10 +79,15 @@ export function AdminAttendanceDashboard() {
   const [loading, setLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
   
-  // Filters
+  // Filters & Config
   const [searchTerm, setSearchTerm] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [lateThresholdHour, setLateThresholdHour] = useState(9);
+  const [lateThresholdMinute, setLateThresholdMinute] = useState(30);
+  
+  // Modal State
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   // Stats
   const [activeEmployees, setActiveEmployees] = useState<number>(0);
@@ -105,7 +114,6 @@ export function AdminAttendanceDashboard() {
       const endDateStr = format(dateRange.end, "yyyy-MM-dd");
       const feedDateStr = format(new Date(), "yyyy-MM-dd"); 
 
-      // PARALLEL FETCHING
       const [usersRes, attendanceRes, feedRes] = await Promise.all([
         supabase.from("users").select("*").eq("is_active", true).order("full_name"),
         supabase.from("attendance").select(`*, user:users!attendance_user_id_fkey(full_name, email, department)`).gte("date", startDateStr).lte("date", endDateStr).order("date", { ascending: false }),
@@ -117,11 +125,8 @@ export function AdminAttendanceDashboard() {
 
       setUsers(usersRes.data || []);
 
-      const processedAttendance = (attendanceRes.data || []).map(record => ({
-        ...record,
-        status: determineStatus(record)
-      }));
-      setAttendanceData(processedAttendance);
+      // We determine status dynamically based on current threshold state later
+      setAttendanceData(attendanceRes.data || []);
 
       if (feedRes.data) {
         let feed: ActivityItem[] = [];
@@ -157,9 +162,15 @@ export function AdminAttendanceDashboard() {
   const determineStatus = (record: any) => {
     if (!record.check_in) return "absent";
     const checkInTime = parseISO(record.check_in);
+    // Dynamic Threshold check
     const hours = checkInTime.getHours();
     const minutes = checkInTime.getMinutes();
-    if (hours > 9 || (hours === 9 && minutes > 30)) return "late";
+    
+    // Convert to minutes for easier comparison
+    const checkInMinutes = hours * 60 + minutes;
+    const thresholdMinutes = lateThresholdHour * 60 + lateThresholdMinute;
+
+    if (checkInMinutes > thresholdMinutes) return "late";
     return "present";
   };
 
@@ -167,12 +178,11 @@ export function AdminAttendanceDashboard() {
     if (!data) return null;
     try {
       const loc = typeof data === 'string' ? JSON.parse(data) : data;
-      // FIX: Corrected Template Literals for Google Maps
       if (loc.latitude && loc.longitude) {
-        return `https://www.google.com/maps?q=${loc.latitude},${loc.longitude}`;
+        return `https://www.google.com/maps/search/?api=1&query=${loc.latitude},${loc.longitude}`;
       }
       if (loc.coordinates) {
-         return `https://www.google.com/maps?q=${loc.coordinates}`;
+         return `https://www.google.com/maps/search/?api=1&query=${loc.coordinates}`;
       }
     } catch (e) { return null; }
     return null;
@@ -186,13 +196,20 @@ export function AdminAttendanceDashboard() {
   };
 
   // --- FILTERING ---
+  const processedData = useMemo(() => {
+    return attendanceData.map(record => ({
+      ...record,
+      status: determineStatus(record)
+    }));
+  }, [attendanceData, lateThresholdHour, lateThresholdMinute]);
+
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.full_name.toLowerCase().includes(searchTerm.toLowerCase()) || user.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesDept = departmentFilter === "all" || user.department === departmentFilter;
     
     if (statusFilter === "all") return matchesSearch && matchesDept;
 
-    const userRecord = attendanceData.find(a => a.user_id === user.id && isSameDay(parseISO(a.date), dateRange.start));
+    const userRecord = processedData.find(a => a.user_id === user.id && isSameDay(parseISO(a.date), dateRange.start));
     const status = userRecord ? userRecord.status : 'absent';
     return matchesSearch && matchesDept && status === statusFilter;
   });
@@ -208,7 +225,7 @@ export function AdminAttendanceDashboard() {
         : ["Employee", "Department", "Month", "Days Present", "Lates", "Total Hours", "Avg Hours/Day"];
 
       const rows = filteredUsers.map(user => {
-        const userRecords = attendanceData.filter(a => a.user_id === user.id);
+        const userRecords = processedData.filter(a => a.user_id === user.id);
         
         if (view === 'daily') {
           const record = userRecords.find(r => isSameDay(parseISO(r.date), dateRange.start));
@@ -256,13 +273,13 @@ export function AdminAttendanceDashboard() {
   // --- STATS ---
   const stats = useMemo(() => {
     if (view === 'monthly') return { present: 0, late: 0, absent: 0 };
-    const dailyRecords = attendanceData.filter(r => isSameDay(parseISO(r.date), dateRange.start));
+    const dailyRecords = processedData.filter(r => isSameDay(parseISO(r.date), dateRange.start));
     return {
       present: dailyRecords.filter(r => r.status === 'present').length,
       late: dailyRecords.filter(r => r.status === 'late').length,
       absent: users.length - dailyRecords.length 
     };
-  }, [attendanceData, users.length, view, dateRange]);
+  }, [processedData, users.length, view, dateRange]);
 
   const navigate = (dir: 'prev' | 'next') => {
     if (view === 'daily') {
@@ -286,6 +303,43 @@ export function AdminAttendanceDashboard() {
         </div>
         
         <div className="flex flex-wrap gap-2 items-center">
+          
+          {/* CONFIG POPOVER */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="icon"><Settings className="h-4 w-4"/></Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80">
+              <div className="space-y-4">
+                <h4 className="font-medium leading-none">Settings</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-500">Late Threshold</span>
+                    <span className="text-sm font-bold">{lateThresholdHour}:{lateThresholdMinute.toString().padStart(2, '0')} AM</span>
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <Slider 
+                      value={[lateThresholdHour]} 
+                      min={7} max={11} step={1} 
+                      onValueChange={(v) => setLateThresholdHour(v[0])} 
+                      className="flex-1"
+                    />
+                    <span className="text-xs w-8 text-center">{lateThresholdHour}h</span>
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <Slider 
+                      value={[lateThresholdMinute]} 
+                      min={0} max={59} step={5} 
+                      onValueChange={(v) => setLateThresholdMinute(v[0])} 
+                      className="flex-1"
+                    />
+                    <span className="text-xs w-8 text-center">{lateThresholdMinute}m</span>
+                  </div>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+
           <Select value={view} onValueChange={(v: any) => setView(v)}>
             <SelectTrigger className="w-36 bg-white"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -295,7 +349,7 @@ export function AdminAttendanceDashboard() {
           </Select>
 
           <div className="flex items-center bg-white rounded-md border shadow-sm">
-            <Button variant="ghost" size="icon" onClick={() => navigate('prev')}>&lt;</Button>
+            <Button variant="ghost" size="icon" onClick={() => navigate('prev')}><</Button>
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" className="w-40 font-medium">
@@ -307,7 +361,7 @@ export function AdminAttendanceDashboard() {
                 <Calendar mode="single" selected={dateRange.start} onSelect={(d) => d && setDateRange(view === 'daily' ? {start: d, end: d} : {start: startOfMonth(d), end: endOfMonth(d)})} />
               </PopoverContent>
             </Popover>
-            <Button variant="ghost" size="icon" onClick={() => navigate('next')}>&gt;</Button>
+            <Button variant="ghost" size="icon" onClick={() => navigate('next')}>></Button>
           </div>
 
           <Button variant="outline" onClick={handleExport} disabled={isExporting} className="bg-white">
@@ -402,7 +456,7 @@ export function AdminAttendanceDashboard() {
                         <TableHead>Late Days</TableHead>
                         <TableHead>Avg Hours</TableHead>
                         <TableHead>Total OT</TableHead>
-                        <TableHead>Efficiency</TableHead>
+                        <TableHead>Action</TableHead>
                       </>
                     )}
                   </TableRow>
@@ -416,7 +470,7 @@ export function AdminAttendanceDashboard() {
                     <TableRow><TableCell colSpan={6} className="text-center py-8 text-gray-500">No employees found.</TableCell></TableRow>
                   ) : (
                     filteredUsers.map(user => {
-                      const userRecords = attendanceData.filter(a => a.user_id === user.id);
+                      const userRecords = processedData.filter(a => a.user_id === user.id);
 
                       // --- RENDER DAILY ROW ---
                       if (view === 'daily') {
@@ -424,7 +478,11 @@ export function AdminAttendanceDashboard() {
                         const status = record ? record.status : 'absent';
                         
                         return (
-                          <TableRow key={user.id} className="hover:bg-gray-50">
+                          <TableRow 
+                            key={user.id} 
+                            className="hover:bg-gray-50 cursor-pointer"
+                            onClick={() => setSelectedUser(user)} // Open Modal
+                          >
                             <TableCell>
                               <div className="font-medium">{user.full_name}</div>
                               <div className="text-xs text-gray-500">{user.department}</div>
@@ -444,6 +502,7 @@ export function AdminAttendanceDashboard() {
                                   target="_blank" 
                                   rel="noopener noreferrer"
                                   className="flex items-center gap-1 text-blue-600 hover:underline text-xs"
+                                  onClick={(e) => e.stopPropagation()} // Prevent row click
                                 >
                                   <MapPin className="h-3 w-3" /> {formatLocationText(record.location_check_in)}
                                 </a>
@@ -462,7 +521,7 @@ export function AdminAttendanceDashboard() {
                         const avgHrs = present > 0 ? (totalHrs / present).toFixed(1) : "0";
 
                         return (
-                          <TableRow key={user.id} className="hover:bg-gray-50">
+                          <TableRow key={user.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedUser(user)}>
                             <TableCell>
                               <div className="font-medium">{user.full_name}</div>
                               <div className="text-xs text-gray-500">{user.department}</div>
@@ -477,12 +536,7 @@ export function AdminAttendanceDashboard() {
                             <TableCell><span className="font-mono text-sm">{avgHrs}h</span></TableCell>
                             <TableCell className={totalOT > 0 ? "text-green-600 font-medium" : "text-gray-400"}>{totalOT > 0 ? `+${totalOT.toFixed(1)}` : "-"}</TableCell>
                             <TableCell>
-                              <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
-                                <div 
-                                  className="bg-blue-500 h-full rounded-full" 
-                                  style={{ width: `${Math.min(100, (Number(avgHrs) / 9) * 100)}%` }} 
-                                />
-                              </div>
+                              <Button variant="ghost" size="icon" className="h-8 w-8"><ChevronRight className="h-4 w-4 text-gray-400"/></Button>
                             </TableCell>
                           </TableRow>
                         )
@@ -540,6 +594,79 @@ export function AdminAttendanceDashboard() {
         </div>
 
       </div>
+
+      {/* --- EMPLOYEE DETAIL MODAL --- */}
+      <Dialog open={!!selectedUser} onOpenChange={(open) => !open && setSelectedUser(null)}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          {selectedUser && (() => {
+             const userRecords = processedData.filter(a => a.user_id === selectedUser.id);
+             // Monthly Stats for Modal
+             const totalHrs = userRecords.reduce((acc, r) => acc + (Number(r.total_hours) || 0), 0);
+             const lateCount = userRecords.filter(r => r.status === 'late').length;
+             const presentCount = userRecords.filter(r => r.status !== 'absent').length;
+
+             return (
+               <>
+                 <DialogHeader>
+                   <DialogTitle className="flex items-center gap-2 text-xl">
+                     {selectedUser.full_name}
+                     <Badge variant="outline" className="font-normal text-sm">{selectedUser.department}</Badge>
+                   </DialogTitle>
+                   <DialogDescription>
+                     Attendance history for {format(dateRange.start, "MMMM yyyy")}
+                   </DialogDescription>
+                 </DialogHeader>
+                 
+                 <div className="grid grid-cols-3 gap-4 my-4">
+                    <div className="p-3 bg-blue-50 rounded-lg text-center">
+                       <div className="text-xs text-gray-500 uppercase font-semibold">Total Hours</div>
+                       <div className="text-xl font-bold text-blue-700">{totalHrs.toFixed(1)}h</div>
+                    </div>
+                    <div className="p-3 bg-green-50 rounded-lg text-center">
+                       <div className="text-xs text-gray-500 uppercase font-semibold">Attendance</div>
+                       <div className="text-xl font-bold text-green-700">{presentCount} <span className="text-sm font-normal text-gray-400">days</span></div>
+                    </div>
+                    <div className="p-3 bg-yellow-50 rounded-lg text-center">
+                       <div className="text-xs text-gray-500 uppercase font-semibold">Late</div>
+                       <div className="text-xl font-bold text-yellow-700">{lateCount} <span className="text-sm font-normal text-gray-400">times</span></div>
+                    </div>
+                 </div>
+
+                 <Table>
+                   <TableHeader>
+                     <TableRow>
+                       <TableHead>Date</TableHead>
+                       <TableHead>Status</TableHead>
+                       <TableHead>Time</TableHead>
+                       <TableHead className="text-right">Hours</TableHead>
+                     </TableRow>
+                   </TableHeader>
+                   <TableBody>
+                     {userRecords.map(record => (
+                       <TableRow key={record.id}>
+                         <TableCell className="font-medium">{format(parseISO(record.date), "MMM dd")}</TableCell>
+                         <TableCell>
+                           <Badge variant="outline" className={record.status === 'late' ? "text-yellow-600 border-yellow-200 bg-yellow-50" : record.status === 'present' ? "text-green-600 border-green-200 bg-green-50" : ""}>
+                             {record.status}
+                           </Badge>
+                         </TableCell>
+                         <TableCell className="text-xs text-gray-500">
+                           {record.check_in ? format(parseISO(record.check_in), "hh:mm a") : "-"} 
+                           {" - "}
+                           {record.check_out ? format(parseISO(record.check_out), "hh:mm a") : "-"}
+                         </TableCell>
+                         <TableCell className="text-right font-mono text-xs">{record.total_hours || "0"}h</TableCell>
+                       </TableRow>
+                     ))}
+                     {userRecords.length === 0 && <TableRow><TableCell colSpan={4} className="text-center text-gray-400">No records found.</TableCell></TableRow>}
+                   </TableBody>
+                 </Table>
+               </>
+             )
+          })()}
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
