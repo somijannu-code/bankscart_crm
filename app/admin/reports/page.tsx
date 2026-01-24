@@ -25,62 +25,78 @@ export default async function ReportsPage({
   const endDate = searchParams.end_date || defaultDate
   const startDate = searchParams.start_date || defaultDate
 
+  // Fetch Telecallers for Filter
   const { data: telecallers } = await supabase
     .from("users")
     .select("id, full_name")
     .eq("role", "telecaller")
     .eq("is_active", true)
 
-  // Handle filters
-  let telecallerIds: string[] = []
-  if (searchParams.telecaller) {
-    telecallerIds = searchParams.telecaller.split(',')
-  }
+  const telecallerId = searchParams.telecaller
 
-  // --- OPTIMIZATION START: Use COUNT only queries ---
-
-  // 1. Total Leads All Time (Just count)
+  // --- OPTIMIZATION: COUNT-ONLY QUERIES ---
+  
+  // 1. Total Leads All Time
   const { count: totalLeads } = await supabase
     .from("leads")
     .select("*", { count: "exact", head: true })
 
-  // 2. Base Period Queries
-  let leadsQuery = supabase.from("leads").select("status", { count: "exact" }) // Select minimal fields
-    .gte("created_at", startDate)
-    .lte("created_at", `${endDate}T23:59:59`)
-
-  let callsQuery = supabase.from("call_logs").select("call_status", { count: "exact" })
-    .gte("created_at", startDate)
-    .lte("created_at", `${endDate}T23:59:59`)
-
-  if (telecallerIds.length > 0) {
-    leadsQuery = leadsQuery.in("assigned_to", telecallerIds)
-    callsQuery = callsQuery.in("user_id", telecallerIds)
+  // 2. Helper to build period queries
+  const buildCountQuery = (table: string, filterField?: string, filterValue?: string) => {
+    let q = supabase
+      .from(table)
+      .select("*", { count: "exact", head: true }) // head: true returns count without rows
+      .gte("created_at", startDate)
+      .lte("created_at", `${endDate}T23:59:59`)
+    
+    if (telecallerId) {
+      // Handle comma-separated IDs if needed, or single ID
+      if (telecallerId.includes(',')) {
+         const col = table === 'leads' ? 'assigned_to' : 'user_id'
+         q = q.in(col, telecallerId.split(','))
+      } else {
+         const col = table === 'leads' ? 'assigned_to' : 'user_id'
+         q = q.eq(col, telecallerId)
+      }
+    }
+    
+    if (filterField && filterValue) {
+      q = q.eq(filterField, filterValue)
+    }
+    return q
   }
 
-  // Execute Queries
-  const [{ data: leadsData }, { data: callsData }] = await Promise.all([
-    leadsQuery,
-    callsQuery
+  // 3. Execute all KPI counts in parallel
+  const [
+    { count: periodLeadsCount },
+    { count: newLeadsCount },
+    { count: convertedLeadsCount },
+    { count: periodCallsCount },
+    { count: connectedCallsCount }
+  ] = await Promise.all([
+    buildCountQuery("leads"),
+    buildCountQuery("leads", "status", "new"), // Adjust "new" if your status ID differs
+    buildCountQuery("leads", "status", "closed_won"), // Adjust "closed_won" to your conversion status
+    buildCountQuery("call_logs"),
+    buildCountQuery("call_logs", "call_status", "connected")
   ])
 
-  // Process counts in memory (but now on much smaller/lighter objects)
-  const periodLeadsCount = leadsData?.length || 0
-  const periodCallsCount = callsData?.length || 0
-
-  const newLeads = leadsData?.filter((lead) => lead.status === "new").length || 0
-  const convertedLeads = leadsData?.filter((lead) => lead.status === "closed_won").length || 0
-  const conversionRate = periodLeadsCount ? ((convertedLeads / periodLeadsCount) * 100).toFixed(1) : "0"
-
-  const connectedCalls = callsData?.filter((call) => call.call_status === "connected").length || 0
-  const callConnectRate = periodCallsCount ? ((connectedCalls / periodCallsCount) * 100).toFixed(1) : "0"
-
-  // --- OPTIMIZATION END ---
+  // Safe Math for Rates
+  const safeLeads = periodLeadsCount || 0
+  const safeCalls = periodCallsCount || 0
+  
+  const conversionRate = safeLeads > 0 
+    ? (((convertedLeadsCount || 0) / safeLeads) * 100).toFixed(1) 
+    : "0"
+    
+  const callConnectRate = safeCalls > 0 
+    ? (((connectedCallsCount || 0) / safeCalls) * 100).toFixed(1) 
+    : "0"
 
   const stats = [
     {
       title: "Total Leads",
-      value: periodLeadsCount, // Shows period count as main value
+      value: safeLeads,
       subtitle: `${totalLeads} all time`,
       icon: TrendingUp,
       color: "text-blue-600",
@@ -88,7 +104,7 @@ export default async function ReportsPage({
     },
     {
       title: "New Leads",
-      value: newLeads,
+      value: newLeadsCount || 0,
       subtitle: "In selected period",
       icon: BarChart3,
       color: "text-green-600",
@@ -97,7 +113,7 @@ export default async function ReportsPage({
     {
       title: "Conversion Rate",
       value: `${conversionRate}%`,
-      subtitle: `${convertedLeads} converted`,
+      subtitle: `${convertedLeadsCount || 0} converted`,
       icon: TrendingUp,
       color: "text-purple-600",
       bgColor: "bg-purple-50",
@@ -105,7 +121,7 @@ export default async function ReportsPage({
     {
       title: "Call Connect Rate",
       value: `${callConnectRate}%`,
-      subtitle: `${connectedCalls}/${periodCallsCount} calls`,
+      subtitle: `${connectedCallsCount || 0}/${safeCalls} calls`,
       icon: BarChart3,
       color: "text-orange-600",
       bgColor: "bg-orange-50",
