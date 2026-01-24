@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { 
   Calendar as CalendarIcon, Users, Clock, CheckCircle, XCircle, AlertCircle, 
   MapPin, Coffee, TrendingUp, Activity, UserCheck, 
-  FileSpreadsheet, Search, Settings, ChevronRight, BarChart3, List, Edit2, Save, X, stickyNote, MessageSquare
+  FileSpreadsheet, Search, Settings, ChevronRight, BarChart3, List, Edit2, Save, X, MessageSquare
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -23,7 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { createClient } from "@/lib/supabase/client";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
-import { toast } from "sonner";
+import { toast } from "sonner"; // Ensure you have this installed or replace with your toast lib
 
 // --- TYPES ---
 type User = {
@@ -48,7 +48,7 @@ type AttendanceRecord = {
   ip_check_in?: string;
   on_break?: boolean;
   updated_at?: string;
-  admin_note?: string; // NEW: Audit Note
+  admin_note?: string; 
   user?: User;
 };
 
@@ -175,15 +175,12 @@ export function AdminAttendanceDashboard() {
 
   const getReliabilityScore = (userRecords: AttendanceRecord[]) => {
     if (userRecords.length === 0) return 0;
-    const totalDays = 30; // Assuming monthly calc
+    const totalDays = 30; 
     const present = userRecords.filter(r => r.status !== 'absent').length;
     const lates = userRecords.filter(r => r.status === 'late').length;
     
-    // Simple Formula: (Present Days * 3) - (Lates * 1) / (Total Days * 3) * 100
-    // Max Score = 100. Late penalizes the score slightly. Absent penalizes heavily.
+    // Simple Score: Present is good, Late is slight penalty
     const rawScore = ((present * 3) - (lates * 1)); 
-    const maxPossible = totalDays * 3; // Should ideally be working days
-    // Normalizing roughly to 100 based on records length if < 30
     const basis = Math.max(userRecords.length, 5) * 3; 
     
     let score = (rawScore / basis) * 100;
@@ -201,8 +198,9 @@ export function AdminAttendanceDashboard() {
     if (!data) return null;
     try {
       const loc = typeof data === 'string' ? JSON.parse(data) : data;
-      if (loc.latitude && loc.longitude) return `https://www.google.com/maps/search/?api=1&query=${loc.latitude},${loc.longitude}`;
-      if (loc.coordinates) return `https://www.google.com/maps/search/?api=1&query=${loc.coordinates}`;
+      // Fixed template literals
+      if (loc.latitude && loc.longitude) return `https://www.google.com/maps/search/?api=1&query=$${loc.latitude},${loc.longitude}`;
+      if (loc.coordinates) return `https://www.google.com/maps/search/?api=1&query=$${loc.coordinates}`;
     } catch (e) { return null; }
     return null;
   };
@@ -337,9 +335,54 @@ export function AdminAttendanceDashboard() {
   const handleExport = () => {
     setIsExporting(true);
     try {
-        // ... (Export Logic same as before) ...
-        setTimeout(() => setIsExporting(false), 500); // Simulate
-    } catch (e) { setIsExporting(false); }
+      const headers = view === 'daily' 
+        ? ["Employee", "Department", "Date", "Status", "Check In", "Check Out", "Hours", "Overtime"]
+        : ["Employee", "Department", "Month", "Days Present", "Lates", "Total Hours", "Avg Hours/Day"];
+
+      const rows = filteredUsers.map(user => {
+        const userRecords = processedData.filter(a => a.user_id === user.id);
+        
+        if (view === 'daily') {
+          const record = userRecords.find(r => isSameDay(parseISO(r.date), dateRange.start));
+          return [
+            user.full_name,
+            user.department,
+            format(dateRange.start, "yyyy-MM-dd"),
+            record ? record.status : "absent",
+            record?.check_in ? format(new Date(record.check_in), "HH:mm") : "-",
+            record?.check_out ? format(new Date(record.check_out), "HH:mm") : "-",
+            record?.total_hours || "0",
+            record?.overtime_hours || "0"
+          ];
+        } else {
+          const presentCount = userRecords.filter(r => r.status !== 'absent').length;
+          const lateCount = userRecords.filter(r => r.status === 'late').length;
+          const totalHrs = userRecords.reduce((sum, r) => sum + (Number(r.total_hours) || 0), 0);
+          const avgHrs = presentCount > 0 ? (totalHrs / presentCount).toFixed(1) : "0";
+          
+          return [
+            user.full_name,
+            user.department,
+            format(dateRange.start, "MMMM yyyy"),
+            presentCount,
+            lateCount,
+            totalHrs.toFixed(1),
+            avgHrs
+          ];
+        }
+      });
+
+      const csvContent = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `attendance_${view}_${format(dateRange.start, "yyyy-MM-dd")}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (e) { console.error(e); } 
+    finally { setIsExporting(false); }
   };
 
   const getDayStatusColor = (day: Date, userRecords: AttendanceRecord[]) => {
@@ -377,7 +420,7 @@ export function AdminAttendanceDashboard() {
           </Popover>
 
           <div className="flex items-center bg-white rounded-md border shadow-sm">
-            <Button variant="ghost" size="icon" onClick={() => navigate('prev')}><span className="sr-only">Prev</span><</Button>
+            <Button variant="ghost" size="icon" onClick={() => navigate('prev')}><span className="sr-only">Prev</span>{"<"}</Button>
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" className="w-44 font-medium justify-start px-3">
@@ -389,7 +432,7 @@ export function AdminAttendanceDashboard() {
                 <Calendar mode="single" selected={dateRange.start} onSelect={(d) => d && setDateRange(view === 'daily' ? {start: d, end: d} : {start: startOfMonth(d), end: endOfMonth(d)})} />
               </PopoverContent>
             </Popover>
-            <Button variant="ghost" size="icon" onClick={() => navigate('next')}><span className="sr-only">Next</span>></Button>
+            <Button variant="ghost" size="icon" onClick={() => navigate('next')}><span className="sr-only">Next</span>{">"}</Button>
           </div>
 
           <Button variant="outline" onClick={handleExport} disabled={isExporting} className="bg-white">
@@ -711,7 +754,7 @@ export function AdminAttendanceDashboard() {
                              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div key={d}>{d}</div>)}
                           </div>
                           <div className="grid grid-cols-7 gap-2">
-                             {Array.from({ length: getDay(monthStart) }).map((_, i) => <div key={`empty-${i}`} />)}
+                             {Array.from({ length: (new Date(monthStart).getDay()) }).map((_, i) => <div key={`empty-${i}`} />)}
                              {monthDays.map(day => {
                                 const dayStr = format(day, 'yyyy-MM-dd');
                                 const record = userRecords.find(r => r.date === dayStr);
