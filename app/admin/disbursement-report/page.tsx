@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { 
   Loader2, IndianRupee, TrendingUp, Filter, Calendar, Trash2, 
   MapPin, Search, RefreshCw, X, Users, Trophy, Medal,
-  Calculator, Building2, Target, PieChart as PieIcon, BarChart3, ArrowUpRight
+  Calculator, Building2, Target, PieChart as PieIcon, BarChart3, 
+  ArrowUpRight, Wallet, Pencil, GripHorizontal
 } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -16,9 +17,10 @@ import { useToast } from "@/components/ui/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Progress } from "@/components/ui/progress"
+import { Slider } from "@/components/ui/slider"
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell,
-  LineChart, Line, AreaChart, Area, PieChart, Pie
+  AreaChart, Area, PieChart, Pie
 } from 'recharts'
 
 import {
@@ -90,6 +92,9 @@ export default function TelecallerDisbursementReport() {
     const [targetAmount, setTargetAmount] = useState<number>(5000000); 
     const [isTargetEditing, setIsTargetEditing] = useState(false);
 
+    // Commission State
+    const [commissionRate, setCommissionRate] = useState<number[]>([1.0]); // Default 1%
+
     const [loading, setLoading] = useState(true);
     const [disbursements, setDisbursements] = useState<LeadDisbursement[]>([]);
     const [userMap, setUserMap] = useState<UserMap>({});
@@ -97,42 +102,6 @@ export default function TelecallerDisbursementReport() {
     const [deleteId, setDeleteId] = useState<string | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const [refreshKey, setRefreshKey] = useState(0);
-
-    // --- QUICK FILTER HANDLERS ---
-    const setQuickFilter = (type: 'today' | 'yesterday' | 'week') => {
-        const today = new Date();
-        const y = today.getFullYear();
-        const m = String(today.getMonth() + 1).padStart(2, '0');
-        const d = String(today.getDate()).padStart(2, '0');
-        
-        let start = "";
-        let end = `${y}-${m}-${d}`; 
-
-        if (type === 'today') {
-            start = `${y}-${m}-${d}`;
-        } else if (type === 'yesterday') {
-            const yest = new Date(today);
-            yest.setDate(today.getDate() - 1);
-            const yY = yest.getFullYear();
-            const yM = String(yest.getMonth() + 1).padStart(2, '0');
-            const yD = String(yest.getDate()).padStart(2, '0');
-            start = `${yY}-${yM}-${yD}`;
-            end = `${yY}-${yM}-${yD}`;
-        } else if (type === 'week') {
-            const lastWeek = new Date(today);
-            lastWeek.setDate(today.getDate() - 7);
-            const wY = lastWeek.getFullYear();
-            const wM = String(lastWeek.getMonth() + 1).padStart(2, '0');
-            const wD = String(lastWeek.getDate()).padStart(2, '0');
-            start = `${wY}-${wM}-${wD}`;
-        }
-
-        setFilterMode('custom');
-        setCustomStart(start);
-        setCustomEnd(end);
-        // User manually clicks apply for custom range usually, but for quick filters we could auto-fetch via effect or user click.
-        // We leave it to user to click 'Apply' to confirm the range logic, or you can add a trigger.
-    };
 
     // 1. Fetch Users
     const fetchUsers = useCallback(async () => {
@@ -237,10 +206,11 @@ export default function TelecallerDisbursementReport() {
     };
 
     // --- AGGREGATION & ANALYTICS ---
-    const { filteredData, grandTotal, displayLabel, bankChartData, trendData, pieData, avgTicketSize } = useMemo(() => {
+    const { filteredData, grandTotal, displayLabel, bankChartData, trendData, pieData, avgTicketSize, cityStats } = useMemo(() => {
         let total = 0;
         const bankMap: Record<string, number> = {};
         const dailyMap: Record<string, number> = {};
+        const cityMap: Record<string, number> = {};
         
         // 1. Filter
         const searched = disbursements.filter(item => {
@@ -263,10 +233,15 @@ export default function TelecallerDisbursementReport() {
             const bank = d.bank_name || 'Others';
             bankMap[bank] = (bankMap[bank] || 0) + amt;
 
+            // City Stats
+            const city = d.city || 'Unknown';
+            cityMap[city] = (cityMap[city] || 0) + amt;
+
             // Trend Stats
             if(d.disbursed_at) {
-                const dateKey = new Date(d.disbursed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
-                dailyMap[dateKey] = (dailyMap[dateKey] || 0) + amt;
+                // ISO Key for sorting
+                const iso = d.disbursed_at.split('T')[0];
+                dailyMap[iso] = (dailyMap[iso] || 0) + amt;
             }
         });
 
@@ -276,34 +251,23 @@ export default function TelecallerDisbursementReport() {
         let label = "Total Revenue";
         if (selectedAgentId) label = `${userMap[selectedAgentId]}'s Revenue`;
 
-        // Chart Data Format - Banks (Bar)
-        const bChartData = Object.entries(bankMap)
-            .map(([name, value]) => ({ name, value }))
-            .sort((a,b) => b.value - a.value)
-            .slice(0, 8);
+        // Chart Data - Banks
+        const bChartData = Object.entries(bankMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 8);
 
-        // Chart Data Format - Pie (Top 5 + Others)
+        // Chart Data - Pie
         const sortedBanks = Object.entries(bankMap).sort((a,b) => b[1] - a[1]);
         const top5 = sortedBanks.slice(0, 5).map(([name, value]) => ({ name, value }));
         const othersVal = sortedBanks.slice(5).reduce((acc, curr) => acc + curr[1], 0);
         if(othersVal > 0) top5.push({ name: 'Others', value: othersVal });
         
-        // Chart Data Format - Trend (Line)
-        // Need to sort by date. The keys are "DD MMM". This is tricky to sort string-wise. 
-        // Better to re-loop or use a map with timestamps.
-        // Quick fix: Since 'disbursements' is sorted desc, we can just process distinct dates in reverse or use a proper sort.
-        const tChartData = Object.entries(dailyMap).map(([date, value]) => ({ date, value })).reverse(); // Reverse because dailyMap keys created from Descending list might be unordered in Object keys.
-        // Actually Object.entries order isn't guaranteed. Let's do it robustly:
-        const tMap: Record<string, number> = {};
-        searched.forEach(d => {
-            // ISO date key YYYY-MM-DD for sorting
-            const iso = d.disbursed_at.split('T')[0];
-            tMap[iso] = (tMap[iso] || 0) + d.disbursed_amount;
-        });
-        const trendFinal = Object.keys(tMap).sort().map(iso => ({
+        // Chart Data - Trend
+        const trendFinal = Object.keys(dailyMap).sort().map(iso => ({
             date: new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
-            value: tMap[iso]
+            value: dailyMap[iso]
         }));
+
+        // City Data (Top 5)
+        const cityFinal = Object.entries(cityMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 5);
 
         return {
             filteredData: searched,
@@ -312,7 +276,8 @@ export default function TelecallerDisbursementReport() {
             bankChartData: bChartData,
             pieData: top5,
             trendData: trendFinal,
-            avgTicketSize: avg
+            avgTicketSize: avg,
+            cityStats: cityFinal
         };
     }, [disbursements, searchTerm, userMap, selectedAgentId]);
 
@@ -335,6 +300,7 @@ export default function TelecallerDisbursementReport() {
     };
 
     const targetProgress = Math.min((grandTotal / targetAmount) * 100, 100);
+    const estimatedCommission = grandTotal * (commissionRate[0] / 100);
 
     return (
         <div className="p-4 md:p-8 space-y-6 bg-slate-50 min-h-screen">
@@ -344,9 +310,9 @@ export default function TelecallerDisbursementReport() {
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-2">
                         <IndianRupee className="h-8 w-8 text-green-600" />
-                        Disbursement Command Center
+                        Disbursement Intelligence
                     </h1>
-                    <p className="text-slate-500 text-sm mt-1">Real-time revenue tracking and performance analytics</p>
+                    <p className="text-slate-500 text-sm mt-1">Real-time financial tracking and commission analysis</p>
                 </div>
                 <div className="flex gap-2">
                     <DisbursementModal onSuccess={() => setRefreshKey(prev => prev + 1)} />
@@ -390,17 +356,10 @@ export default function TelecallerDisbursementReport() {
                                     </Select>
                                 </>
                             ) : (
-                                <div className="flex flex-col gap-2">
-                                    <div className="flex gap-1 mb-1">
-                                        <Badge variant="outline" className="cursor-pointer hover:bg-slate-100" onClick={() => setQuickFilter('today')}>Today</Badge>
-                                        <Badge variant="outline" className="cursor-pointer hover:bg-slate-100" onClick={() => setQuickFilter('yesterday')}>Yesterday</Badge>
-                                        <Badge variant="outline" className="cursor-pointer hover:bg-slate-100" onClick={() => setQuickFilter('week')}>Last 7 Days</Badge>
-                                    </div>
-                                    <div className="flex gap-2">
-                                        <Input type="date" className="w-[140px]" value={customStart} onChange={e => setCustomStart(e.target.value)} />
-                                        <Input type="date" className="w-[140px]" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
-                                        <Button onClick={() => fetchLeads()} variant="secondary" size="icon"><RefreshCw className="h-4 w-4"/></Button>
-                                    </div>
+                                <div className="flex gap-2">
+                                    <Input type="date" className="w-[140px]" value={customStart} onChange={e => setCustomStart(e.target.value)} />
+                                    <Input type="date" className="w-[140px]" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
+                                    <Button onClick={() => fetchLeads()} variant="secondary" size="icon"><RefreshCw className="h-4 w-4"/></Button>
                                 </div>
                             )}
                         </div>
@@ -417,73 +376,91 @@ export default function TelecallerDisbursementReport() {
 
                 <TabsContent value="dashboard" className="space-y-6 mt-4">
                     
-                    {/* TOP ROW: Stats & Target */}
+                    {/* TOP ROW: Stats & Target & Commission */}
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
                         {/* MAIN STAT */}
-                        <Card className="md:col-span-5 bg-gradient-to-br from-green-600 to-emerald-800 text-white shadow-md border-0">
+                        <Card className="md:col-span-4 bg-gradient-to-br from-green-600 to-emerald-800 text-white shadow-md border-0">
                             <CardContent className="p-6">
                                 <div className="flex justify-between items-start">
                                     <div>
                                         <p className="text-emerald-100 font-medium text-sm flex items-center gap-1">
-                                            {selectedAgentId && <Badge variant="secondary" className="mr-2 cursor-pointer bg-white/20 hover:bg-white/30 text-white border-0" onClick={() => setSelectedAgentId(null)}>Clear Filter</Badge>}
+                                            {selectedAgentId && <Badge variant="secondary" className="mr-2 cursor-pointer bg-white/20 hover:bg-white/30 text-white border-0" onClick={() => setSelectedAgentId(null)}>Clear</Badge>}
                                             {displayLabel}
                                         </p>
-                                        <h2 className="text-4xl font-bold mt-2">{formatCurrency(grandTotal)}</h2>
+                                        <h2 className="text-3xl font-bold mt-2">{formatCurrency(grandTotal)}</h2>
                                         <div className="flex items-center gap-2 mt-4 text-emerald-100 text-sm">
-                                            <Calculator className="h-4 w-4 opacity-70" /> Avg Ticket: {formatCurrency(avgTicketSize)}
+                                            <Calculator className="h-4 w-4 opacity-70" /> Ticket: {formatCurrency(avgTicketSize)}
                                         </div>
                                     </div>
                                     <div className="p-3 bg-white/10 rounded-full backdrop-blur-sm">
-                                        <TrendingUp className="h-8 w-8 text-white" />
+                                        <TrendingUp className="h-6 w-6 text-white" />
                                     </div>
                                 </div>
                             </CardContent>
                         </Card>
 
                         {/* TARGET TRACKER */}
-                        <Card className="md:col-span-7 bg-white shadow-sm border-slate-200 flex flex-col justify-center">
-                            <CardHeader className="pb-2">
+                        <Card className="md:col-span-4 bg-white shadow-sm border-slate-200 flex flex-col justify-center">
+                            <CardHeader className="pb-2 pt-4">
                                 <div className="flex justify-between items-center">
                                     <CardTitle className="text-sm font-medium text-slate-500 flex items-center gap-2">
-                                        <Target className="h-4 w-4 text-red-500"/> Monthly Goal Tracker
+                                        <Target className="h-4 w-4 text-red-500"/> Monthly Goal
                                     </CardTitle>
                                     {!isTargetEditing ? (
-                                        <Button variant="ghost" size="sm" className="h-6 text-xs text-slate-400" onClick={() => setIsTargetEditing(true)}>Edit Goal</Button>
+                                        <Button variant="ghost" size="sm" className="h-6 text-xs text-slate-400" onClick={() => setIsTargetEditing(true)}>Edit</Button>
                                     ) : (
                                         <div className="flex items-center gap-2">
-                                            <Input 
-                                                type="number" 
-                                                className="h-7 w-32 text-xs" 
-                                                value={targetAmount} 
-                                                onChange={(e) => setTargetAmount(Number(e.target.value))} 
-                                            />
-                                            <Button size="sm" className="h-7 text-xs" onClick={() => setIsTargetEditing(false)}>Save</Button>
+                                            <Input type="number" className="h-6 w-24 text-xs" value={targetAmount} onChange={(e) => setTargetAmount(Number(e.target.value))} />
+                                            <Button size="sm" className="h-6 text-xs" onClick={() => setIsTargetEditing(false)}>Save</Button>
                                         </div>
                                     )}
                                 </div>
                             </CardHeader>
                             <CardContent>
                                 <div className="flex justify-between text-sm font-medium mb-2">
-                                    <span>{formatCurrency(grandTotal)}</span>
+                                    <span>{targetProgress.toFixed(1)}%</span>
                                     <span className="text-slate-400">Target: {formatCurrency(targetAmount)}</span>
                                 </div>
-                                <Progress value={targetProgress} className="h-3" />
-                                <p className="text-xs text-slate-400 mt-2 text-right">{targetProgress.toFixed(1)}% Achieved</p>
+                                <Progress value={targetProgress} className="h-2" />
+                            </CardContent>
+                        </Card>
+
+                        {/* COMMISSION CALCULATOR */}
+                        <Card className="md:col-span-4 bg-blue-50/50 border-blue-100 shadow-sm flex flex-col justify-center">
+                            <CardHeader className="pb-2 pt-4">
+                                <div className="flex justify-between items-center">
+                                    <CardTitle className="text-sm font-medium text-blue-600 flex items-center gap-2">
+                                        <Wallet className="h-4 w-4"/> Est. Commission ({commissionRate[0]}%)
+                                    </CardTitle>
+                                </div>
+                            </CardHeader>
+                            <CardContent>
+                                <h2 className="text-2xl font-bold text-blue-700">{formatCurrency(estimatedCommission)}</h2>
+                                <div className="mt-3">
+                                    <Slider 
+                                        defaultValue={[1]} 
+                                        max={5} 
+                                        step={0.1} 
+                                        value={commissionRate} 
+                                        onValueChange={setCommissionRate}
+                                        className="py-1"
+                                    />
+                                    <p className="text-[10px] text-blue-400 mt-1 text-right">Adjust payout percentage</p>
+                                </div>
                             </CardContent>
                         </Card>
                     </div>
 
                     {/* MIDDLE ROW: Charts */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         {/* 1. TREND LINE CHART */}
-                        <Card className="shadow-sm border-slate-200">
+                        <Card className="md:col-span-2 shadow-sm border-slate-200">
                             <CardHeader>
                                 <CardTitle className="text-base flex items-center gap-2">
-                                    <ArrowUpRight className="h-4 w-4 text-indigo-500"/> Daily Trend (Momentum)
+                                    <ArrowUpRight className="h-4 w-4 text-indigo-500"/> Daily Trend
                                 </CardTitle>
-                                <CardDescription>Day-wise disbursement breakdown</CardDescription>
                             </CardHeader>
-                            <CardContent className="h-[300px]">
+                            <CardContent className="h-[250px]">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <AreaChart data={trendData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                                         <defs>
@@ -502,40 +479,25 @@ export default function TelecallerDisbursementReport() {
                             </CardContent>
                         </Card>
 
-                        {/* 2. BANK PIE CHART */}
+                        {/* 2. CITY STATS */}
                         <Card className="shadow-sm border-slate-200">
                             <CardHeader>
                                 <CardTitle className="text-base flex items-center gap-2">
-                                    <PieIcon className="h-4 w-4 text-pink-500"/> Bank Market Share
+                                    <MapPin className="h-4 w-4 text-rose-500"/> Top Cities
                                 </CardTitle>
-                                <CardDescription>Distribution by funding source</CardDescription>
                             </CardHeader>
-                            <CardContent className="h-[300px]">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <PieChart>
-                                        <Pie
-                                            data={pieData}
-                                            cx="50%"
-                                            cy="50%"
-                                            innerRadius={60}
-                                            outerRadius={90}
-                                            paddingAngle={2}
-                                            dataKey="value"
-                                        >
-                                            {pieData.map((entry, index) => (
-                                                <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                                            ))}
-                                        </Pie>
-                                        <RechartsTooltip formatter={(value: number) => formatCurrency(value)} />
-                                    </PieChart>
-                                </ResponsiveContainer>
-                                <div className="flex flex-wrap justify-center gap-4 mt-2">
-                                    {pieData.map((entry, index) => (
-                                        <div key={index} className="flex items-center gap-1 text-xs text-slate-500">
-                                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}></div>
-                                            {entry.name}
+                            <CardContent>
+                                <div className="space-y-4">
+                                    {cityStats.map((city, idx) => (
+                                        <div key={idx} className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-2 h-2 rounded-full bg-rose-400"></div>
+                                                <span className="text-sm font-medium text-slate-700">{city.name}</span>
+                                            </div>
+                                            <span className="text-xs font-bold text-slate-900">{formatCurrency(city.value)}</span>
                                         </div>
                                     ))}
+                                    {cityStats.length === 0 && <div className="text-xs text-slate-400">No location data available</div>}
                                 </div>
                             </CardContent>
                         </Card>
@@ -571,22 +533,62 @@ export default function TelecallerDisbursementReport() {
                             </Card>
                         </div>
 
-                        {/* Bar Chart (Bank Volume) */}
-                        <div className="md:col-span-8">
-                            <Card className="h-[450px] shadow-sm border-slate-200">
-                                <CardHeader>
+                        {/* Pie & Bar Mixed */}
+                        <div className="md:col-span-8 flex flex-col gap-6">
+                             {/* Bank Market Share */}
+                             <Card className="flex-1 shadow-sm border-slate-200">
+                                <CardHeader className="py-4">
                                     <CardTitle className="text-base flex items-center gap-2">
-                                        <BarChart3 className="h-4 w-4 text-blue-500"/> Bank Volume Analysis
+                                        <PieIcon className="h-4 w-4 text-purple-500"/> Bank Distribution
                                     </CardTitle>
                                 </CardHeader>
-                                <CardContent className="h-[380px]">
+                                <CardContent className="h-[200px] flex items-center justify-around">
+                                    <div className="h-full w-1/2">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <PieChart>
+                                                <Pie
+                                                    data={pieData}
+                                                    cx="50%"
+                                                    cy="50%"
+                                                    innerRadius={40}
+                                                    outerRadius={70}
+                                                    paddingAngle={2}
+                                                    dataKey="value"
+                                                >
+                                                    {pieData.map((entry, index) => (
+                                                        <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                                                    ))}
+                                                </Pie>
+                                                <RechartsTooltip formatter={(value: number) => formatCurrency(value)} />
+                                            </PieChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                    <div className="w-1/2 space-y-1">
+                                         {pieData.map((entry, index) => (
+                                            <div key={index} className="flex items-center gap-2 text-xs text-slate-600">
+                                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}></div>
+                                                <span className="font-medium">{entry.name}:</span> {formatCurrency(entry.value)}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </CardContent>
+                            </Card>
+
+                            {/* Bank Volume Bar */}
+                            <Card className="flex-1 shadow-sm border-slate-200">
+                                <CardHeader className="py-4">
+                                    <CardTitle className="text-base flex items-center gap-2">
+                                        <BarChart3 className="h-4 w-4 text-blue-500"/> Volume by Bank
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="h-[200px]">
                                     <ResponsiveContainer width="100%" height="100%">
-                                        <BarChart data={bankChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                                        <BarChart data={bankChartData} margin={{ top: 10, right: 30, left: 20, bottom: 0 }}>
                                             <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                            <XAxis dataKey="name" fontSize={11} tickLine={false} axisLine={false} interval={0} angle={-15} textAnchor="end" height={60}/>
-                                            <YAxis fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `₹${value/1000}k`} />
+                                            <XAxis dataKey="name" fontSize={11} tickLine={false} axisLine={false} />
+                                            <YAxis fontSize={11} tickLine={false} axisLine={false} tickFormatter={(value) => `₹${value/1000}k`} />
                                             <RechartsTooltip formatter={(value: number) => formatCurrency(value)} cursor={{ fill: '#f1f5f9' }} />
-                                            <Bar dataKey="value" fill="#16a34a" radius={[4, 4, 0, 0]}>
+                                            <Bar dataKey="value" fill="#16a34a" radius={[4, 4, 0, 0]} barSize={40}>
                                                 {bankChartData.map((entry, index) => (
                                                     <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#16a34a' : '#15803d'} />
                                                 ))}
@@ -599,7 +601,7 @@ export default function TelecallerDisbursementReport() {
                     </div>
                 </TabsContent>
 
-                {/* --- DATA LIST VIEW (Unchanged but retained) --- */}
+                {/* --- DATA LIST VIEW --- */}
                 <TabsContent value="data" className="mt-4">
                     <Card className="shadow-sm">
                         <CardHeader>
@@ -619,7 +621,7 @@ export default function TelecallerDisbursementReport() {
                                         <TableHead>Date</TableHead>
                                         <TableHead>Bank</TableHead>
                                         <TableHead className="text-right">Amount</TableHead>
-                                        <TableHead className="text-center w-[60px]">Action</TableHead>
+                                        <TableHead className="text-center w-[100px]">Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -638,9 +640,14 @@ export default function TelecallerDisbursementReport() {
                                             <TableCell className="text-sm">{item.bank_name}</TableCell>
                                             <TableCell className="text-right font-bold text-green-700">{formatCurrency(item.disbursed_amount)}</TableCell>
                                             <TableCell className="text-center">
-                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => setDeleteId(item.id)}>
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
+                                                <div className="flex items-center justify-center gap-1">
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-400 hover:text-blue-600 hover:bg-blue-50" onClick={() => toast({ title: "Edit Feature", description: "This opens the edit modal."})}>
+                                                        <Pencil className="h-4 w-4" />
+                                                    </Button>
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => setDeleteId(item.id)}>
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
                                             </TableCell>
                                         </TableRow>
                                     ))}
