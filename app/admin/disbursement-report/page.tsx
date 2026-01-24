@@ -4,10 +4,9 @@ import { useState, useEffect, useMemo, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { 
-  Loader2, IndianRupee, TrendingUp, Filter, Calendar, Trash2, 
-  MapPin, Search, RefreshCw, X, Users, Trophy, Medal,
-  Calculator, Building2, Target, PieChart as PieIcon, BarChart3, 
-  ArrowUpRight, Wallet, Pencil, Zap, Printer, Gauge
+  Loader2, IndianRupee, TrendingUp, Search, RefreshCw, X, Users, Trophy, Medal,
+  Calculator, Building2, Target, PieChart as PieIcon, ArrowUpRight, Wallet, Pencil, Zap, Printer, Gauge,
+  Lightbulb, Crown, Calendar, Trash2
 } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -78,8 +77,6 @@ export default function TelecallerDisbursementReport() {
     // --- STATE ---
     const [filterMode, setFilterMode] = useState<'monthly' | 'custom'>('monthly');
     const currentYear = new Date().getFullYear();
-    const currentMonthIndex = new Date().getMonth();
-    
     const [selectedYear, setSelectedYear] = useState(String(currentYear));
     const [selectedMonth, setSelectedMonth] = useState<string>('all');
     
@@ -101,6 +98,50 @@ export default function TelecallerDisbursementReport() {
     const [deleteId, setDeleteId] = useState<string | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const [refreshKey, setRefreshKey] = useState(0);
+
+    // --- QUICK FILTER HANDLERS ---
+    const setQuickFilter = (type: 'today' | 'yesterday' | 'week' | 'lastMonth') => {
+        const today = new Date();
+        const y = today.getFullYear();
+        
+        let start = "";
+        let end = ""; 
+
+        if (type === 'today') {
+            const m = String(today.getMonth() + 1).padStart(2, '0');
+            const d = String(today.getDate()).padStart(2, '0');
+            start = `${y}-${m}-${d}`;
+            end = `${y}-${m}-${d}`;
+        } else if (type === 'yesterday') {
+            const yest = new Date(today);
+            yest.setDate(today.getDate() - 1);
+            const yM = String(yest.getMonth() + 1).padStart(2, '0');
+            const yD = String(yest.getDate()).padStart(2, '0');
+            start = `${yest.getFullYear()}-${yM}-${yD}`;
+            end = `${yest.getFullYear()}-${yM}-${yD}`;
+        } else if (type === 'week') {
+            const lastWeek = new Date(today);
+            lastWeek.setDate(today.getDate() - 7);
+            const wM = String(lastWeek.getMonth() + 1).padStart(2, '0');
+            const wD = String(lastWeek.getDate()).padStart(2, '0');
+            start = `${lastWeek.getFullYear()}-${wM}-${wD}`;
+            end = `${y}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        } else if (type === 'lastMonth') {
+            setFilterMode('monthly');
+            let lm = today.getMonth(); 
+            let ly = today.getFullYear();
+            if(lm === 0) { lm = 12; ly = ly - 1; }
+            setSelectedMonth(String(lm).padStart(2, '0'));
+            setSelectedYear(String(ly));
+            return; 
+        }
+
+        if(start && end) {
+            setFilterMode('custom');
+            setCustomStart(start);
+            setCustomEnd(end);
+        }
+    };
 
     // 1. Fetch Users
     const fetchUsers = useCallback(async () => {
@@ -207,14 +248,18 @@ export default function TelecallerDisbursementReport() {
     const { 
         filteredData, grandTotal, displayLabel, bankChartData, trendData, 
         pieData, avgTicketSize, cityStats, availableBanks,
-        projectedRevenue, dailyVelocity
+        projectedRevenue, dailyVelocity,
+        smartInsight, maxDeal
     } = useMemo(() => {
         let total = 0;
         const bankMap: Record<string, number> = {};
         const dailyMap: Record<string, number> = {};
         const cityMap: Record<string, number> = {};
+        const agentMap: Record<string, number> = {};
         const uniqueBanks = new Set<string>();
         
+        let maxDealItem: LeadDisbursement | null = null;
+
         // 1. Filter
         const searched = disbursements.filter(item => {
             if(item.bank_name) uniqueBanks.add(item.bank_name);
@@ -232,11 +277,20 @@ export default function TelecallerDisbursementReport() {
         searched.forEach(d => { 
             const amt = d.disbursed_amount;
             total += amt; 
+            
+            // Stats Building
             bankMap[d.bank_name || 'Others'] = (bankMap[d.bank_name || 'Others'] || 0) + amt;
             cityMap[d.city || 'Unknown'] = (cityMap[d.city || 'Unknown'] || 0) + amt;
+            agentMap[d.assigned_to] = (agentMap[d.assigned_to] || 0) + amt;
+            
             if(d.disbursed_at) {
                 const iso = d.disbursed_at.split('T')[0];
                 dailyMap[iso] = (dailyMap[iso] || 0) + amt;
+            }
+
+            // Find Max Deal
+            if (!maxDealItem || amt > maxDealItem.disbursed_amount) {
+                maxDealItem = d;
             }
         });
 
@@ -246,21 +300,42 @@ export default function TelecallerDisbursementReport() {
         let velocity = 0;
         let projection = total;
         
-        // Calculate days passed in selected window
         if (filterMode === 'monthly' && selectedMonth !== 'all') {
             const now = new Date();
             const selYear = Number(selectedYear);
             const selMonthIdx = Number(selectedMonth) - 1;
             const daysInMonth = new Date(selYear, selMonthIdx + 1, 0).getDate();
             
-            // Check if selected month is current month
             if (selYear === now.getFullYear() && selMonthIdx === now.getMonth()) {
                 const daysPassed = now.getDate();
                 velocity = total / daysPassed;
-                projection = velocity * daysInMonth; // Linear projection
+                projection = velocity * daysInMonth; 
             } else {
-                velocity = total / daysInMonth; // Historic velocity
-                projection = total; // No projection for past
+                velocity = total / daysInMonth; 
+                projection = total; 
+            }
+        }
+
+        // 4. Smart Insights Logic
+        let insight = "Track your daily performance to hit targets.";
+        if (total > 0) {
+            const entries = Object.entries(bankMap).sort((a,b) => b[1] - a[1]);
+            if (entries.length > 0) {
+                const topBankName = entries[0][0];
+                const topBankShare = (entries[0][1] / total) * 100;
+                
+                if (topBankShare > 60) {
+                    insight = `⚠️ High dependency on ${topBankName} (${topBankShare.toFixed(0)}% of volume). Consider diversifying.`;
+                } else if (topBankShare > 40) {
+                    insight = `ℹ️ ${topBankName} is your leading partner, driving ${topBankShare.toFixed(0)}% of sales.`;
+                } else {
+                    const agentEntries = Object.entries(agentMap).sort((a,b) => b[1] - a[1]);
+                    if (agentEntries.length > 0) {
+                        const topAgentName = userMap[agentEntries[0][0]]?.split(' ')[0] || 'Unknown';
+                        const topAgentShare = (agentEntries[0][1] / total) * 100;
+                        insight = `🚀 ${topAgentName} is leading the pack with ${topAgentShare.toFixed(0)}% contribution.`;
+                    }
+                }
             }
         }
 
@@ -292,7 +367,9 @@ export default function TelecallerDisbursementReport() {
             cityStats: cityFinal,
             availableBanks: banksList,
             projectedRevenue: projection,
-            dailyVelocity: velocity
+            dailyVelocity: velocity,
+            smartInsight: insight,
+            maxDeal: maxDealItem
         };
     }, [disbursements, searchTerm, userMap, selectedAgentId, selectedBank, filterMode, selectedYear, selectedMonth]);
 
@@ -317,23 +394,20 @@ export default function TelecallerDisbursementReport() {
     }, [disbursements, userMap, selectedBank]);
 
     const getRankIcon = (index: number) => {
-        if (index === 0) return <Trophy className="h-4 w-4 text-yellow-500 fill-yellow-100" />;
-        if (index === 1) return <Medal className="h-4 w-4 text-gray-400 fill-gray-100" />;
-        if (index === 2) return <Medal className="h-4 w-4 text-orange-600 fill-orange-100" />;
-        return <span className="text-gray-400 text-xs">#{index + 1}</span>;
+        if (index === 0) return <Trophy className="h-5 w-5 text-yellow-500 fill-yellow-100" />;
+        if (index === 1) return <Medal className="h-5 w-5 text-gray-400 fill-gray-100" />;
+        if (index === 2) return <Medal className="h-5 w-5 text-orange-600 fill-orange-100" />;
+        return <span className="text-gray-400 font-bold text-sm">#{index + 1}</span>;
     };
 
     const targetProgress = Math.min((grandTotal / targetAmount) * 100, 100);
     const estimatedCommission = grandTotal * (commissionRate[0] / 100);
-
-    const handlePrint = () => {
-        window.print();
-    };
+    const handlePrint = () => window.print();
 
     return (
         <div className="p-4 md:p-8 space-y-6 bg-slate-50 min-h-screen print:p-0 print:bg-white">
             
-            {/* --- HEADER (Hidden on Print) --- */}
+            {/* --- HEADER --- */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 print:hidden">
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-2">
@@ -350,23 +424,32 @@ export default function TelecallerDisbursementReport() {
                 </div>
             </div>
 
-            {/* --- CONTROLS (Hidden on Print) --- */}
+            {/* --- CONTROLS --- */}
             <Card className="border-slate-200 shadow-sm print:hidden">
                 <CardContent className="p-4">
+                    {/* INSIGHTS */}
+                    {grandTotal > 0 && (
+                        <div className="mb-4 bg-blue-50 border border-blue-100 rounded-md p-3 flex items-center gap-3">
+                            <Lightbulb className="h-5 w-5 text-blue-600" />
+                            <p className="text-sm text-blue-800 font-medium">{smartInsight}</p>
+                        </div>
+                    )}
+
                     <div className="flex flex-col lg:flex-row gap-4 justify-between items-end lg:items-center">
                         <div className="w-full lg:w-1/3 relative">
                             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                            <Input 
-                                placeholder="Search Name, App No..." 
-                                className="pl-9"
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                            />
+                            <Input placeholder="Search Name, App No..." className="pl-9" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                         </div>
                         
                         <div className="flex flex-wrap gap-2 items-end">
+                             <div className="flex gap-1 mb-1 lg:mb-0 mr-2">
+                                <Badge variant="outline" className="cursor-pointer hover:bg-slate-100" onClick={() => setQuickFilter('today')}>Today</Badge>
+                                <Badge variant="outline" className="cursor-pointer hover:bg-slate-100" onClick={() => setQuickFilter('yesterday')}>Yesterday</Badge>
+                                <Badge variant="outline" className="cursor-pointer hover:bg-slate-100" onClick={() => setQuickFilter('lastMonth')}>Last Month</Badge>
+                            </div>
+
                             <Select value={selectedBank} onValueChange={setSelectedBank}>
-                                <SelectTrigger className="w-[160px] border-slate-300"><SelectValue placeholder="All Banks" /></SelectTrigger>
+                                <SelectTrigger className="w-[140px] border-slate-300"><SelectValue placeholder="All Banks" /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">All Banks</SelectItem>
                                     {availableBanks.map(bank => <SelectItem key={bank} value={bank}>{bank}</SelectItem>)}
@@ -374,20 +457,20 @@ export default function TelecallerDisbursementReport() {
                             </Select>
 
                             <Select value={filterMode} onValueChange={(v:any) => setFilterMode(v)}>
-                                <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+                                <SelectTrigger className="w-[110px]"><SelectValue /></SelectTrigger>
                                 <SelectContent><SelectItem value="monthly">Monthly</SelectItem><SelectItem value="custom">Custom</SelectItem></SelectContent>
                             </Select>
 
                             {filterMode === 'monthly' ? (
                                 <>
                                     <Select value={selectedYear} onValueChange={setSelectedYear}>
-                                        <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
+                                        <SelectTrigger className="w-[80px]"><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             {[currentYear-1, currentYear, currentYear+1].map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
                                     <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                                        <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+                                        <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="all">Full Year</SelectItem>
                                             {Array.from({length: 12}, (_, i) => <SelectItem key={i} value={String(i+1).padStart(2,'0')}>{new Date(0,i).toLocaleString('default',{month:'long'})}</SelectItem>)}
@@ -396,8 +479,8 @@ export default function TelecallerDisbursementReport() {
                                 </>
                             ) : (
                                 <div className="flex gap-2">
-                                    <Input type="date" className="w-[140px]" value={customStart} onChange={e => setCustomStart(e.target.value)} />
-                                    <Input type="date" className="w-[140px]" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
+                                    <Input type="date" className="w-[130px]" value={customStart} onChange={e => setCustomStart(e.target.value)} />
+                                    <Input type="date" className="w-[130px]" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
                                     <Button onClick={() => fetchLeads()} variant="secondary" size="icon"><RefreshCw className="h-4 w-4"/></Button>
                                 </div>
                             )}
@@ -406,7 +489,7 @@ export default function TelecallerDisbursementReport() {
                 </CardContent>
             </Card>
 
-            {/* --- DASHBOARD VIEW --- */}
+            {/* --- TABS --- */}
             <Tabs defaultValue="dashboard" className="w-full">
                 <TabsList className="grid w-full max-w-[400px] grid-cols-2 print:hidden">
                     <TabsTrigger value="dashboard">Analytics Board</TabsTrigger>
@@ -415,44 +498,49 @@ export default function TelecallerDisbursementReport() {
 
                 <TabsContent value="dashboard" className="space-y-6 mt-4">
                     
-                    {/* STATS STRIP: MAIN, VELOCITY, PROJECTION, TARGET */}
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {/* STATS STRIP */}
+                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                         {/* 1. ACTUAL */}
-                        <Card className="bg-gradient-to-br from-green-600 to-emerald-800 text-white shadow-md border-0">
+                        <Card className="bg-gradient-to-br from-green-600 to-emerald-800 text-white shadow-md border-0 md:col-span-2">
                             <CardContent className="p-4 pt-6">
-                                <p className="text-emerald-100 text-xs font-medium uppercase tracking-wider">Actual Revenue</p>
-                                <h2 className="text-2xl font-bold mt-1">{formatCurrency(grandTotal)}</h2>
-                                <div className="mt-2 text-[10px] bg-white/10 w-fit px-2 py-0.5 rounded-full text-emerald-50">
-                                    Ticket: {formatCurrency(avgTicketSize)}
+                                <div className="flex justify-between">
+                                    <div>
+                                        <p className="text-emerald-100 text-xs font-medium uppercase tracking-wider">Actual Revenue</p>
+                                        <h2 className="text-3xl font-bold mt-1">{formatCurrency(grandTotal)}</h2>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className="bg-white/10 rounded-lg p-2 backdrop-blur-sm">
+                                            <p className="text-[10px] text-emerald-100">Daily Speed</p>
+                                            <p className="text-sm font-bold">{formatCurrency(dailyVelocity)}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="mt-4 flex gap-2">
+                                    <Badge variant="secondary" className="bg-white/20 text-white hover:bg-white/30 border-0 text-[10px]">Ticket: {formatCurrency(avgTicketSize)}</Badge>
+                                    <Badge variant="secondary" className="bg-blue-500/50 text-white hover:bg-blue-500/60 border-0 text-[10px]">Projected: {formatCurrency(projectedRevenue)}</Badge>
                                 </div>
                             </CardContent>
                         </Card>
 
-                        {/* 2. VELOCITY */}
+                        {/* 2. BIG WIN */}
                         <Card className="bg-white shadow-sm border-slate-200">
-                            <CardContent className="p-4 pt-6">
+                            <CardContent className="p-4 pt-6 flex flex-col justify-between h-full">
                                 <div className="flex justify-between items-center mb-1">
-                                    <p className="text-slate-500 text-xs font-medium uppercase tracking-wider">Daily Speed</p>
-                                    <Zap className="h-4 w-4 text-orange-500"/>
+                                    <p className="text-amber-500 text-xs font-bold uppercase tracking-wider flex items-center gap-1"><Crown className="h-3 w-3"/> Top Deal</p>
                                 </div>
-                                <h2 className="text-2xl font-bold text-slate-800">{formatCurrency(dailyVelocity)}</h2>
-                                <p className="text-[10px] text-slate-400 mt-1">Average per day</p>
+                                {maxDeal ? (
+                                    <div>
+                                        <h2 className="text-xl font-bold text-slate-800">{formatCurrency(maxDeal.disbursed_amount)}</h2>
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <Badge variant="outline" className="text-[10px] px-1">{userMap[maxDeal.assigned_to]?.split(' ')[0]}</Badge>
+                                            <span className="text-[10px] text-slate-400 truncate w-16">{maxDeal.bank_name}</span>
+                                        </div>
+                                    </div>
+                                ) : <p className="text-sm text-slate-400 italic">No data</p>}
                             </CardContent>
                         </Card>
 
-                        {/* 3. PROJECTION */}
-                        <Card className="bg-white shadow-sm border-slate-200">
-                            <CardContent className="p-4 pt-6">
-                                <div className="flex justify-between items-center mb-1">
-                                    <p className="text-slate-500 text-xs font-medium uppercase tracking-wider">Projected End</p>
-                                    <Gauge className="h-4 w-4 text-blue-500"/>
-                                </div>
-                                <h2 className="text-2xl font-bold text-blue-600">{formatCurrency(projectedRevenue)}</h2>
-                                <p className="text-[10px] text-slate-400 mt-1">Based on current pace</p>
-                            </CardContent>
-                        </Card>
-
-                        {/* 4. GOAL */}
+                        {/* 3. GOAL */}
                         <Card className="bg-white shadow-sm border-slate-200">
                             <CardContent className="p-4 pt-6">
                                 <div className="flex justify-between items-center mb-1">
@@ -470,16 +558,24 @@ export default function TelecallerDisbursementReport() {
                                 <Progress value={targetProgress} className="h-1.5 mt-2 bg-slate-100" indicatorClassName={targetProgress >= 100 ? 'bg-green-500' : 'bg-slate-900'}/>
                             </CardContent>
                         </Card>
+
+                         {/* 4. COMMISSION */}
+                         <Card className="bg-blue-50/50 border-blue-100 shadow-sm">
+                            <CardContent className="p-4 pt-6">
+                                <div className="flex justify-between items-center mb-1">
+                                    <p className="text-blue-600 text-xs font-medium uppercase tracking-wider">Payout ({commissionRate[0]}%)</p>
+                                </div>
+                                <h2 className="text-xl font-bold text-blue-700">{formatCurrency(estimatedCommission)}</h2>
+                                <Slider defaultValue={[1]} max={5} step={0.1} value={commissionRate} onValueChange={setCommissionRate} className="mt-3 py-1" />
+                            </CardContent>
+                        </Card>
                     </div>
 
-                    {/* MIDDLE: CHARTS & SIDEBAR */}
+                    {/* CHARTS */}
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-                        <div className="md:col-span-9 space-y-6">
-                             {/* TREND */}
+                        <div className="md:col-span-8 space-y-6">
                              <Card className="shadow-sm border-slate-200">
-                                <CardHeader className="py-4">
-                                    <CardTitle className="text-sm font-semibold flex items-center gap-2"><ArrowUpRight className="h-4 w-4 text-indigo-500"/> Daily Trend</CardTitle>
-                                </CardHeader>
+                                <CardHeader className="py-4"><CardTitle className="text-sm font-semibold flex items-center gap-2"><ArrowUpRight className="h-4 w-4 text-indigo-500"/> Daily Trend</CardTitle></CardHeader>
                                 <CardContent className="h-[200px]">
                                     <ResponsiveContainer width="100%" height="100%">
                                         <AreaChart data={trendData}>
@@ -495,7 +591,6 @@ export default function TelecallerDisbursementReport() {
                             </Card>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                {/* BANK SHARE */}
                                 <Card className="shadow-sm border-slate-200">
                                     <CardHeader className="py-4"><CardTitle className="text-sm font-semibold flex gap-2"><PieIcon className="h-4 w-4 text-purple-500"/> Bank Share</CardTitle></CardHeader>
                                     <CardContent className="h-[200px]">
@@ -509,15 +604,20 @@ export default function TelecallerDisbursementReport() {
                                         </ResponsiveContainer>
                                     </CardContent>
                                 </Card>
-                                {/* CITY STATS */}
                                 <Card className="shadow-sm border-slate-200">
-                                    <CardHeader className="py-4"><CardTitle className="text-sm font-semibold flex gap-2"><MapPin className="h-4 w-4 text-rose-500"/> Top Cities</CardTitle></CardHeader>
-                                    <CardContent className="h-[200px] overflow-y-auto pr-1">
-                                        <div className="space-y-3">
-                                            {cityStats.map((city, idx) => (
-                                                <div key={idx} className="flex justify-between border-b border-slate-50 pb-2 last:border-0">
-                                                    <span className="text-xs font-medium text-slate-600">{city.name}</span>
-                                                    <span className="text-xs font-bold text-slate-800">{formatCurrency(city.value)}</span>
+                                    <CardHeader className="py-4"><CardTitle className="text-sm font-semibold flex gap-2"><Zap className="h-4 w-4 text-orange-500"/> Live Feed</CardTitle></CardHeader>
+                                    <CardContent className="h-[200px] overflow-y-auto p-0">
+                                        <div className="divide-y divide-slate-100">
+                                            {filteredData.slice(0, 5).map((item) => (
+                                                <div key={item.id} className="p-3 hover:bg-slate-50">
+                                                    <div className="flex justify-between items-start mb-1">
+                                                        <span className="text-xs font-bold text-slate-800">{formatCurrency(item.disbursed_amount)}</span>
+                                                        <span className="text-[10px] text-slate-400">{formatDate(item.disbursed_at)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="text-[10px] text-slate-500 truncate w-24">{item.name}</span>
+                                                        <Badge variant="outline" className="text-[9px] h-4 px-1">{userMap[item.assigned_to]?.split(' ')[0]}</Badge>
+                                                    </div>
                                                 </div>
                                             ))}
                                         </div>
@@ -526,67 +626,47 @@ export default function TelecallerDisbursementReport() {
                             </div>
                         </div>
 
-                        <div className="md:col-span-3 space-y-6">
-                            {/* COMMISSION CARD */}
-                            <Card className="bg-blue-50/50 border-blue-100 shadow-sm">
-                                <CardHeader className="py-4 pb-2"><CardTitle className="text-xs font-medium text-blue-600 flex gap-2"><Wallet className="h-3 w-3"/> Payout ({commissionRate[0]}%)</CardTitle></CardHeader>
-                                <CardContent>
-                                    <h2 className="text-xl font-bold text-blue-700">{formatCurrency(estimatedCommission)}</h2>
-                                    <Slider defaultValue={[1]} max={5} step={0.1} value={commissionRate} onValueChange={setCommissionRate} className="mt-4 py-1" />
-                                </CardContent>
-                            </Card>
-
-                            {/* RECENT ACTIVITY */}
-                            <Card className="shadow-sm border-slate-200 h-full max-h-[400px]">
-                                <CardHeader className="py-4 bg-slate-50 border-b"><CardTitle className="text-sm font-semibold flex gap-2"><Zap className="h-4 w-4 text-orange-500"/> Live Feed</CardTitle></CardHeader>
-                                <CardContent className="p-0">
-                                    <div className="divide-y divide-slate-100">
-                                        {filteredData.slice(0, 5).map((item) => (
-                                            <div key={item.id} className="p-3 hover:bg-slate-50">
-                                                <div className="flex justify-between items-start mb-1">
-                                                    <span className="text-xs font-bold text-slate-800">{formatCurrency(item.disbursed_amount)}</span>
-                                                    <span className="text-[10px] text-slate-400">{formatDate(item.disbursed_at)}</span>
-                                                </div>
-                                                <div className="flex justify-between items-center">
-                                                    <span className="text-[10px] text-slate-500 truncate w-20">{item.name}</span>
-                                                    <Badge variant="outline" className="text-[9px] h-4 px-1">{userMap[item.assigned_to]?.split(' ')[0]}</Badge>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </CardContent>
+                        <div className="md:col-span-4 space-y-6">
+                            {/* MATCHED LEADERBOARD CARD */}
+                            <Card className="shadow-sm border-slate-200 h-full">
+                                <CardHeader className="py-4 bg-slate-50 border-b">
+                                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                                        <Trophy className="h-4 w-4 text-yellow-500" /> Leaderboard
+                                    </CardTitle>
+                                </CardHeader>
+                                <div className="overflow-x-auto">
+                                    <Table>
+                                        <TableHeader className="bg-slate-50">
+                                            <TableRow className="hover:bg-slate-50">
+                                                <TableHead className="w-[40px] text-xs font-bold text-slate-600">#</TableHead>
+                                                <TableHead className="text-xs font-bold text-slate-600">Agent</TableHead>
+                                                <TableHead className="text-center text-xs font-bold text-slate-600">Count</TableHead>
+                                                <TableHead className="text-right text-xs font-bold text-slate-600">Avg Ticket</TableHead>
+                                                <TableHead className="text-right text-xs font-bold text-green-600">Total</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {telecallerStats.map((stat, idx) => (
+                                                <TableRow 
+                                                    key={stat.id} 
+                                                    className={`hover:bg-slate-50 border-b border-slate-100 ${selectedAgentId === stat.id ? 'bg-green-50' : ''}`}
+                                                    onClick={() => setSelectedAgentId(stat.id === selectedAgentId ? null : stat.id)}
+                                                >
+                                                    <TableCell className="py-3">{getRankIcon(idx)}</TableCell>
+                                                    <TableCell className="py-3 font-semibold text-slate-700 text-xs">{stat.name}</TableCell>
+                                                    <TableCell className="py-3 text-center">
+                                                        <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-md font-medium">{stat.count}</span>
+                                                    </TableCell>
+                                                    <TableCell className="py-3 text-right font-mono text-xs text-slate-400">{formatCurrency(stat.avg)}</TableCell>
+                                                    <TableCell className="py-3 text-right font-bold text-green-700 text-xs">{formatCurrency(stat.amount)}</TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </div>
                             </Card>
                         </div>
                     </div>
-
-                    {/* LEADERBOARD */}
-                    <Card className="shadow-sm border-slate-200">
-                        <CardHeader className="py-4 bg-slate-50 border-b"><CardTitle className="text-sm font-semibold flex gap-2"><Trophy className="h-4 w-4 text-yellow-600" /> Leaderboard</CardTitle></CardHeader>
-                        <div className="p-0 overflow-x-auto">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead className="w-[50px]">#</TableHead>
-                                        <TableHead>Agent</TableHead>
-                                        <TableHead className="text-center">Count</TableHead>
-                                        <TableHead className="text-right">Avg Ticket</TableHead>
-                                        <TableHead className="text-right text-emerald-600">Total</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {telecallerStats.map((stat, idx) => (
-                                        <TableRow key={stat.id} className={`cursor-pointer ${selectedAgentId === stat.id ? 'bg-green-50' : 'hover:bg-slate-50'}`} onClick={() => setSelectedAgentId(stat.id === selectedAgentId ? null : stat.id)}>
-                                            <TableCell className="font-medium text-slate-500">{getRankIcon(idx)}</TableCell>
-                                            <TableCell className="font-semibold text-slate-700 text-xs">{stat.name}</TableCell>
-                                            <TableCell className="text-center"><Badge variant="secondary" className="bg-slate-100 text-xs">{stat.count}</Badge></TableCell>
-                                            <TableCell className="text-right font-mono text-xs text-slate-500">{formatCurrency(stat.avg)}</TableCell>
-                                            <TableCell className="text-right font-bold text-emerald-700 text-xs">{formatCurrency(stat.amount)}</TableCell>
-                                        </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
-                        </div>
-                    </Card>
                 </TabsContent>
 
                 <TabsContent value="data" className="mt-4">
