@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
 import { 
   Loader2, IndianRupee, TrendingUp, Filter, Calendar, Trash2, 
   MapPin, Search, RefreshCw, X, Users, Trophy, Medal,
-  Calculator, Building2, MousePointerClick
+  Calculator, Building2, Target, PieChart as PieIcon, BarChart3, ArrowUpRight
 } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -15,9 +15,10 @@ import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-// REMOVED react-csv
+import { Progress } from "@/components/ui/progress"
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell,
+  LineChart, Line, AreaChart, Area, PieChart, Pie
 } from 'recharts'
 
 import {
@@ -65,6 +66,8 @@ const formatDate = (dateString: string) => {
     });
 };
 
+const PIE_COLORS = ['#16a34a', '#2563eb', '#db2777', '#ea580c', '#ca8a04', '#0891b2', '#4b5563'];
+
 // --- MAIN COMPONENT ---
 export default function TelecallerDisbursementReport() {
     const supabase = createClient();
@@ -83,6 +86,10 @@ export default function TelecallerDisbursementReport() {
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
+    // Target State (Default 50 Lakhs)
+    const [targetAmount, setTargetAmount] = useState<number>(5000000); 
+    const [isTargetEditing, setIsTargetEditing] = useState(false);
+
     const [loading, setLoading] = useState(true);
     const [disbursements, setDisbursements] = useState<LeadDisbursement[]>([]);
     const [userMap, setUserMap] = useState<UserMap>({});
@@ -99,7 +106,7 @@ export default function TelecallerDisbursementReport() {
         const d = String(today.getDate()).padStart(2, '0');
         
         let start = "";
-        let end = `${y}-${m}-${d}`; // Default end is today
+        let end = `${y}-${m}-${d}`; 
 
         if (type === 'today') {
             start = `${y}-${m}-${d}`;
@@ -123,13 +130,8 @@ export default function TelecallerDisbursementReport() {
         setFilterMode('custom');
         setCustomStart(start);
         setCustomEnd(end);
-        // We set a small timeout to allow state to update before fetching, or use useEffect. 
-        // For simplicity in this patterns, user clicks "Apply" or we trigger fetch immediately if we move logic to useEffect.
-        // Here we will just set state, and the user can click Apply, OR we can auto-trigger. 
-        // Let's Auto-Trigger via a specialized effect or just let the user click apply? 
-        // Better UX: Trigger fetch immediately.
-        // Since fetchLeads depends on state, we can't call it immediately here with *new* state.
-        // We will just let the user click "Apply" to keep it simple, or use a specific useEffect.
+        // User manually clicks apply for custom range usually, but for quick filters we could auto-fetch via effect or user click.
+        // We leave it to user to click 'Apply' to confirm the range logic, or you can add a trigger.
     };
 
     // 1. Fetch Users
@@ -235,11 +237,12 @@ export default function TelecallerDisbursementReport() {
     };
 
     // --- AGGREGATION & ANALYTICS ---
-    const { filteredData, grandTotal, displayLabel, bankChartData, avgTicketSize, topBank } = useMemo(() => {
+    const { filteredData, grandTotal, displayLabel, bankChartData, trendData, pieData, avgTicketSize } = useMemo(() => {
         let total = 0;
         const bankMap: Record<string, number> = {};
+        const dailyMap: Record<string, number> = {};
         
-        // 1. Filter by Search Term AND Drill-down Agent
+        // 1. Filter
         const searched = disbursements.filter(item => {
             if (selectedAgentId && item.assigned_to !== selectedAgentId) return false;
 
@@ -251,42 +254,65 @@ export default function TelecallerDisbursementReport() {
             return telecallerName.includes(term) || customerName.includes(term) || appNo.includes(term);
         });
 
+        // 2. Aggregate
         searched.forEach(d => { 
-            total += d.disbursed_amount; 
+            const amt = d.disbursed_amount;
+            total += amt; 
+            
+            // Bank Stats
             const bank = d.bank_name || 'Others';
-            bankMap[bank] = (bankMap[bank] || 0) + d.disbursed_amount;
-        });
+            bankMap[bank] = (bankMap[bank] || 0) + amt;
 
-        // Metrics
-        const avg = searched.length > 0 ? total / searched.length : 0;
-        
-        // Find Top Bank
-        let maxBankName = "N/A";
-        let maxBankVal = 0;
-        Object.entries(bankMap).forEach(([b, val]) => {
-            if(val > maxBankVal) {
-                maxBankVal = val;
-                maxBankName = b;
+            // Trend Stats
+            if(d.disbursed_at) {
+                const dateKey = new Date(d.disbursed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+                dailyMap[dateKey] = (dailyMap[dateKey] || 0) + amt;
             }
         });
 
+        const avg = searched.length > 0 ? total / searched.length : 0;
+        
         // Label Logic
-        let label = "Total Disbursed";
-        if (selectedAgentId) label = `${userMap[selectedAgentId]}'s Sales`;
+        let label = "Total Revenue";
+        if (selectedAgentId) label = `${userMap[selectedAgentId]}'s Revenue`;
 
-        // Chart Data Format
+        // Chart Data Format - Banks (Bar)
         const bChartData = Object.entries(bankMap)
             .map(([name, value]) => ({ name, value }))
-            .sort((a,b) => b.value - a.value) // Sort desc
-            .slice(0, 8); // Top 8 banks only to keep chart clean
+            .sort((a,b) => b.value - a.value)
+            .slice(0, 8);
+
+        // Chart Data Format - Pie (Top 5 + Others)
+        const sortedBanks = Object.entries(bankMap).sort((a,b) => b[1] - a[1]);
+        const top5 = sortedBanks.slice(0, 5).map(([name, value]) => ({ name, value }));
+        const othersVal = sortedBanks.slice(5).reduce((acc, curr) => acc + curr[1], 0);
+        if(othersVal > 0) top5.push({ name: 'Others', value: othersVal });
+        
+        // Chart Data Format - Trend (Line)
+        // Need to sort by date. The keys are "DD MMM". This is tricky to sort string-wise. 
+        // Better to re-loop or use a map with timestamps.
+        // Quick fix: Since 'disbursements' is sorted desc, we can just process distinct dates in reverse or use a proper sort.
+        const tChartData = Object.entries(dailyMap).map(([date, value]) => ({ date, value })).reverse(); // Reverse because dailyMap keys created from Descending list might be unordered in Object keys.
+        // Actually Object.entries order isn't guaranteed. Let's do it robustly:
+        const tMap: Record<string, number> = {};
+        searched.forEach(d => {
+            // ISO date key YYYY-MM-DD for sorting
+            const iso = d.disbursed_at.split('T')[0];
+            tMap[iso] = (tMap[iso] || 0) + d.disbursed_amount;
+        });
+        const trendFinal = Object.keys(tMap).sort().map(iso => ({
+            date: new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
+            value: tMap[iso]
+        }));
 
         return {
             filteredData: searched,
             grandTotal: total,
             displayLabel: label,
             bankChartData: bChartData,
-            avgTicketSize: avg,
-            topBank: maxBankName
+            pieData: top5,
+            trendData: trendFinal,
+            avgTicketSize: avg
         };
     }, [disbursements, searchTerm, userMap, selectedAgentId]);
 
@@ -308,6 +334,8 @@ export default function TelecallerDisbursementReport() {
         return <span className="text-gray-400 text-xs">#{index + 1}</span>;
     };
 
+    const targetProgress = Math.min((grandTotal / targetAmount) * 100, 100);
+
     return (
         <div className="p-4 md:p-8 space-y-6 bg-slate-50 min-h-screen">
             
@@ -316,9 +344,9 @@ export default function TelecallerDisbursementReport() {
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-2">
                         <IndianRupee className="h-8 w-8 text-green-600" />
-                        Disbursement Report
+                        Disbursement Command Center
                     </h1>
-                    <p className="text-slate-500 text-sm mt-1">Analytics & Performance Tracking</p>
+                    <p className="text-slate-500 text-sm mt-1">Real-time revenue tracking and performance analytics</p>
                 </div>
                 <div className="flex gap-2">
                     <DisbursementModal onSuccess={() => setRefreshKey(prev => prev + 1)} />
@@ -380,77 +408,150 @@ export default function TelecallerDisbursementReport() {
                 </CardContent>
             </Card>
 
-            {/* --- TABS --- */}
+            {/* --- DASHBOARD VIEW --- */}
             <Tabs defaultValue="dashboard" className="w-full">
                 <TabsList className="grid w-full max-w-[400px] grid-cols-2">
-                    <TabsTrigger value="dashboard">Dashboard View</TabsTrigger>
+                    <TabsTrigger value="dashboard">Analytics Board</TabsTrigger>
                     <TabsTrigger value="data">Data List</TabsTrigger>
                 </TabsList>
 
-                {/* --- DASHBOARD --- */}
                 <TabsContent value="dashboard" className="space-y-6 mt-4">
-                    {/* STATS ROW */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        {/* 1. Total Card */}
-                        <Card className="bg-gradient-to-br from-green-50 to-white border-green-100 shadow-sm">
+                    
+                    {/* TOP ROW: Stats & Target */}
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                        {/* MAIN STAT */}
+                        <Card className="md:col-span-5 bg-gradient-to-br from-green-600 to-emerald-800 text-white shadow-md border-0">
                             <CardContent className="p-6">
                                 <div className="flex justify-between items-start">
                                     <div>
-                                        <p className="text-green-700 font-medium text-sm flex items-center gap-1">
-                                            {selectedAgentId && <Badge variant="outline" className="mr-2 bg-white text-black cursor-pointer hover:bg-slate-100" onClick={() => setSelectedAgentId(null)}>Clear Filter</Badge>}
+                                        <p className="text-emerald-100 font-medium text-sm flex items-center gap-1">
+                                            {selectedAgentId && <Badge variant="secondary" className="mr-2 cursor-pointer bg-white/20 hover:bg-white/30 text-white border-0" onClick={() => setSelectedAgentId(null)}>Clear Filter</Badge>}
                                             {displayLabel}
                                         </p>
-                                        <h2 className="text-3xl font-bold text-slate-900 mt-2">{formatCurrency(grandTotal)}</h2>
+                                        <h2 className="text-4xl font-bold mt-2">{formatCurrency(grandTotal)}</h2>
+                                        <div className="flex items-center gap-2 mt-4 text-emerald-100 text-sm">
+                                            <Calculator className="h-4 w-4 opacity-70" /> Avg Ticket: {formatCurrency(avgTicketSize)}
+                                        </div>
                                     </div>
-                                    <div className="p-2 bg-green-100 rounded-full">
-                                        <TrendingUp className="h-6 w-6 text-green-700" />
-                                    </div>
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        {/* 2. Avg Ticket Size */}
-                        <Card className="bg-white border-slate-200 shadow-sm">
-                            <CardContent className="p-6">
-                                <div className="flex justify-between items-start">
-                                    <div>
-                                        <p className="text-slate-500 font-medium text-sm">Avg. Ticket Size</p>
-                                        <h2 className="text-3xl font-bold text-slate-900 mt-2">{formatCurrency(avgTicketSize)}</h2>
-                                    </div>
-                                    <div className="p-2 bg-blue-50 rounded-full">
-                                        <Calculator className="h-6 w-6 text-blue-600" />
+                                    <div className="p-3 bg-white/10 rounded-full backdrop-blur-sm">
+                                        <TrendingUp className="h-8 w-8 text-white" />
                                     </div>
                                 </div>
                             </CardContent>
                         </Card>
 
-                        {/* 3. Top Bank */}
-                        <Card className="bg-white border-slate-200 shadow-sm">
-                            <CardContent className="p-6">
-                                <div className="flex justify-between items-start">
-                                    <div>
-                                        <p className="text-slate-500 font-medium text-sm">Top Performing Bank</p>
-                                        <h2 className="text-2xl font-bold text-slate-900 mt-2 truncate max-w-[200px]" title={topBank}>
-                                            {topBank}
-                                        </h2>
-                                    </div>
-                                    <div className="p-2 bg-purple-50 rounded-full">
-                                        <Building2 className="h-6 w-6 text-purple-600" />
-                                    </div>
+                        {/* TARGET TRACKER */}
+                        <Card className="md:col-span-7 bg-white shadow-sm border-slate-200 flex flex-col justify-center">
+                            <CardHeader className="pb-2">
+                                <div className="flex justify-between items-center">
+                                    <CardTitle className="text-sm font-medium text-slate-500 flex items-center gap-2">
+                                        <Target className="h-4 w-4 text-red-500"/> Monthly Goal Tracker
+                                    </CardTitle>
+                                    {!isTargetEditing ? (
+                                        <Button variant="ghost" size="sm" className="h-6 text-xs text-slate-400" onClick={() => setIsTargetEditing(true)}>Edit Goal</Button>
+                                    ) : (
+                                        <div className="flex items-center gap-2">
+                                            <Input 
+                                                type="number" 
+                                                className="h-7 w-32 text-xs" 
+                                                value={targetAmount} 
+                                                onChange={(e) => setTargetAmount(Number(e.target.value))} 
+                                            />
+                                            <Button size="sm" className="h-7 text-xs" onClick={() => setIsTargetEditing(false)}>Save</Button>
+                                        </div>
+                                    )}
+                                </div>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="flex justify-between text-sm font-medium mb-2">
+                                    <span>{formatCurrency(grandTotal)}</span>
+                                    <span className="text-slate-400">Target: {formatCurrency(targetAmount)}</span>
+                                </div>
+                                <Progress value={targetProgress} className="h-3" />
+                                <p className="text-xs text-slate-400 mt-2 text-right">{targetProgress.toFixed(1)}% Achieved</p>
+                            </CardContent>
+                        </Card>
+                    </div>
+
+                    {/* MIDDLE ROW: Charts */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* 1. TREND LINE CHART */}
+                        <Card className="shadow-sm border-slate-200">
+                            <CardHeader>
+                                <CardTitle className="text-base flex items-center gap-2">
+                                    <ArrowUpRight className="h-4 w-4 text-indigo-500"/> Daily Trend (Momentum)
+                                </CardTitle>
+                                <CardDescription>Day-wise disbursement breakdown</CardDescription>
+                            </CardHeader>
+                            <CardContent className="h-[300px]">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <AreaChart data={trendData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                                        <defs>
+                                            <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
+                                                <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                                            </linearGradient>
+                                        </defs>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                        <XAxis dataKey="date" fontSize={11} axisLine={false} tickLine={false} />
+                                        <YAxis fontSize={11} axisLine={false} tickLine={false} tickFormatter={(val) => `${val/1000}k`} />
+                                        <RechartsTooltip formatter={(value: number) => formatCurrency(value)} />
+                                        <Area type="monotone" dataKey="value" stroke="#6366f1" fillOpacity={1} fill="url(#colorVal)" strokeWidth={2} />
+                                    </AreaChart>
+                                </ResponsiveContainer>
+                            </CardContent>
+                        </Card>
+
+                        {/* 2. BANK PIE CHART */}
+                        <Card className="shadow-sm border-slate-200">
+                            <CardHeader>
+                                <CardTitle className="text-base flex items-center gap-2">
+                                    <PieIcon className="h-4 w-4 text-pink-500"/> Bank Market Share
+                                </CardTitle>
+                                <CardDescription>Distribution by funding source</CardDescription>
+                            </CardHeader>
+                            <CardContent className="h-[300px]">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={pieData}
+                                            cx="50%"
+                                            cy="50%"
+                                            innerRadius={60}
+                                            outerRadius={90}
+                                            paddingAngle={2}
+                                            dataKey="value"
+                                        >
+                                            {pieData.map((entry, index) => (
+                                                <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                                            ))}
+                                        </Pie>
+                                        <RechartsTooltip formatter={(value: number) => formatCurrency(value)} />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                                <div className="flex flex-wrap justify-center gap-4 mt-2">
+                                    {pieData.map((entry, index) => (
+                                        <div key={index} className="flex items-center gap-1 text-xs text-slate-500">
+                                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}></div>
+                                            {entry.name}
+                                        </div>
+                                    ))}
                                 </div>
                             </CardContent>
                         </Card>
                     </div>
 
+                    {/* BOTTOM ROW: Detailed Stats */}
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                        
                         {/* Leaderboard */}
                         <div className="md:col-span-4">
-                            <Card className="h-[450px] flex flex-col shadow-sm">
+                            <Card className="h-[450px] flex flex-col shadow-sm border-slate-200">
                                 <CardHeader className="py-4 bg-slate-50 border-b">
                                     <CardTitle className="text-base flex items-center gap-2">
-                                        <Trophy className="h-4 w-4 text-yellow-600" /> Top Performers
+                                        <Trophy className="h-4 w-4 text-yellow-600" /> Leaderboard
                                     </CardTitle>
-                                    <CardDescription className="text-xs">Click a name to filter dashboard</CardDescription>
+                                    <CardDescription className="text-xs">Click to drill-down</CardDescription>
                                 </CardHeader>
                                 <div className="flex-1 overflow-y-auto p-2">
                                     {telecallerStats.map((stat, idx) => (
@@ -470,11 +571,13 @@ export default function TelecallerDisbursementReport() {
                             </Card>
                         </div>
 
-                        {/* Charts */}
+                        {/* Bar Chart (Bank Volume) */}
                         <div className="md:col-span-8">
-                            <Card className="h-[450px] shadow-sm">
+                            <Card className="h-[450px] shadow-sm border-slate-200">
                                 <CardHeader>
-                                    <CardTitle className="text-base">Bank-wise Disbursement Volume</CardTitle>
+                                    <CardTitle className="text-base flex items-center gap-2">
+                                        <BarChart3 className="h-4 w-4 text-blue-500"/> Bank Volume Analysis
+                                    </CardTitle>
                                 </CardHeader>
                                 <CardContent className="h-[380px]">
                                     <ResponsiveContainer width="100%" height="100%">
@@ -496,7 +599,7 @@ export default function TelecallerDisbursementReport() {
                     </div>
                 </TabsContent>
 
-                {/* --- DATA LIST --- */}
+                {/* --- DATA LIST VIEW (Unchanged but retained) --- */}
                 <TabsContent value="data" className="mt-4">
                     <Card className="shadow-sm">
                         <CardHeader>
@@ -541,7 +644,6 @@ export default function TelecallerDisbursementReport() {
                                             </TableCell>
                                         </TableRow>
                                     ))}
-                                    {filteredData.length === 0 && <TableRow><TableCell colSpan={8} className="text-center p-8 text-slate-500">No records found.</TableCell></TableRow>}
                                 </TableBody>
                             </Table>
                         </CardContent>
