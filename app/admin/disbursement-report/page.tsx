@@ -7,7 +7,7 @@ import {
   Loader2, IndianRupee, TrendingUp, Filter, Calendar, Trash2, 
   MapPin, Search, RefreshCw, X, Users, Trophy, Medal,
   Calculator, Building2, Target, PieChart as PieIcon, BarChart3, 
-  ArrowUpRight, Wallet, Pencil, GripHorizontal
+  ArrowUpRight, Wallet, Pencil, Zap, Clock
 } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -87,13 +87,14 @@ export default function TelecallerDisbursementReport() {
 
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+    const [selectedBank, setSelectedBank] = useState<string>("all"); // NEW: Bank Filter
 
     // Target State (Default 50 Lakhs)
     const [targetAmount, setTargetAmount] = useState<number>(5000000); 
     const [isTargetEditing, setIsTargetEditing] = useState(false);
 
     // Commission State
-    const [commissionRate, setCommissionRate] = useState<number[]>([1.0]); // Default 1%
+    const [commissionRate, setCommissionRate] = useState<number[]>([1.0]); 
 
     const [loading, setLoading] = useState(true);
     const [disbursements, setDisbursements] = useState<LeadDisbursement[]>([]);
@@ -206,16 +207,25 @@ export default function TelecallerDisbursementReport() {
     };
 
     // --- AGGREGATION & ANALYTICS ---
-    const { filteredData, grandTotal, displayLabel, bankChartData, trendData, pieData, avgTicketSize, cityStats } = useMemo(() => {
+    const { filteredData, grandTotal, displayLabel, bankChartData, trendData, pieData, avgTicketSize, cityStats, availableBanks } = useMemo(() => {
         let total = 0;
         const bankMap: Record<string, number> = {};
         const dailyMap: Record<string, number> = {};
         const cityMap: Record<string, number> = {};
+        const uniqueBanks = new Set<string>();
         
         // 1. Filter
         const searched = disbursements.filter(item => {
-            if (selectedAgentId && item.assigned_to !== selectedAgentId) return false;
+            // Collect banks for dropdown
+            if(item.bank_name) uniqueBanks.add(item.bank_name);
 
+            // Agent Filter
+            if (selectedAgentId && item.assigned_to !== selectedAgentId) return false;
+            
+            // Bank Filter (NEW)
+            if (selectedBank !== 'all' && item.bank_name !== selectedBank) return false;
+
+            // Search
             const term = searchTerm.toLowerCase();
             const telecallerName = userMap[item.assigned_to]?.toLowerCase() || "";
             const customerName = item.name?.toLowerCase() || "";
@@ -229,17 +239,13 @@ export default function TelecallerDisbursementReport() {
             const amt = d.disbursed_amount;
             total += amt; 
             
-            // Bank Stats
             const bank = d.bank_name || 'Others';
             bankMap[bank] = (bankMap[bank] || 0) + amt;
 
-            // City Stats
             const city = d.city || 'Unknown';
             cityMap[city] = (cityMap[city] || 0) + amt;
 
-            // Trend Stats
             if(d.disbursed_at) {
-                // ISO Key for sorting
                 const iso = d.disbursed_at.split('T')[0];
                 dailyMap[iso] = (dailyMap[iso] || 0) + amt;
             }
@@ -247,27 +253,25 @@ export default function TelecallerDisbursementReport() {
 
         const avg = searched.length > 0 ? total / searched.length : 0;
         
-        // Label Logic
         let label = "Total Revenue";
         if (selectedAgentId) label = `${userMap[selectedAgentId]}'s Revenue`;
+        if (selectedBank !== 'all') label += ` (${selectedBank})`;
 
-        // Chart Data - Banks
+        // Chart Data Prep
         const bChartData = Object.entries(bankMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 8);
-
-        // Chart Data - Pie
+        
         const sortedBanks = Object.entries(bankMap).sort((a,b) => b[1] - a[1]);
         const top5 = sortedBanks.slice(0, 5).map(([name, value]) => ({ name, value }));
         const othersVal = sortedBanks.slice(5).reduce((acc, curr) => acc + curr[1], 0);
         if(othersVal > 0) top5.push({ name: 'Others', value: othersVal });
         
-        // Chart Data - Trend
         const trendFinal = Object.keys(dailyMap).sort().map(iso => ({
             date: new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
             value: dailyMap[iso]
         }));
 
-        // City Data (Top 5)
         const cityFinal = Object.entries(cityMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 5);
+        const banksList = Array.from(uniqueBanks).sort();
 
         return {
             filteredData: searched,
@@ -277,20 +281,40 @@ export default function TelecallerDisbursementReport() {
             pieData: top5,
             trendData: trendFinal,
             avgTicketSize: avg,
-            cityStats: cityFinal
+            cityStats: cityFinal,
+            availableBanks: banksList
         };
-    }, [disbursements, searchTerm, userMap, selectedAgentId]);
+    }, [disbursements, searchTerm, userMap, selectedAgentId, selectedBank]);
 
+    // Enhanced Leaderboard (with Count and Avg)
     const telecallerStats = useMemo(() => {
-        const stats: Record<string, number> = {};
-        disbursements.forEach(d => {
-            const id = d.assigned_to;
-            stats[id] = (stats[id] || 0) + (d.disbursed_amount || 0);
+        const stats: Record<string, { amount: number, count: number }> = {};
+        
+        // Use filtered data so leaderboard respects Bank Filter, but NOT agent filter (so we see ranking)
+        // We re-filter disbursements just by Bank/Search to keep leaderboard comparative
+        const leaderboardData = disbursements.filter(item => {
+            if (selectedBank !== 'all' && item.bank_name !== selectedBank) return false;
+            // Apply search term if needed, or leave leaderboard purely based on bank/date context
+            return true; 
         });
+
+        leaderboardData.forEach(d => {
+            const id = d.assigned_to;
+            if(!stats[id]) stats[id] = { amount: 0, count: 0 };
+            stats[id].amount += (d.disbursed_amount || 0);
+            stats[id].count += 1;
+        });
+
         return Object.entries(stats)
-            .map(([id, amount]) => ({ id, name: userMap[id] || 'Unknown', amount }))
+            .map(([id, data]) => ({ 
+                id, 
+                name: userMap[id] || 'Unknown', 
+                amount: data.amount,
+                count: data.count,
+                avg: data.count > 0 ? data.amount / data.count : 0
+            }))
             .sort((a, b) => b.amount - a.amount);
-    }, [disbursements, userMap]);
+    }, [disbursements, userMap, selectedBank]);
 
     const getRankIcon = (index: number) => {
         if (index === 0) return <Trophy className="h-4 w-4 text-yellow-500 fill-yellow-100" />;
@@ -334,6 +358,20 @@ export default function TelecallerDisbursementReport() {
                         </div>
                         
                         <div className="flex flex-wrap gap-2 items-end">
+                            {/* BANK FILTER */}
+                            <Select value={selectedBank} onValueChange={setSelectedBank}>
+                                <SelectTrigger className="w-[160px] border-slate-300">
+                                    <SelectValue placeholder="All Banks" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All Banks</SelectItem>
+                                    {availableBanks.map(bank => (
+                                        <SelectItem key={bank} value={bank}>{bank}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+
+                            {/* DATE FILTER TYPE */}
                             <Select value={filterMode} onValueChange={(v:any) => setFilterMode(v)}>
                                 <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
                                 <SelectContent><SelectItem value="monthly">Monthly</SelectItem><SelectItem value="custom">Custom</SelectItem></SelectContent>
@@ -376,7 +414,7 @@ export default function TelecallerDisbursementReport() {
 
                 <TabsContent value="dashboard" className="space-y-6 mt-4">
                     
-                    {/* TOP ROW: Stats & Target & Commission */}
+                    {/* TOP ROW */}
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
                         {/* MAIN STAT */}
                         <Card className="md:col-span-4 bg-gradient-to-br from-green-600 to-emerald-800 text-white shadow-md border-0">
@@ -389,7 +427,7 @@ export default function TelecallerDisbursementReport() {
                                         </p>
                                         <h2 className="text-3xl font-bold mt-2">{formatCurrency(grandTotal)}</h2>
                                         <div className="flex items-center gap-2 mt-4 text-emerald-100 text-sm">
-                                            <Calculator className="h-4 w-4 opacity-70" /> Ticket: {formatCurrency(avgTicketSize)}
+                                            <Calculator className="h-4 w-4 opacity-70" /> Avg Ticket: {formatCurrency(avgTicketSize)}
                                         </div>
                                     </div>
                                     <div className="p-3 bg-white/10 rounded-full backdrop-blur-sm">
@@ -437,165 +475,161 @@ export default function TelecallerDisbursementReport() {
                             <CardContent>
                                 <h2 className="text-2xl font-bold text-blue-700">{formatCurrency(estimatedCommission)}</h2>
                                 <div className="mt-3">
-                                    <Slider 
-                                        defaultValue={[1]} 
-                                        max={5} 
-                                        step={0.1} 
-                                        value={commissionRate} 
-                                        onValueChange={setCommissionRate}
-                                        className="py-1"
-                                    />
+                                    <Slider defaultValue={[1]} max={5} step={0.1} value={commissionRate} onValueChange={setCommissionRate} className="py-1" />
                                     <p className="text-[10px] text-blue-400 mt-1 text-right">Adjust payout percentage</p>
                                 </div>
                             </CardContent>
                         </Card>
                     </div>
 
-                    {/* MIDDLE ROW: Charts */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        {/* 1. TREND LINE CHART */}
-                        <Card className="md:col-span-2 shadow-sm border-slate-200">
-                            <CardHeader>
-                                <CardTitle className="text-base flex items-center gap-2">
-                                    <ArrowUpRight className="h-4 w-4 text-indigo-500"/> Daily Trend
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent className="h-[250px]">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <AreaChart data={trendData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                                        <defs>
-                                            <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
-                                                <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                                            </linearGradient>
-                                        </defs>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                        <XAxis dataKey="date" fontSize={11} axisLine={false} tickLine={false} />
-                                        <YAxis fontSize={11} axisLine={false} tickLine={false} tickFormatter={(val) => `${val/1000}k`} />
-                                        <RechartsTooltip formatter={(value: number) => formatCurrency(value)} />
-                                        <Area type="monotone" dataKey="value" stroke="#6366f1" fillOpacity={1} fill="url(#colorVal)" strokeWidth={2} />
-                                    </AreaChart>
-                                </ResponsiveContainer>
-                            </CardContent>
-                        </Card>
-
-                        {/* 2. CITY STATS */}
-                        <Card className="shadow-sm border-slate-200">
-                            <CardHeader>
-                                <CardTitle className="text-base flex items-center gap-2">
-                                    <MapPin className="h-4 w-4 text-rose-500"/> Top Cities
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="space-y-4">
-                                    {cityStats.map((city, idx) => (
-                                        <div key={idx} className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <div className="w-2 h-2 rounded-full bg-rose-400"></div>
-                                                <span className="text-sm font-medium text-slate-700">{city.name}</span>
-                                            </div>
-                                            <span className="text-xs font-bold text-slate-900">{formatCurrency(city.value)}</span>
-                                        </div>
-                                    ))}
-                                    {cityStats.length === 0 && <div className="text-xs text-slate-400">No location data available</div>}
-                                </div>
-                            </CardContent>
-                        </Card>
-                    </div>
-
-                    {/* BOTTOM ROW: Detailed Stats */}
+                    {/* MIDDLE ROW */}
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-                        
-                        {/* Leaderboard */}
-                        <div className="md:col-span-4">
-                            <Card className="h-[450px] flex flex-col shadow-sm border-slate-200">
+                        {/* LEFT COLUMN: ACTIVITY FEED */}
+                        <div className="md:col-span-3 space-y-6">
+                             {/* LIVE ACTIVITY FEED */}
+                             <Card className="shadow-sm border-slate-200 h-full max-h-[450px]">
                                 <CardHeader className="py-4 bg-slate-50 border-b">
-                                    <CardTitle className="text-base flex items-center gap-2">
-                                        <Trophy className="h-4 w-4 text-yellow-600" /> Leaderboard
+                                    <CardTitle className="text-sm flex items-center gap-2">
+                                        <Zap className="h-4 w-4 text-orange-500"/> Live Activity
                                     </CardTitle>
-                                    <CardDescription className="text-xs">Click to drill-down</CardDescription>
+                                    <CardDescription className="text-xs">Recent 5 disbursements</CardDescription>
                                 </CardHeader>
-                                <div className="flex-1 overflow-y-auto p-2">
-                                    {telecallerStats.map((stat, idx) => (
-                                        <div 
-                                            key={stat.id} 
-                                            onClick={() => setSelectedAgentId(stat.id === selectedAgentId ? null : stat.id)}
-                                            className={`flex items-center justify-between p-3 rounded-lg mb-1 cursor-pointer transition-all ${selectedAgentId === stat.id ? 'bg-green-100 border border-green-200' : 'hover:bg-slate-50 border border-transparent'}`}
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-6 flex justify-center">{getRankIcon(idx)}</div>
-                                                <div className="text-sm font-medium text-slate-700">{stat.name}</div>
-                                            </div>
-                                            <div className="text-sm font-bold text-slate-900">{formatCurrency(stat.amount)}</div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </Card>
-                        </div>
-
-                        {/* Pie & Bar Mixed */}
-                        <div className="md:col-span-8 flex flex-col gap-6">
-                             {/* Bank Market Share */}
-                             <Card className="flex-1 shadow-sm border-slate-200">
-                                <CardHeader className="py-4">
-                                    <CardTitle className="text-base flex items-center gap-2">
-                                        <PieIcon className="h-4 w-4 text-purple-500"/> Bank Distribution
-                                    </CardTitle>
-                                </CardHeader>
-                                <CardContent className="h-[200px] flex items-center justify-around">
-                                    <div className="h-full w-1/2">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <PieChart>
-                                                <Pie
-                                                    data={pieData}
-                                                    cx="50%"
-                                                    cy="50%"
-                                                    innerRadius={40}
-                                                    outerRadius={70}
-                                                    paddingAngle={2}
-                                                    dataKey="value"
-                                                >
-                                                    {pieData.map((entry, index) => (
-                                                        <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                                                    ))}
-                                                </Pie>
-                                                <RechartsTooltip formatter={(value: number) => formatCurrency(value)} />
-                                            </PieChart>
-                                        </ResponsiveContainer>
-                                    </div>
-                                    <div className="w-1/2 space-y-1">
-                                         {pieData.map((entry, index) => (
-                                            <div key={index} className="flex items-center gap-2 text-xs text-slate-600">
-                                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}></div>
-                                                <span className="font-medium">{entry.name}:</span> {formatCurrency(entry.value)}
+                                <CardContent className="p-0">
+                                    <div className="divide-y divide-slate-100">
+                                        {filteredData.slice(0, 5).map((item) => (
+                                            <div key={item.id} className="p-3 hover:bg-slate-50 transition-colors">
+                                                <div className="flex justify-between items-start mb-1">
+                                                    <span className="text-xs font-bold text-slate-800">{formatCurrency(item.disbursed_amount)}</span>
+                                                    <span className="text-[10px] text-slate-400">{formatDate(item.disbursed_at)}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-xs text-slate-600 truncate max-w-[100px]">{item.name}</span>
+                                                    <Badge variant="outline" className="text-[10px] px-1 h-5">{userMap[item.assigned_to]?.split(' ')[0]}</Badge>
+                                                </div>
+                                                <div className="mt-1 flex items-center gap-1">
+                                                    <Building2 className="h-3 w-3 text-slate-300"/>
+                                                    <span className="text-[10px] text-slate-400">{item.bank_name}</span>
+                                                </div>
                                             </div>
                                         ))}
+                                        {filteredData.length === 0 && <div className="p-4 text-xs text-center text-slate-400">No activity yet</div>}
                                     </div>
                                 </CardContent>
                             </Card>
+                        </div>
 
-                            {/* Bank Volume Bar */}
-                            <Card className="flex-1 shadow-sm border-slate-200">
-                                <CardHeader className="py-4">
+                        {/* CENTER COLUMN: CHARTS */}
+                        <div className="md:col-span-9 space-y-6">
+                             {/* TREND CHART */}
+                             <Card className="shadow-sm border-slate-200">
+                                <CardHeader>
                                     <CardTitle className="text-base flex items-center gap-2">
-                                        <BarChart3 className="h-4 w-4 text-blue-500"/> Volume by Bank
+                                        <ArrowUpRight className="h-4 w-4 text-indigo-500"/> Daily Trend
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="h-[200px]">
                                     <ResponsiveContainer width="100%" height="100%">
-                                        <BarChart data={bankChartData} margin={{ top: 10, right: 30, left: 20, bottom: 0 }}>
+                                        <AreaChart data={trendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                            <defs>
+                                                <linearGradient id="colorVal" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
+                                                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                                                </linearGradient>
+                                            </defs>
                                             <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                            <XAxis dataKey="name" fontSize={11} tickLine={false} axisLine={false} />
-                                            <YAxis fontSize={11} tickLine={false} axisLine={false} tickFormatter={(value) => `₹${value/1000}k`} />
-                                            <RechartsTooltip formatter={(value: number) => formatCurrency(value)} cursor={{ fill: '#f1f5f9' }} />
-                                            <Bar dataKey="value" fill="#16a34a" radius={[4, 4, 0, 0]} barSize={40}>
-                                                {bankChartData.map((entry, index) => (
-                                                    <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#16a34a' : '#15803d'} />
-                                                ))}
-                                            </Bar>
-                                        </BarChart>
+                                            <XAxis dataKey="date" fontSize={11} axisLine={false} tickLine={false} />
+                                            <YAxis fontSize={11} axisLine={false} tickLine={false} tickFormatter={(val) => `${val/1000}k`} />
+                                            <RechartsTooltip formatter={(value: number) => formatCurrency(value)} />
+                                            <Area type="monotone" dataKey="value" stroke="#6366f1" fillOpacity={1} fill="url(#colorVal)" strokeWidth={2} />
+                                        </AreaChart>
                                     </ResponsiveContainer>
                                 </CardContent>
+                            </Card>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* BANK PIE */}
+                                <Card className="shadow-sm border-slate-200">
+                                    <CardHeader className="py-4">
+                                        <CardTitle className="text-base flex items-center gap-2">
+                                            <PieIcon className="h-4 w-4 text-purple-500"/> Bank Share
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="h-[200px] flex items-center justify-center">
+                                         <ResponsiveContainer width="100%" height="100%">
+                                            <PieChart>
+                                                <Pie data={pieData} cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={2} dataKey="value">
+                                                    {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />)}
+                                                </Pie>
+                                                <RechartsTooltip formatter={(value: number) => formatCurrency(value)} />
+                                            </PieChart>
+                                        </ResponsiveContainer>
+                                    </CardContent>
+                                </Card>
+                                
+                                {/* CITY LIST */}
+                                <Card className="shadow-sm border-slate-200">
+                                    <CardHeader className="py-4">
+                                        <CardTitle className="text-base flex items-center gap-2">
+                                            <MapPin className="h-4 w-4 text-rose-500"/> Top Cities
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="h-[200px] overflow-y-auto pr-2">
+                                        <div className="space-y-3">
+                                            {cityStats.map((city, idx) => (
+                                                <div key={idx} className="flex items-center justify-between border-b border-slate-50 pb-2 last:border-0">
+                                                    <span className="text-sm font-medium text-slate-600">{city.name}</span>
+                                                    <span className="text-xs font-bold text-slate-800">{formatCurrency(city.value)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* BOTTOM ROW: LEADERBOARD & DETAILS */}
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                        
+                        {/* Leaderboard */}
+                        <div className="md:col-span-12">
+                            <Card className="flex flex-col shadow-sm border-slate-200">
+                                <CardHeader className="py-4 bg-slate-50 border-b">
+                                    <CardTitle className="text-base flex items-center gap-2">
+                                        <Trophy className="h-4 w-4 text-yellow-600" /> Performance Leaderboard
+                                    </CardTitle>
+                                    <CardDescription className="text-xs">Ranked by Total Disbursed Amount</CardDescription>
+                                </CardHeader>
+                                <div className="p-0 overflow-x-auto">
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead className="w-[50px]">Rank</TableHead>
+                                                <TableHead>Agent Name</TableHead>
+                                                <TableHead className="text-center">Files Disbursed</TableHead>
+                                                <TableHead className="text-right">Avg. Ticket Size</TableHead>
+                                                <TableHead className="text-right text-emerald-600">Total Revenue</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {telecallerStats.map((stat, idx) => (
+                                                <TableRow 
+                                                    key={stat.id} 
+                                                    className={`cursor-pointer ${selectedAgentId === stat.id ? 'bg-green-50' : 'hover:bg-slate-50'}`}
+                                                    onClick={() => setSelectedAgentId(stat.id === selectedAgentId ? null : stat.id)}
+                                                >
+                                                    <TableCell className="font-medium text-slate-500">{getRankIcon(idx)}</TableCell>
+                                                    <TableCell className="font-semibold text-slate-700">{stat.name}</TableCell>
+                                                    <TableCell className="text-center">
+                                                        <Badge variant="secondary" className="bg-slate-100">{stat.count}</Badge>
+                                                    </TableCell>
+                                                    <TableCell className="text-right font-mono text-xs text-slate-500">{formatCurrency(stat.avg)}</TableCell>
+                                                    <TableCell className="text-right font-bold text-emerald-700">{formatCurrency(stat.amount)}</TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </div>
                             </Card>
                         </div>
                     </div>
