@@ -2,14 +2,23 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Loader2, IndianRupee, BarChart3, TrendingUp, Filter, Calendar, Trash2, MapPin, Search, RefreshCw, X, Users } from "lucide-react"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { 
+  Loader2, IndianRupee, TrendingUp, Filter, Calendar, Trash2, 
+  MapPin, Search, RefreshCw, X, Users, Download, Trophy, Medal 
+} from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/components/ui/use-toast"
 import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { CSVLink } from "react-csv" // NEW: For Export
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, PieChart, Pie 
+} from 'recharts' // NEW: For Charts
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,7 +30,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 
-// IMPORT YOUR MODAL COMPONENT
 import { DisbursementModal } from "@/components/admin/disbursement-modal"
 
 // --- TYPES ---
@@ -29,11 +37,11 @@ interface LeadDisbursement {
     id: string;
     assigned_to: string; 
     disbursed_amount: number;
-    disbursed_at: string; // ISO String
+    disbursed_at: string;
     application_number: string;
-    name: string; // Customer Name
+    name: string;
     bank_name: string;
-    city: string; // Location
+    city: string;
 }
 
 interface UserMap {
@@ -56,41 +64,32 @@ const formatDate = (dateString: string) => {
     });
 };
 
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
+
 // --- MAIN COMPONENT ---
 export default function TelecallerDisbursementReport() {
     const supabase = createClient();
     const { toast } = useToast();
     
     // --- STATE ---
-    
-    // Filter Mode: 'monthly' (Dropdowns) or 'custom' (Date Range)
     const [filterMode, setFilterMode] = useState<'monthly' | 'custom'>('monthly');
-
-    // 1. Monthly Filters
     const currentYear = new Date().getFullYear();
     const [selectedYear, setSelectedYear] = useState(String(currentYear));
-    const [selectedMonth, setSelectedMonth] = useState<string>('all'); // 'all' or '01', '02', etc.
-
-    // 2. Custom Date Filters
+    const [selectedMonth, setSelectedMonth] = useState<string>('all');
     const [customStart, setCustomStart] = useState("");
     const [customEnd, setCustomEnd] = useState("");
-
-    // 3. Search Filter
     const [searchTerm, setSearchTerm] = useState("");
+    const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null); // NEW: For Drill-down
 
-    // Data State
     const [loading, setLoading] = useState(true);
     const [disbursements, setDisbursements] = useState<LeadDisbursement[]>([]);
     const [userMap, setUserMap] = useState<UserMap>({});
     
-    // Delete State
     const [deleteId, setDeleteId] = useState<string | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
-    
-    // Refresh Trigger
     const [refreshKey, setRefreshKey] = useState(0);
 
-    // 1. Fetch Users (Telecallers)
+    // 1. Fetch Users
     const fetchUsers = useCallback(async () => {
         const { data, error } = await supabase
             .from('users')
@@ -109,26 +108,22 @@ export default function TelecallerDisbursementReport() {
         setUserMap(map);
     }, [supabase]);
 
-    // 2. Fetch Leads (Transactions) based on Filters
+    // 2. Fetch Leads
     const fetchLeads = useCallback(async () => {
         setLoading(true);
+        setSelectedAgentId(null); // Reset drill-down on new fetch
         
         let startQuery: string, endQuery: string;
 
-        // LOGIC: Determine Date Range based on Filter Mode
         if (filterMode === 'custom' && customStart && customEnd) {
-            // Custom Range
             startQuery = `${customStart}T00:00:00.000Z`;
             endQuery = `${customEnd}T23:59:59.999Z`;
         } else {
-            // Monthly Mode (Default)
             if (selectedMonth !== 'all') {
-                // Specific Month Selected
-                const monthIndex = parseInt(selectedMonth) - 1; // 0-based
+                const monthIndex = parseInt(selectedMonth) - 1;
                 const startDate = new Date(Number(selectedYear), monthIndex, 1);
-                const endDate = new Date(Number(selectedYear), monthIndex + 1, 0); // Last day of month
+                const endDate = new Date(Number(selectedYear), monthIndex + 1, 0);
                 
-                // Creating simplified ISO strings
                 const y = startDate.getFullYear();
                 const m = String(startDate.getMonth() + 1).padStart(2, '0');
                 const lastDay = endDate.getDate();
@@ -136,7 +131,6 @@ export default function TelecallerDisbursementReport() {
                 startQuery = `${y}-${m}-01T00:00:00.000Z`;
                 endQuery = `${y}-${m}-${lastDay}T23:59:59.999Z`;
             } else {
-                // Whole Year
                 startQuery = `${selectedYear}-01-01T00:00:00.000Z`;
                 endQuery = `${Number(selectedYear) + 1}-01-01T00:00:00.000Z`;
             }
@@ -152,7 +146,6 @@ export default function TelecallerDisbursementReport() {
             .limit(5000); 
 
         if (error) {
-            console.error('Error fetching leads:', error);
             toast({ title: "Error", description: "Failed to fetch transactions", variant: "destructive" });
             setLoading(false);
             return;
@@ -167,12 +160,10 @@ export default function TelecallerDisbursementReport() {
         setLoading(false);
     }, [supabase, filterMode, selectedYear, selectedMonth, customStart, customEnd, toast]);
 
-    // 3. INITIAL LOAD & REAL-TIME SUBSCRIPTION
     useEffect(() => {
         fetchUsers().then(() => fetchLeads());
-
-        const channel = supabase
-            .channel('disbursement-updates')
+        // Real-time subscription logic (same as before)
+        const channel = supabase.channel('disbursement-updates')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, (payload) => {
                 const newData = payload.new as any;
                 if (newData.status === 'DISBURSED' || (payload.old as any)?.status === 'DISBURSED') {
@@ -180,11 +171,9 @@ export default function TelecallerDisbursementReport() {
                 }
             })
             .subscribe();
-
         return () => { supabase.removeChannel(channel); };
     }, [fetchUsers, fetchLeads, refreshKey, supabase]);
 
-    // 4. Delete Handler
     const handleDelete = async () => {
         if (!deleteId) return;
         setIsDeleting(true);
@@ -203,12 +192,17 @@ export default function TelecallerDisbursementReport() {
         }
     };
 
-    // --- CLIENT-SIDE SEARCH & AGGREGATION ---
-    const { filteredData, grandTotal, displayLabel } = useMemo(() => {
+    // --- AGGREGATION & ANALYTICS ---
+    const { filteredData, grandTotal, displayLabel, bankChartData } = useMemo(() => {
         let total = 0;
+        const bankMap: Record<string, number> = {};
         
-        // Apply Text Search (Telecaller Name OR Customer Name)
+        // 1. Filter by Search Term AND Drill-down Agent
         const searched = disbursements.filter(item => {
+            // Drill down check
+            if (selectedAgentId && item.assigned_to !== selectedAgentId) return false;
+
+            // Search Check
             const term = searchTerm.toLowerCase();
             const telecallerName = userMap[item.assigned_to]?.toLowerCase() || "";
             const customerName = item.name?.toLowerCase() || "";
@@ -217,330 +211,279 @@ export default function TelecallerDisbursementReport() {
             return telecallerName.includes(term) || customerName.includes(term) || appNo.includes(term);
         });
 
-        searched.forEach(d => { total += d.disbursed_amount; });
+        searched.forEach(d => { 
+            total += d.disbursed_amount; 
+            // Bank Stats
+            const bank = d.bank_name || 'Others';
+            bankMap[bank] = (bankMap[bank] || 0) + d.disbursed_amount;
+        });
 
+        // Label Logic
         let label = "Total Disbursed";
-        if (filterMode === 'monthly') {
-            if (selectedMonth === 'all') label += ` (${selectedYear})`;
-            else {
-                const date = new Date(Number(selectedYear), parseInt(selectedMonth)-1, 1);
-                label += ` (${date.toLocaleString('default', { month: 'long', year: 'numeric' })})`;
-            }
-        } else {
-            if (customStart && customEnd) label += ` (${customStart} to ${customEnd})`;
-            else label += " (Custom Range)";
-        }
+        if (selectedAgentId) label = `${userMap[selectedAgentId]}'s Sales`; // Update label on drill-down
+
+        // Chart Data Format
+        const bChartData = Object.entries(bankMap).map(([name, value]) => ({ name, value }));
 
         return {
             filteredData: searched,
             grandTotal: total,
-            displayLabel: label
+            displayLabel: label,
+            bankChartData: bChartData
         };
-    }, [disbursements, searchTerm, userMap, filterMode, selectedYear, selectedMonth, customStart, customEnd]);
+    }, [disbursements, searchTerm, userMap, selectedAgentId]);
 
-    // --- NEW: TELECALLER AGGREGATION ---
+    // Telecaller Stats (Ranked) - Calculated on FULL data set (independent of drill-down)
     const telecallerStats = useMemo(() => {
         const stats: Record<string, number> = {};
-        
-        // We use 'disbursements' (the full date-filtered list) instead of 'filteredData'
-        // so the leaderboard remains visible even when searching for a specific customer in the table.
         disbursements.forEach(d => {
             const id = d.assigned_to;
             stats[id] = (stats[id] || 0) + (d.disbursed_amount || 0);
         });
-
         return Object.entries(stats)
-            .map(([id, amount]) => ({
-                id,
-                name: userMap[id] || 'Unknown',
-                amount
-            }))
-            .sort((a, b) => b.amount - a.amount); // Descending Order
+            .map(([id, amount]) => ({ id, name: userMap[id] || 'Unknown', amount }))
+            .sort((a, b) => b.amount - a.amount);
     }, [disbursements, userMap]);
 
-    const availableYears = useMemo(() => {
-        const years = [];
-        for (let i = currentYear - 2; i <= currentYear + 1; i++) years.push(String(i));
-        return years;
-    }, [currentYear]);
+    // Export Data Preparation
+    const csvData = useMemo(() => {
+        return filteredData.map(item => ({
+            "App No": item.application_number,
+            "Date": formatDate(item.disbursed_at),
+            "Customer": item.name,
+            "Telecaller": userMap[item.assigned_to] || 'Unknown',
+            "Bank": item.bank_name,
+            "Amount": item.disbursed_amount,
+            "City": item.city
+        }));
+    }, [filteredData, userMap]);
+
+    // --- RENDER HELPERS ---
+    const getRankIcon = (index: number) => {
+        if (index === 0) return <Trophy className="h-4 w-4 text-yellow-500 fill-yellow-100" />;
+        if (index === 1) return <Medal className="h-4 w-4 text-gray-400 fill-gray-100" />;
+        if (index === 2) return <Medal className="h-4 w-4 text-orange-600 fill-orange-100" />;
+        return <span className="text-gray-400 text-xs">#{index + 1}</span>;
+    };
 
     return (
-        <div className="p-4 md:p-8 space-y-6 bg-gray-50/50 min-h-screen">
+        <div className="p-4 md:p-8 space-y-6 bg-slate-50 min-h-screen">
             
-            {/* Header */}
+            {/* --- HEADER --- */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
-                        <IndianRupee className="h-7 w-7 text-green-600" />
+                    <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-2">
+                        <IndianRupee className="h-8 w-8 text-green-600" />
                         Disbursement Report
                     </h1>
-                    <p className="text-gray-500 text-sm mt-1">Track and manage processed disbursements</p>
+                    <p className="text-slate-500 text-sm mt-1">Analytics & Performance Tracking</p>
                 </div>
-                <DisbursementModal onSuccess={() => setRefreshKey(prev => prev + 1)} />
+                <div className="flex gap-2">
+                    {/* CSV EXPORT BUTTON */}
+                    {csvData.length > 0 && (
+                        <CSVLink 
+                            data={csvData} 
+                            filename={`disbursement_report_${new Date().toISOString().slice(0,10)}.csv`}
+                            className="bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 px-4 py-2 rounded-md flex items-center gap-2 text-sm font-medium transition-colors shadow-sm"
+                        >
+                            <Download className="h-4 w-4" /> Export CSV
+                        </CSVLink>
+                    )}
+                    <DisbursementModal onSuccess={() => setRefreshKey(prev => prev + 1)} />
+                </div>
             </div>
 
-            {/* --- FILTER SECTION --- */}
-            <Card className="shadow-sm border-gray-200">
+            {/* --- CONTROLS --- */}
+            <Card className="border-slate-200 shadow-sm">
                 <CardContent className="p-4">
                     <div className="flex flex-col lg:flex-row gap-4 justify-between items-end lg:items-center">
-                        
-                        {/* LEFT: Search Bar */}
                         <div className="w-full lg:w-1/3 relative">
-                            <label className="text-xs font-semibold text-gray-500 uppercase mb-1 block">Search Records</label>
-                            <div className="relative">
-                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
-                                <Input 
-                                    placeholder="Search by Telecaller or Customer..." 
-                                    className="pl-9 bg-gray-50 border-gray-200 focus:bg-white transition-colors"
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                />
-                                {searchTerm && (
-                                    <button 
-                                        onClick={() => setSearchTerm("")}
-                                        className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
-                                    >
-                                        <X className="h-4 w-4" />
-                                    </button>
-                                )}
-                            </div>
+                            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+                            <Input 
+                                placeholder="Search Name, App No..." 
+                                className="pl-9"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
                         </div>
+                        
+                        {/* Filters (Simplified for brevity, logic remains same) */}
+                        <div className="flex flex-wrap gap-2 items-end">
+                            <Select value={filterMode} onValueChange={(v:any) => setFilterMode(v)}>
+                                <SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger>
+                                <SelectContent><SelectItem value="monthly">Monthly</SelectItem><SelectItem value="custom">Custom</SelectItem></SelectContent>
+                            </Select>
 
-                        {/* RIGHT: Date Filters */}
-                        <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
-                            
-                            {/* Toggle Mode */}
-                            <div className="flex flex-col">
-                                <label className="text-xs font-semibold text-gray-500 uppercase mb-1">Filter Type</label>
-                                <Select value={filterMode} onValueChange={(val: any) => setFilterMode(val)}>
-                                    <SelectTrigger className="w-[140px] bg-white">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="monthly">Monthly View</SelectItem>
-                                        <SelectItem value="custom">Custom Range</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-
-                            {/* CONDITIONAL INPUTS */}
                             {filterMode === 'monthly' ? (
                                 <>
-                                    <div className="flex flex-col">
-                                        <label className="text-xs font-semibold text-gray-500 uppercase mb-1">Year</label>
-                                        <Select value={selectedYear} onValueChange={setSelectedYear}>
-                                            <SelectTrigger className="w-[100px] bg-white"><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                {availableYears.map(y => <SelectItem key={y} value={y}>{y}</SelectItem>)}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="flex flex-col">
-                                        <label className="text-xs font-semibold text-gray-500 uppercase mb-1">Month</label>
-                                        <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                                            <SelectTrigger className="w-[140px] bg-white"><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="all">Whole Year</SelectItem>
-                                                {Array.from({length: 12}, (_, i) => {
-                                                    const date = new Date(2000, i, 1);
-                                                    return <SelectItem key={i} value={String(i+1).padStart(2, '0')}>{date.toLocaleString('default', { month: 'long' })}</SelectItem>
-                                                })}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
+                                    <Select value={selectedYear} onValueChange={setSelectedYear}>
+                                        <SelectTrigger className="w-[100px]"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            {[currentYear-1, currentYear, currentYear+1].map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                    <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                                        <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">Full Year</SelectItem>
+                                            {Array.from({length: 12}, (_, i) => <SelectItem key={i} value={String(i+1).padStart(2,'0')}>{new Date(0,i).toLocaleString('default',{month:'long'})}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
                                 </>
                             ) : (
-                                <>
-                                    <div className="flex flex-col">
-                                        <label className="text-xs font-semibold text-gray-500 uppercase mb-1">From Date</label>
-                                        <Input 
-                                            type="date" 
-                                            className="w-[150px] bg-white" 
-                                            value={customStart}
-                                            onChange={(e) => setCustomStart(e.target.value)}
-                                        />
-                                    </div>
-                                    <div className="flex flex-col">
-                                        <label className="text-xs font-semibold text-gray-500 uppercase mb-1">To Date</label>
-                                        <Input 
-                                            type="date" 
-                                            className="w-[150px] bg-white" 
-                                            value={customEnd}
-                                            onChange={(e) => setCustomEnd(e.target.value)}
-                                        />
-                                    </div>
-                                    <div className="flex flex-col justify-end">
-                                        <Button 
-                                            onClick={() => fetchLeads()} 
-                                            disabled={!customStart || !customEnd || loading}
-                                            variant="secondary"
-                                            className="gap-2"
-                                        >
-                                            {loading ? <Loader2 className="h-4 w-4 animate-spin"/> : <RefreshCw className="h-4 w-4"/>}
-                                            Apply
-                                        </Button>
-                                    </div>
-                                </>
+                                <div className="flex gap-2">
+                                    <Input type="date" className="w-[140px]" value={customStart} onChange={e => setCustomStart(e.target.value)} />
+                                    <Input type="date" className="w-[140px]" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
+                                    <Button onClick={() => fetchLeads()} variant="secondary" size="icon"><RefreshCw className="h-4 w-4"/></Button>
+                                </div>
                             )}
                         </div>
                     </div>
                 </CardContent>
             </Card>
 
-            {/* --- STATS GRID --- */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                
-                {/* 1. Grand Total Card */}
-                <Card className="shadow-sm border-l-4 border-l-green-600 bg-white md:col-span-1 flex flex-col justify-center">
-                    <CardContent className="p-6">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm font-medium text-gray-500 flex items-center gap-1">
-                                    <TrendingUp className="h-4 w-4 text-green-600" />
-                                    {displayLabel}
-                                </p>
-                                <p className="text-3xl font-extrabold text-gray-900 mt-2">
-                                    {loading ? <Loader2 className="h-6 w-6 animate-spin text-gray-400" /> : formatCurrency(grandTotal)}
-                                </p>
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
+            {/* --- TABS FOR VIEWS --- */}
+            <Tabs defaultValue="dashboard" className="w-full">
+                <TabsList className="grid w-full max-w-[400px] grid-cols-2">
+                    <TabsTrigger value="dashboard">Dashboard View</TabsTrigger>
+                    <TabsTrigger value="data">Data List</TabsTrigger>
+                </TabsList>
 
-                {/* 2. Telecaller Breakdown Card */}
-                <Card className="shadow-sm border-gray-200 md:col-span-2">
-                    <CardHeader className="py-4 border-b border-gray-100 bg-gray-50/50">
-                        <CardTitle className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                            <Users className="h-4 w-4 text-indigo-600"/>
-                            Telecaller Performance (Ranked)
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                        <div className="max-h-[150px] overflow-y-auto">
-                            {loading ? (
-                                <div className="p-4 text-center text-xs text-gray-400">Loading stats...</div>
-                            ) : telecallerStats.length === 0 ? (
-                                <div className="p-4 text-center text-xs text-gray-400">No data available</div>
-                            ) : (
-                                <Table>
-                                    <TableBody>
-                                        {telecallerStats.map((stat, idx) => (
-                                            <TableRow key={stat.id} className="border-b-0 hover:bg-gray-50">
-                                                <TableCell className="py-2 text-xs font-medium text-gray-500 w-[50px]">
-                                                    #{idx + 1}
-                                                </TableCell>
-                                                <TableCell className="py-2 text-sm font-medium text-gray-800">
-                                                    {stat.name}
-                                                </TableCell>
-                                                <TableCell className="py-2 text-sm font-bold text-green-700 text-right">
-                                                    {formatCurrency(stat.amount)}
-                                                </TableCell>
-                                            </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
-                            )}
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
+                {/* --- VIEW 1: DASHBOARD --- */}
+                <TabsContent value="dashboard" className="space-y-6 mt-4">
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+                        
+                        {/* LEFT COL: Total & Leaderboard */}
+                        <div className="md:col-span-4 space-y-6">
+                            {/* Total Card */}
+                            <Card className="bg-gradient-to-br from-green-50 to-white border-green-100">
+                                <CardContent className="p-6">
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <p className="text-green-700 font-medium text-sm flex items-center gap-1">
+                                                {selectedAgentId && <Badge variant="outline" className="mr-2 bg-white text-black cursor-pointer hover:bg-slate-100" onClick={() => setSelectedAgentId(null)}>Clear Filter</Badge>}
+                                                {displayLabel}
+                                            </p>
+                                            <h2 className="text-3xl font-bold text-slate-900 mt-2">{formatCurrency(grandTotal)}</h2>
+                                        </div>
+                                        <div className="p-2 bg-green-100 rounded-full">
+                                            <TrendingUp className="h-6 w-6 text-green-700" />
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
 
-            {/* Data Table */}
-            <Card className="shadow-lg border-gray-200">
-                <CardHeader>
-                    <CardTitle className="text-lg flex items-center justify-between">
-                        <span>Transactions ({filteredData.length})</span>
-                    </CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                    {loading ? (
-                        <div className="p-10 text-center text-gray-500">
-                            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-3 text-indigo-500" />
-                            Loading data...
+                            {/* Leaderboard */}
+                            <Card className="h-[400px] flex flex-col">
+                                <CardHeader className="py-4 bg-slate-50 border-b">
+                                    <CardTitle className="text-base flex items-center gap-2">
+                                        <Trophy className="h-4 w-4 text-yellow-600" /> Top Performers
+                                    </CardTitle>
+                                    <CardDescription>Click a name to filter dashboard</CardDescription>
+                                </CardHeader>
+                                <div className="flex-1 overflow-y-auto p-2">
+                                    {telecallerStats.map((stat, idx) => (
+                                        <div 
+                                            key={stat.id} 
+                                            onClick={() => setSelectedAgentId(stat.id === selectedAgentId ? null : stat.id)}
+                                            className={`flex items-center justify-between p-3 rounded-lg mb-1 cursor-pointer transition-all ${selectedAgentId === stat.id ? 'bg-green-100 border border-green-200' : 'hover:bg-slate-50 border border-transparent'}`}
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-6 flex justify-center">{getRankIcon(idx)}</div>
+                                                <div className="text-sm font-medium text-slate-700">{stat.name}</div>
+                                            </div>
+                                            <div className="text-sm font-bold text-slate-900">{formatCurrency(stat.amount)}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </Card>
                         </div>
-                    ) : filteredData.length === 0 ? (
-                        <div className="p-16 text-center text-gray-500">
-                            <Filter className="h-10 w-10 mx-auto text-gray-300 mb-3" />
-                            <p className="text-lg font-medium">No records found</p>
-                            <p className="text-sm">Try adjusting your search or date filters.</p>
+
+                        {/* RIGHT COL: Charts */}
+                        <div className="md:col-span-8 space-y-6">
+                            {/* Bank Distribution Chart */}
+                            <Card className="h-[520px]">
+                                <CardHeader>
+                                    <CardTitle>Bank-wise Disbursement</CardTitle>
+                                </CardHeader>
+                                <CardContent className="h-[450px]">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={bankChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                            <XAxis dataKey="name" fontSize={12} tickLine={false} axisLine={false} />
+                                            <YAxis fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `₹${value/1000}k`} />
+                                            <RechartsTooltip formatter={(value: number) => formatCurrency(value)} cursor={{ fill: '#f1f5f9' }} />
+                                            <Bar dataKey="value" fill="#16a34a" radius={[4, 4, 0, 0]}>
+                                                {bankChartData.map((entry, index) => (
+                                                    <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#16a34a' : '#15803d'} />
+                                                ))}
+                                            </Bar>
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </CardContent>
+                            </Card>
                         </div>
-                    ) : (
-                        <div className="overflow-x-auto">
+                    </div>
+                </TabsContent>
+
+                {/* --- VIEW 2: DATA LIST --- */}
+                <TabsContent value="data" className="mt-4">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="text-base flex justify-between">
+                                <span>Detailed Transactions ({filteredData.length})</span>
+                                {selectedAgentId && <Button variant="ghost" size="sm" onClick={() => setSelectedAgentId(null)} className="text-red-500">Clear Agent Filter</Button>}
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-0">
                             <Table>
-                                <TableHeader className="bg-gray-50">
+                                <TableHeader className="bg-slate-50">
                                     <TableRow>
-                                        <TableHead className="w-[50px] font-bold">#</TableHead>
-                                        <TableHead className="font-bold">App No.</TableHead>
-                                        <TableHead className="font-bold">Telecaller</TableHead>
-                                        <TableHead className="font-bold">Customer</TableHead>
-                                        <TableHead className="font-bold">Disbursed On</TableHead>
-                                        <TableHead className="font-bold">Bank</TableHead>
-                                        <TableHead className="text-right font-bold">Amount</TableHead>
-                                        <TableHead className="w-[50px] text-center">Action</TableHead>
+                                        <TableHead>#</TableHead>
+                                        <TableHead>App No</TableHead>
+                                        <TableHead>Telecaller</TableHead>
+                                        <TableHead>Customer</TableHead>
+                                        <TableHead>Date</TableHead>
+                                        <TableHead>Bank</TableHead>
+                                        <TableHead className="text-right">Amount</TableHead>
+                                        <TableHead className="text-center">Action</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {filteredData.map((item, index) => (
-                                        <TableRow key={item.id} className="hover:bg-gray-50">
-                                            <TableCell className="text-gray-500 text-xs">{index + 1}</TableCell>
-                                            <TableCell className="font-mono text-xs text-gray-600">{item.application_number || '-'}</TableCell>
-                                            <TableCell>
-                                                <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 font-medium border-0">
-                                                    {userMap[item.assigned_to] || 'Unknown'}
-                                                </Badge>
-                                            </TableCell>
-                                            <TableCell>
-                                                <div className="flex flex-col">
-                                                    <span className="font-medium text-gray-900">{item.name}</span>
-                                                    {item.city && (
-                                                        <span className="text-[10px] text-gray-500 flex items-center gap-1">
-                                                            <MapPin className="h-3 w-3" /> {item.city}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </TableCell>
-                                            <TableCell className="text-sm text-gray-600">{formatDate(item.disbursed_at)}</TableCell>
-                                            <TableCell>
-                                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                                                    {item.bank_name || 'N/A'}
-                                                </span>
-                                            </TableCell>
-                                            <TableCell className="text-right font-bold text-green-700">
-                                                {formatCurrency(item.disbursed_amount)}
-                                            </TableCell>
+                                        <TableRow key={item.id}>
+                                            <TableCell className="text-xs text-slate-500">{index+1}</TableCell>
+                                            <TableCell className="text-xs font-mono">{item.application_number}</TableCell>
+                                            <TableCell><Badge variant="outline" className="font-normal">{userMap[item.assigned_to]}</Badge></TableCell>
+                                            <TableCell className="font-medium text-sm">{item.name}</TableCell>
+                                            <TableCell className="text-sm text-slate-500">{formatDate(item.disbursed_at)}</TableCell>
+                                            <TableCell>{item.bank_name}</TableCell>
+                                            <TableCell className="text-right font-bold text-green-700">{formatCurrency(item.disbursed_amount)}</TableCell>
                                             <TableCell className="text-center">
-                                                <Button 
-                                                    variant="ghost" 
-                                                    size="sm" 
-                                                    className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50"
-                                                    onClick={() => setDeleteId(item.id)}
-                                                >
+                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50" onClick={() => setDeleteId(item.id)}>
                                                     <Trash2 className="h-4 w-4" />
                                                 </Button>
                                             </TableCell>
                                         </TableRow>
                                     ))}
+                                    {filteredData.length === 0 && <TableRow><TableCell colSpan={8} className="text-center p-8 text-slate-500">No records found.</TableCell></TableRow>}
                                 </TableBody>
                             </Table>
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+            </Tabs>
 
-            {/* DELETE CONFIRMATION DIALOG */}
+            {/* DELETE ALERT (Same as before) */}
             <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>Delete Record?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                            This will remove the disbursement status from this lead.
-                        </AlertDialogDescription>
+                        <AlertDialogDescription>This removes the disbursement status. Are you sure?</AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleDelete} disabled={isDeleting} className="bg-red-600 hover:bg-red-700">
-                            {isDeleting ? "Deleting..." : "Delete"}
-                        </AlertDialogAction>
+                        <AlertDialogAction onClick={handleDelete} disabled={isDeleting} className="bg-red-600">Delete</AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
