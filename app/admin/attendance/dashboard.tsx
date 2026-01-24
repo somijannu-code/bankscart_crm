@@ -56,7 +56,7 @@ type ActivityItem = {
   location?: any;
 };
 
-const COLORS = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6'];
+const COLORS = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6'];
 
 // --- MAIN COMPONENT ---
 export function AdminAttendanceDashboard() {
@@ -159,6 +159,7 @@ export function AdminAttendanceDashboard() {
     if (!data) return null;
     try {
       const loc = typeof data === 'string' ? JSON.parse(data) : data;
+      // Fixed Template Literals
       if (loc.latitude && loc.longitude) return `https://www.google.com/maps/search/?api=1&query=${loc.latitude},${loc.longitude}`;
       if (loc.coordinates) return `https://www.google.com/maps/search/?api=1&query=${loc.coordinates}`;
     } catch (e) { return null; }
@@ -186,7 +187,6 @@ export function AdminAttendanceDashboard() {
       const matchesDept = departmentFilter === "all" || user.department === departmentFilter;
       if (statusFilter === "all") return matchesSearch && matchesDept;
       
-      // For filtering by status, we check if they have that status TODAY in daily view, or ANY time in monthly
       const userRecords = processedData.filter(a => a.user_id === user.id);
       if (view === 'daily') {
         const record = userRecords.find(r => isSameDay(parseISO(r.date), dateRange.start));
@@ -201,7 +201,7 @@ export function AdminAttendanceDashboard() {
 
   // --- CHART DATA PREP ---
   const chartData = useMemo(() => {
-    // 1. Trend Chart (Last 7 Days or Selected Range)
+    // 1. Trend Chart
     const days = eachDayOfInterval({ start: dateRange.start, end: dateRange.end });
     const trend = days.map(day => {
       const dayStr = format(day, "yyyy-MM-dd");
@@ -212,7 +212,7 @@ export function AdminAttendanceDashboard() {
         late: records.filter(r => r.status === 'late').length,
         absent: users.length - records.length
       };
-    }).slice(-14); // Limit to last 14 days for visual clarity if range is huge
+    }).slice(-14);
 
     // 2. Dept Chart
     const deptStats: any = {};
@@ -229,11 +229,10 @@ export function AdminAttendanceDashboard() {
   // --- STATS ---
   const stats = useMemo(() => {
     if (view === 'monthly') {
-       // Monthly Stats
        return {
          present: processedData.filter(r => r.status === 'present').length,
          late: processedData.filter(r => r.status === 'late').length,
-         absent: (users.length * 30) - processedData.length // Rough est
+         absent: (users.length * 30) - processedData.length 
        };
     }
     const dailyRecords = processedData.filter(r => isSameDay(parseISO(r.date), dateRange.start));
@@ -256,8 +255,56 @@ export function AdminAttendanceDashboard() {
   };
 
   const handleExport = () => {
-    // ... (Existing export logic remains same for brevity, can paste previous export logic here)
-    alert("Exporting CSV...");
+    setIsExporting(true);
+    try {
+      const headers = view === 'daily' 
+        ? ["Employee", "Department", "Date", "Status", "Check In", "Check Out", "Hours", "Overtime"]
+        : ["Employee", "Department", "Month", "Days Present", "Lates", "Total Hours", "Avg Hours/Day"];
+
+      const rows = filteredUsers.map(user => {
+        const userRecords = processedData.filter(a => a.user_id === user.id);
+        
+        if (view === 'daily') {
+          const record = userRecords.find(r => isSameDay(parseISO(r.date), dateRange.start));
+          return [
+            user.full_name,
+            user.department,
+            format(dateRange.start, "yyyy-MM-dd"),
+            record ? record.status : "absent",
+            record?.check_in ? format(new Date(record.check_in), "HH:mm") : "-",
+            record?.check_out ? format(new Date(record.check_out), "HH:mm") : "-",
+            record?.total_hours || "0",
+            record?.overtime_hours || "0"
+          ];
+        } else {
+          const presentCount = userRecords.filter(r => r.status !== 'absent').length;
+          const lateCount = userRecords.filter(r => r.status === 'late').length;
+          const totalHrs = userRecords.reduce((sum, r) => sum + (Number(r.total_hours) || 0), 0);
+          const avgHrs = presentCount > 0 ? (totalHrs / presentCount).toFixed(1) : "0";
+          
+          return [
+            user.full_name,
+            user.department,
+            format(dateRange.start, "MMMM yyyy"),
+            presentCount,
+            lateCount,
+            totalHrs.toFixed(1),
+            avgHrs
+          ];
+        }
+      });
+
+      const csvContent = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `attendance_${view}_${format(dateRange.start, "yyyy-MM-dd")}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (e) { console.error(e); } 
+    finally { setIsExporting(false); }
   };
 
   return (
@@ -287,7 +334,7 @@ export function AdminAttendanceDashboard() {
           </Popover>
 
           <div className="flex items-center bg-white rounded-md border shadow-sm">
-            <Button variant="ghost" size="icon" onClick={() => navigate('prev')}><</Button>
+            <Button variant="ghost" size="icon" onClick={() => navigate('prev')}><span className="sr-only">Prev</span>&lt;</Button>
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" className="w-44 font-medium justify-start px-3">
@@ -299,7 +346,7 @@ export function AdminAttendanceDashboard() {
                 <Calendar mode="single" selected={dateRange.start} onSelect={(d) => d && setDateRange(view === 'daily' ? {start: d, end: d} : {start: startOfMonth(d), end: endOfMonth(d)})} />
               </PopoverContent>
             </Popover>
-            <Button variant="ghost" size="icon" onClick={() => navigate('next')}>></Button>
+            <Button variant="ghost" size="icon" onClick={() => navigate('next')}><span className="sr-only">Next</span>&gt;</Button>
           </div>
 
           <Button variant="outline" onClick={handleExport} disabled={isExporting} className="bg-white">
@@ -316,16 +363,16 @@ export function AdminAttendanceDashboard() {
              <TabsTrigger value="analytics" className="gap-2"><BarChart3 className="h-4 w-4"/> Analytics</TabsTrigger>
            </TabsList>
            
-           {/* VIEW TOGGLE (Only relevant for Roster) */}
+           {/* VIEW TOGGLE */}
            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
-              <Button variant={view === 'daily' ? 'white' : 'ghost'} size="sm" onClick={() => setView('daily')} className={`text-xs ${view==='daily' ? 'shadow-sm' : ''}`}>Daily</Button>
-              <Button variant={view === 'monthly' ? 'white' : 'ghost'} size="sm" onClick={() => setView('monthly')} className={`text-xs ${view==='monthly' ? 'shadow-sm' : ''}`}>Monthly</Button>
+              <Button variant={view === 'daily' ? 'default' : 'ghost'} size="sm" onClick={() => setView('daily')} className="text-xs h-7">Daily</Button>
+              <Button variant={view === 'monthly' ? 'default' : 'ghost'} size="sm" onClick={() => setView('monthly')} className="text-xs h-7">Monthly</Button>
            </div>
         </div>
 
         {/* --- TAB 1: ROSTER VIEW --- */}
         <TabsContent value="roster" className="space-y-6">
-          {/* KPI CARDS */}
+          {/* KPI CARDS (Only daily) */}
           {view === 'daily' && (
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <Card className="border-l-4 border-l-blue-500 shadow-sm">
