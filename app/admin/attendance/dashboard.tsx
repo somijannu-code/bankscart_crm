@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { format, startOfMonth, endOfMonth, subMonths, addMonths, parseISO, isSameDay, setHours, setMinutes, isAfter, eachDayOfInterval, getDay, startOfWeek, endOfWeek, isSameMonth, addDays } from "date-fns";
+import { format, startOfMonth, endOfMonth, subMonths, addMonths, parseISO, isSameDay, setHours, setMinutes, isAfter, eachDayOfInterval, differenceInMinutes } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
   Calendar as CalendarIcon, Users, Clock, CheckCircle, XCircle, AlertCircle, 
   MapPin, Coffee, TrendingUp, Activity, UserCheck, 
-  FileSpreadsheet, Search, Settings, ChevronRight, BarChart3, List, Edit2, Save, X
+  FileSpreadsheet, Search, Settings, ChevronRight, BarChart3, List, Edit2, Save, X, stickyNote, MessageSquare
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -19,9 +19,11 @@ import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar } from "@/components/ui/calendar"; 
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { createClient } from "@/lib/supabase/client";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
-import { toast } from "sonner"; // Assuming you have sonner or use-toast
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
+import { toast } from "sonner";
 
 // --- TYPES ---
 type User = {
@@ -46,6 +48,7 @@ type AttendanceRecord = {
   ip_check_in?: string;
   on_break?: boolean;
   updated_at?: string;
+  admin_note?: string; // NEW: Audit Note
   user?: User;
 };
 
@@ -92,6 +95,7 @@ export function AdminAttendanceDashboard() {
   const [editingRecord, setEditingRecord] = useState<AttendanceRecord | null>(null);
   const [editCheckIn, setEditCheckIn] = useState("");
   const [editCheckOut, setEditCheckOut] = useState("");
+  const [editNote, setEditNote] = useState("");
 
   // --- REAL-TIME SUBSCRIPTION ---
   useEffect(() => {
@@ -162,6 +166,37 @@ export function AdminAttendanceDashboard() {
     return "present";
   };
 
+  const calculateLateMinutes = (checkInTime: string) => {
+    const time = parseISO(checkInTime);
+    const checkInMinutes = time.getHours() * 60 + time.getMinutes();
+    const thresholdMinutes = lateThresholdHour * 60 + lateThresholdMinute;
+    return Math.max(0, checkInMinutes - thresholdMinutes);
+  };
+
+  const getReliabilityScore = (userRecords: AttendanceRecord[]) => {
+    if (userRecords.length === 0) return 0;
+    const totalDays = 30; // Assuming monthly calc
+    const present = userRecords.filter(r => r.status !== 'absent').length;
+    const lates = userRecords.filter(r => r.status === 'late').length;
+    
+    // Simple Formula: (Present Days * 3) - (Lates * 1) / (Total Days * 3) * 100
+    // Max Score = 100. Late penalizes the score slightly. Absent penalizes heavily.
+    const rawScore = ((present * 3) - (lates * 1)); 
+    const maxPossible = totalDays * 3; // Should ideally be working days
+    // Normalizing roughly to 100 based on records length if < 30
+    const basis = Math.max(userRecords.length, 5) * 3; 
+    
+    let score = (rawScore / basis) * 100;
+    return Math.min(100, Math.max(0, Math.round(score)));
+  };
+
+  const getScoreColor = (score: number) => {
+    if (score >= 90) return "text-emerald-600 bg-emerald-50 border-emerald-200";
+    if (score >= 75) return "text-blue-600 bg-blue-50 border-blue-200";
+    if (score >= 50) return "text-yellow-600 bg-yellow-50 border-yellow-200";
+    return "text-red-600 bg-red-50 border-red-200";
+  };
+
   const getLocationUrl = (data: any) => {
     if (!data) return null;
     try {
@@ -205,7 +240,7 @@ export function AdminAttendanceDashboard() {
 
   const departments = Array.from(new Set(users.map(u => u.department).filter(Boolean)));
 
-  // --- CHART DATA PREP ---
+  // --- CHART DATA ---
   const chartData = useMemo(() => {
     const days = eachDayOfInterval({ start: dateRange.start, end: dateRange.end });
     const trend = days.map(day => {
@@ -227,16 +262,12 @@ export function AdminAttendanceDashboard() {
     });
     const deptPie = Object.values(deptStats);
 
-    // NEW: Top Violators (Late)
     const lateCounts: Record<string, number> = {};
     processedData.filter(r => r.status === 'late').forEach(r => {
         const name = r.user?.full_name || 'Unknown';
         lateCounts[name] = (lateCounts[name] || 0) + 1;
     });
-    const topViolators = Object.entries(lateCounts)
-        .map(([name, count]) => ({ name, count }))
-        .sort((a,b) => b.count - a.count)
-        .slice(0, 5);
+    const topViolators = Object.entries(lateCounts).map(([name, count]) => ({ name, count })).sort((a,b) => b.count - a.count).slice(0, 5);
 
     return { trend, deptPie, topViolators };
   }, [processedData, users.length, dateRange]);
@@ -246,37 +277,33 @@ export function AdminAttendanceDashboard() {
     setEditingRecord(record);
     setEditCheckIn(record.check_in ? format(parseISO(record.check_in), "HH:mm") : "");
     setEditCheckOut(record.check_out ? format(parseISO(record.check_out), "HH:mm") : "");
+    setEditNote(record.admin_note || "");
   };
 
   const saveEdit = async () => {
     if (!editingRecord) return;
     try {
-        const datePart = editingRecord.date; // yyyy-MM-dd
-        
-        const updates: any = {};
+        const datePart = editingRecord.date; 
+        const updates: any = { admin_note: editNote };
         if (editCheckIn) updates.check_in = `${datePart}T${editCheckIn}:00`;
         if (editCheckOut) updates.check_out = `${datePart}T${editCheckOut}:00`;
         
-        // Recalculate duration if both exist
         if (updates.check_in && updates.check_out) {
             const start = new Date(updates.check_in);
             const end = new Date(updates.check_out);
             const diffMs = end.getTime() - start.getTime();
             const diffHours = diffMs / (1000 * 60 * 60);
             updates.total_hours = parseFloat(diffHours.toFixed(2));
-            updates.overtime_hours = Math.max(0, parseFloat((diffHours - 9).toFixed(2))); // Assuming 9h shift
+            updates.overtime_hours = Math.max(0, parseFloat((diffHours - 9).toFixed(2))); 
         }
 
         const { error } = await supabase.from('attendance').update(updates).eq('id', editingRecord.id);
         if (error) throw error;
         
-        loadData(); // Refresh
+        loadData(); 
         setEditingRecord(null);
-        toast("Attendance record updated successfully.");
-    } catch (e) {
-        console.error(e);
-        toast("Failed to update record.");
-    }
+        toast("Record updated.");
+    } catch (e) { console.error(e); toast("Failed to update."); }
   };
 
   // --- STATS ---
@@ -309,18 +336,19 @@ export function AdminAttendanceDashboard() {
 
   const handleExport = () => {
     setIsExporting(true);
-    // ... existing export logic ...
-    setTimeout(() => setIsExporting(false), 1000);
+    try {
+        // ... (Export Logic same as before) ...
+        setTimeout(() => setIsExporting(false), 500); // Simulate
+    } catch (e) { setIsExporting(false); }
   };
 
-  // Helper for Calendar Heatmap
   const getDayStatusColor = (day: Date, userRecords: AttendanceRecord[]) => {
     const dayStr = format(day, 'yyyy-MM-dd');
     const record = userRecords.find(r => r.date === dayStr);
-    if (!record) return 'bg-slate-100 text-slate-300'; // Absent/No Data
-    if (record.status === 'late') return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-    if (record.status === 'present') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-    return 'bg-slate-100 text-slate-400';
+    if (!record) return 'bg-slate-50 text-slate-300 border-slate-100'; 
+    if (record.status === 'late') return 'bg-yellow-50 text-yellow-700 border-yellow-200 font-medium';
+    if (record.status === 'present') return 'bg-emerald-50 text-emerald-700 border-emerald-200 font-medium';
+    return 'bg-slate-50 text-slate-400';
   };
 
   return (
@@ -349,7 +377,7 @@ export function AdminAttendanceDashboard() {
           </Popover>
 
           <div className="flex items-center bg-white rounded-md border shadow-sm">
-            <Button variant="ghost" size="icon" onClick={() => navigate('prev')}><span className="sr-only">Prev</span>&lt;</Button>
+            <Button variant="ghost" size="icon" onClick={() => navigate('prev')}><span className="sr-only">Prev</span><</Button>
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" className="w-44 font-medium justify-start px-3">
@@ -361,7 +389,7 @@ export function AdminAttendanceDashboard() {
                 <Calendar mode="single" selected={dateRange.start} onSelect={(d) => d && setDateRange(view === 'daily' ? {start: d, end: d} : {start: startOfMonth(d), end: endOfMonth(d)})} />
               </PopoverContent>
             </Popover>
-            <Button variant="ghost" size="icon" onClick={() => navigate('next')}><span className="sr-only">Next</span>&gt;</Button>
+            <Button variant="ghost" size="icon" onClick={() => navigate('next')}><span className="sr-only">Next</span>></Button>
           </div>
 
           <Button variant="outline" onClick={handleExport} disabled={isExporting} className="bg-white">
@@ -429,14 +457,15 @@ export function AdminAttendanceDashboard() {
                             <TableHead>Status</TableHead>
                             <TableHead>Check-In</TableHead>
                             <TableHead>Check-Out</TableHead>
-                            <TableHead>Hours</TableHead>
+                            <TableHead>Shift Progress</TableHead>
                             <TableHead>Location</TableHead>
                           </>
                         ) : (
                           <>
-                            <TableHead>Attendance</TableHead>
-                            <TableHead>Avg Hours</TableHead>
-                            <TableHead>Late Count</TableHead>
+                            <TableHead>Reliability Score</TableHead>
+                            <TableHead>Days Present</TableHead>
+                            <TableHead>Lates</TableHead>
+                            <TableHead>Avg Hrs</TableHead>
                             <TableHead>Action</TableHead>
                           </>
                         )}
@@ -454,6 +483,7 @@ export function AdminAttendanceDashboard() {
                           if (view === 'daily') {
                             const record = userRecords.find(r => isSameDay(parseISO(r.date), dateRange.start));
                             const status = record ? record.status : 'absent';
+                            const progress = Math.min(100, (Number(record?.total_hours || 0) / 9) * 100);
                             
                             return (
                               <TableRow key={user.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedUser(user)}>
@@ -462,13 +492,29 @@ export function AdminAttendanceDashboard() {
                                   <div className="text-xs text-slate-500">{user.department}</div>
                                 </TableCell>
                                 <TableCell>
-                                  <Badge variant="outline" className={status === 'late' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : status === 'present' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}>
-                                    {status === 'late' ? 'Late' : status === 'present' ? 'Present' : 'Absent'}
-                                  </Badge>
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger>
+                                        <Badge variant="outline" className={status === 'late' ? 'bg-yellow-50 text-yellow-700 border-yellow-200 cursor-help' : status === 'present' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}>
+                                          {status === 'late' ? 'Late' : status === 'present' ? 'Present' : 'Absent'}
+                                        </Badge>
+                                      </TooltipTrigger>
+                                      {status === 'late' && record?.check_in && (
+                                        <TooltipContent><p>Late by {calculateLateMinutes(record.check_in)} mins</p></TooltipContent>
+                                      )}
+                                    </Tooltip>
+                                  </TooltipProvider>
                                 </TableCell>
                                 <TableCell className="font-mono text-xs">{record?.check_in ? format(new Date(record.check_in), "hh:mm a") : "-"}</TableCell>
                                 <TableCell className="font-mono text-xs">{record?.check_out ? format(new Date(record.check_out), "hh:mm a") : "-"}</TableCell>
-                                <TableCell className="font-mono text-xs">{record?.total_hours || "-"}</TableCell>
+                                <TableCell>
+                                   <div className="flex items-center gap-2">
+                                      <div className="w-24 bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                                        <div className={`h-full rounded-full ${progress >= 100 ? 'bg-green-500' : 'bg-blue-500'}`} style={{ width: `${progress}%` }} />
+                                      </div>
+                                      <span className="text-xs font-mono">{record?.total_hours || 0}h</span>
+                                   </div>
+                                </TableCell>
                                 <TableCell>
                                   {record?.location_check_in ? (
                                     <a href={getLocationUrl(record.location_check_in) || '#'} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-blue-600 hover:underline text-xs" onClick={(e) => e.stopPropagation()}>
@@ -483,6 +529,7 @@ export function AdminAttendanceDashboard() {
                             const lates = userRecords.filter(r => r.status === 'late').length;
                             const totalHrs = userRecords.reduce((acc, r) => acc + (Number(r.total_hours) || 0), 0);
                             const avgHrs = present > 0 ? (totalHrs / present).toFixed(1) : "0";
+                            const score = getReliabilityScore(userRecords);
 
                             return (
                               <TableRow key={user.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedUser(user)}>
@@ -491,13 +538,16 @@ export function AdminAttendanceDashboard() {
                                   <div className="text-xs text-slate-500">{user.department}</div>
                                 </TableCell>
                                 <TableCell>
+                                   <Badge variant="outline" className={`${getScoreColor(score)} font-bold`}>{score}%</Badge>
+                                </TableCell>
+                                <TableCell>
                                   <div className="flex items-center gap-2">
                                     <span className="font-bold text-slate-700">{present}</span>
                                     <span className="text-xs text-slate-400">days</span>
                                   </div>
                                 </TableCell>
-                                <TableCell><span className="font-mono text-sm">{avgHrs}h</span></TableCell>
                                 <TableCell className={lates > 0 ? "text-yellow-600 font-medium" : "text-slate-400"}>{lates} Late</TableCell>
+                                <TableCell><span className="font-mono text-sm">{avgHrs}h</span></TableCell>
                                 <TableCell><Button variant="ghost" size="icon" className="h-8 w-8"><ChevronRight className="h-4 w-4 text-slate-400"/></Button></TableCell>
                               </TableRow>
                             )
@@ -596,7 +646,7 @@ export function AdminAttendanceDashboard() {
         </TabsContent>
       </Tabs>
 
-      {/* --- EMPLOYEE MODAL (WITH CALENDAR) --- */}
+      {/* --- EMPLOYEE MODAL (WITH CALENDAR & EDIT) --- */}
       <Dialog open={!!selectedUser} onOpenChange={(open) => !open && setSelectedUser(null)}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           {selectedUser && (() => {
@@ -604,8 +654,6 @@ export function AdminAttendanceDashboard() {
              const presentCount = userRecords.filter(r => r.status !== 'absent').length;
              const lateCount = userRecords.filter(r => r.status === 'late').length;
              const totalHrs = userRecords.reduce((acc, r) => acc + (Number(r.total_hours) || 0), 0);
-
-             // Generate days for the month view
              const monthStart = startOfMonth(dateRange.start);
              const monthEnd = endOfMonth(dateRange.start);
              const monthDays = eachDayOfInterval({ start: monthStart, end: monthEnd });
@@ -625,7 +673,6 @@ export function AdminAttendanceDashboard() {
                  </DialogHeader>
                  
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {/* LEFT: STATS & LIST */}
                     <div className="col-span-1 space-y-6">
                        <div className="grid grid-cols-2 gap-3">
                           <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-center">
@@ -647,14 +694,16 @@ export function AdminAttendanceDashboard() {
                                       <div className="font-medium">{format(parseISO(r.date), "MMM dd")}</div>
                                       <div className="text-xs text-slate-400">{r.check_in ? format(parseISO(r.check_in), "hh:mm a") : "-"}</div>
                                    </div>
-                                   <Badge variant="outline" className={r.status === 'late' ? "text-yellow-600 bg-yellow-50" : "text-green-600 bg-green-50"}>{r.status}</Badge>
+                                   <div className="flex flex-col items-end gap-1">
+                                      <Badge variant="outline" className={r.status === 'late' ? "text-yellow-600 bg-yellow-50" : "text-green-600 bg-green-50"}>{r.status}</Badge>
+                                      {r.admin_note && <div className="text-[9px] text-slate-400 flex items-center gap-1"><MessageSquare className="w-2 h-2"/> Note</div>}
+                                   </div>
                                 </div>
                              ))}
                           </div>
                        </div>
                     </div>
 
-                    {/* RIGHT: VISUAL CALENDAR */}
                     <div className="col-span-2">
                        <div className="border rounded-xl p-4 shadow-sm">
                           <div className="font-semibold mb-4 text-center">{format(monthStart, "MMMM yyyy")}</div>
@@ -662,25 +711,22 @@ export function AdminAttendanceDashboard() {
                              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div key={d}>{d}</div>)}
                           </div>
                           <div className="grid grid-cols-7 gap-2">
-                             {/* Empty slots for start of month */}
                              {Array.from({ length: getDay(monthStart) }).map((_, i) => <div key={`empty-${i}`} />)}
-                             
                              {monthDays.map(day => {
-                                const statusColor = getDayStatusColor(day, userRecords);
-                                const dayStr = format(day, "yyyy-MM-dd");
+                                const dayStr = format(day, 'yyyy-MM-dd');
                                 const record = userRecords.find(r => r.date === dayStr);
+                                const color = record ? (record.status === 'late' ? 'bg-yellow-100 text-yellow-700 border-yellow-200' : 'bg-emerald-100 text-emerald-700 border-emerald-200') : 'bg-slate-50 text-slate-300';
                                 
                                 return (
                                    <div 
                                      key={dayStr} 
                                      onClick={() => record && handleEdit(record)}
-                                     className={`h-20 border rounded-lg p-1 flex flex-col justify-between cursor-pointer hover:ring-2 ring-blue-200 transition-all ${statusColor}`}
+                                     className={`h-16 border rounded-lg p-1 flex flex-col justify-between cursor-pointer hover:ring-2 ring-blue-200 transition-all ${color}`}
                                    >
                                       <div className="text-right font-bold text-xs">{format(day, "d")}</div>
                                       {record && (
-                                         <div className="text-[10px] leading-tight font-mono text-center">
+                                         <div className="text-[9px] leading-tight font-mono text-center">
                                             <div>{record.check_in ? format(parseISO(record.check_in), "HH:mm") : ""}</div>
-                                            <div className="opacity-50 text-[9px]">{record.total_hours ? `${record.total_hours}h` : ""}</div>
                                          </div>
                                       )}
                                    </div>
@@ -701,7 +747,7 @@ export function AdminAttendanceDashboard() {
          <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
                <DialogTitle>Edit Attendance</DialogTitle>
-               <DialogDescription>Manually correct time for {editingRecord && format(parseISO(editingRecord.date), "MMM dd, yyyy")}</DialogDescription>
+               <DialogDescription>Correction for {editingRecord && format(parseISO(editingRecord.date), "MMM dd, yyyy")}</DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
                <div className="grid grid-cols-4 items-center gap-4">
@@ -711,6 +757,10 @@ export function AdminAttendanceDashboard() {
                <div className="grid grid-cols-4 items-center gap-4">
                   <Label htmlFor="out" className="text-right">Check Out</Label>
                   <Input id="out" type="time" value={editCheckOut} onChange={e => setEditCheckOut(e.target.value)} className="col-span-3" />
+               </div>
+               <div className="grid grid-cols-4 items-start gap-4">
+                  <Label htmlFor="note" className="text-right mt-2">Reason</Label>
+                  <Textarea id="note" value={editNote} onChange={e => setEditNote(e.target.value)} placeholder="e.g. System glitch, forgot ID..." className="col-span-3" />
                </div>
             </div>
             <DialogFooter>
