@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { 
   Calendar as CalendarIcon, Users, Clock, CheckCircle, XCircle, AlertCircle, 
   MapPin, Wifi, Coffee, TrendingUp, Activity, UserCheck, LogOut, 
-  FileSpreadsheet, ExternalLink, Search, Filter 
+  FileSpreadsheet, Search 
 } from "lucide-react";
 import { 
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue 
@@ -58,7 +58,7 @@ type ActivityItem = {
   location?: any;
 };
 
-// --- MAIN COMPONENT (Named Export) ---
+// --- MAIN COMPONENT ---
 export function AdminAttendanceDashboard() {
   const supabase = createClient();
 
@@ -159,7 +159,6 @@ export function AdminAttendanceDashboard() {
     const checkInTime = parseISO(record.check_in);
     const hours = checkInTime.getHours();
     const minutes = checkInTime.getMinutes();
-    // Late if after 9:30 AM
     if (hours > 9 || (hours === 9 && minutes > 30)) return "late";
     return "present";
   };
@@ -168,11 +167,12 @@ export function AdminAttendanceDashboard() {
     if (!data) return null;
     try {
       const loc = typeof data === 'string' ? JSON.parse(data) : data;
+      // FIX: Corrected Template Literals for Google Maps
       if (loc.latitude && loc.longitude) {
-        return `https://www.google.com/maps/search/?api=1&query=${loc.latitude},${loc.longitude}`;
+        return `https://www.google.com/maps?q=${loc.latitude},${loc.longitude}`;
       }
       if (loc.coordinates) {
-         return `https://www.google.com/maps/search/?api=1&query=${loc.coordinates}`;
+         return `https://www.google.com/maps?q=${loc.coordinates}`;
       }
     } catch (e) { return null; }
     return null;
@@ -295,7 +295,7 @@ export function AdminAttendanceDashboard() {
           </Select>
 
           <div className="flex items-center bg-white rounded-md border shadow-sm">
-            <Button variant="ghost" size="icon" onClick={() => navigate('prev')}><</Button>
+            <Button variant="ghost" size="icon" onClick={() => navigate('prev')}>&lt;</Button>
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" className="w-40 font-medium">
@@ -307,7 +307,7 @@ export function AdminAttendanceDashboard() {
                 <Calendar mode="single" selected={dateRange.start} onSelect={(d) => d && setDateRange(view === 'daily' ? {start: d, end: d} : {start: startOfMonth(d), end: endOfMonth(d)})} />
               </PopoverContent>
             </Popover>
-            <Button variant="ghost" size="icon" onClick={() => navigate('next')}>></Button>
+            <Button variant="ghost" size="icon" onClick={() => navigate('next')}>&gt;</Button>
           </div>
 
           <Button variant="outline" onClick={handleExport} disabled={isExporting} className="bg-white">
