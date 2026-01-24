@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { 
   Loader2, IndianRupee, TrendingUp, Search, RefreshCw, X, Users, Trophy, Medal,
   Calculator, Building2, Target, PieChart as PieIcon, ArrowUpRight, Wallet, Pencil, Zap, Printer, Gauge,
-  Lightbulb, Crown, Calendar, Trash2
+  Lightbulb, Crown, Calendar, Trash2 // <--- ADDED TRASH2 HERE
 } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -125,14 +125,13 @@ export default function TelecallerDisbursementReport() {
             const wD = String(lastWeek.getDate()).padStart(2, '0');
             start = `${lastWeek.getFullYear()}-${wM}-${wD}`;
         } else if (type === 'lastMonth') {
-            // Logic for Monthly view switch
             setFilterMode('monthly');
-            let lm = today.getMonth(); // 0-11, so if current is Jan (0), lm is 0. Wait, previous month.
+            let lm = today.getMonth(); 
             let ly = today.getFullYear();
             if(lm === 0) { lm = 12; ly = ly - 1; }
             setSelectedMonth(String(lm).padStart(2, '0'));
             setSelectedYear(String(ly));
-            return; // Exit as we switched mode
+            return; 
         }
 
         setFilterMode('custom');
