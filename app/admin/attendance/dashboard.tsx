@@ -120,7 +120,9 @@ export function AdminAttendanceDashboard() {
   const [newOfficeLat, setNewOfficeLat] = useState("");
   const [newOfficeLng, setNewOfficeLng] = useState("");
 
+  // Modals State
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [showSettingsModal, setShowSettingsModal] = useState(false); // NEW: Explicit state for Settings
   const [userMonthData, setUserMonthData] = useState<AttendanceRecord[]>([]);
   const [loadingModal, setLoadingModal] = useState(false);
 
@@ -492,45 +494,11 @@ export function AdminAttendanceDashboard() {
         </div>
         
         <div className="flex flex-wrap gap-2 items-center">
-          {/* SETTINGS POPOVER (Fixed Z-Index) */}
-          <Popover>
-            <PopoverTrigger asChild><Button variant="outline" size="icon"><Settings className="h-4 w-4 text-slate-600"/></Button></PopoverTrigger>
-            <PopoverContent className="w-96 z-[999] bg-white shadow-xl" sideOffset={8}> 
-              <div className="space-y-6">
-                <div>
-                  <h4 className="font-medium mb-2">Late Threshold</h4>
-                  <div className="flex justify-between items-center bg-slate-50 p-2 rounded border">
-                    <span className="text-sm font-bold">{lateThresholdHour}:{lateThresholdMinute.toString().padStart(2, '0')} AM</span>
-                    <div className="flex gap-2">
-                       <Input type="number" className="w-12 h-8" value={lateThresholdHour} onChange={e=>setLateThresholdHour(Number(e.target.value))} />
-                       <Input type="number" className="w-12 h-8" value={lateThresholdMinute} onChange={e=>setLateThresholdMinute(Number(e.target.value))} />
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="font-medium mb-2">Office Locations</h4>
-                  <div className="space-y-2 max-h-32 overflow-y-auto mb-2">
-                    {offices.map(office => (
-                      <div key={office.id} className="flex justify-between items-center text-sm p-2 bg-slate-50 rounded border">
-                        <div>
-                          <p className="font-medium">{office.name}</p>
-                          <p className="text-[10px] text-slate-500">{office.lat.toFixed(4)}, {office.lng.toFixed(4)}</p>
-                        </div>
-                        <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500" onClick={() => removeOffice(office.id)}><Trash2 className="h-3 w-3"/></Button>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <Input placeholder="Name" className="col-span-3 h-8 text-xs" value={newOfficeName} onChange={e => setNewOfficeName(e.target.value)} />
-                    <Input placeholder="Lat" className="h-8 text-xs" value={newOfficeLat} onChange={e => setNewOfficeLat(e.target.value)} />
-                    <Input placeholder="Lng" className="h-8 text-xs" value={newOfficeLng} onChange={e => setNewOfficeLng(e.target.value)} />
-                    <Button size="sm" className="h-8 bg-black text-white" onClick={addOffice}><Plus className="h-3 w-3"/></Button>
-                  </div>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
+          
+          {/* SETTINGS BUTTON (Explicit OnClick) */}
+          <Button variant="outline" size="icon" onClick={() => setShowSettingsModal(true)}>
+             <Settings className="h-4 w-4 text-slate-600"/>
+          </Button>
 
           <div className="flex items-center bg-white rounded-md border shadow-sm">
             <Button variant="ghost" size="icon" onClick={() => navigate('prev')}><span className="sr-only">Prev</span>{"<"}</Button>
@@ -813,6 +781,63 @@ export function AdminAttendanceDashboard() {
         </TabsContent>
       </Tabs>
 
+      {/* --- SETTINGS DIALOG (Fixed from Popover) --- */}
+      <Dialog open={showSettingsModal} onOpenChange={setShowSettingsModal}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Configuration</DialogTitle>
+            <DialogDescription>Manage attendance rules and office locations.</DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6 py-4">
+            {/* LATE THRESHOLD */}
+            <div>
+              <div className="flex justify-between mb-3">
+                <Label className="text-base">Late Threshold</Label>
+                <span className="font-mono text-sm bg-slate-100 px-2 py-1 rounded">{lateThresholdHour}:{lateThresholdMinute.toString().padStart(2, '0')} AM</span>
+              </div>
+              <div className="flex gap-4 items-center">
+                 <div className="flex-1 space-y-1">
+                    <span className="text-xs text-slate-500">Hour</span>
+                    <Slider value={[lateThresholdHour]} min={7} max={11} step={1} onValueChange={(v) => setLateThresholdHour(v[0])} />
+                 </div>
+                 <div className="flex-1 space-y-1">
+                    <span className="text-xs text-slate-500">Minute</span>
+                    <Slider value={[lateThresholdMinute]} min={0} max={59} step={5} onValueChange={(v) => setLateThresholdMinute(v[0])} />
+                 </div>
+              </div>
+            </div>
+
+            {/* OFFICE LOCATIONS */}
+            <div className="border-t pt-4">
+              <Label className="text-base mb-3 block">Office Locations</Label>
+              <div className="space-y-2 mb-4 max-h-[150px] overflow-y-auto border rounded-md p-2 bg-slate-50">
+                {offices.map(office => (
+                  <div key={office.id} className="flex justify-between items-center text-sm bg-white p-2 rounded shadow-sm border">
+                    <div>
+                      <p className="font-medium text-slate-800">{office.name}</p>
+                      <p className="text-[10px] text-slate-500 font-mono">{office.lat.toFixed(4)}, {office.lng.toFixed(4)}</p>
+                    </div>
+                    <Button variant="ghost" size="sm" className="h-7 w-7 text-red-500 hover:text-red-700" onClick={() => removeOffice(office.id)}><Trash2 className="h-3 w-3"/></Button>
+                  </div>
+                ))}
+                {offices.length === 0 && <p className="text-xs text-slate-400 text-center py-2">No offices added.</p>}
+              </div>
+              
+              <div className="grid grid-cols-4 gap-2">
+                <Input placeholder="Name" className="col-span-4 h-8 text-xs" value={newOfficeName} onChange={e => setNewOfficeName(e.target.value)} />
+                <Input placeholder="Latitude" className="col-span-2 h-8 text-xs" value={newOfficeLat} onChange={e => setNewOfficeLat(e.target.value)} />
+                <Input placeholder="Longitude" className="col-span-2 h-8 text-xs" value={newOfficeLng} onChange={e => setNewOfficeLng(e.target.value)} />
+                <Button size="sm" className="col-span-4 h-8 mt-1" onClick={addOffice}><Plus className="h-3 w-3 mr-1"/> Add Location</Button>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+             <Button onClick={() => setShowSettingsModal(false)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* --- EMPLOYEE MODAL --- */}
       <Dialog open={!!selectedUser} onOpenChange={(open) => !open && setSelectedUser(null)}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -822,6 +847,7 @@ export function AdminAttendanceDashboard() {
              const lateCount = userRecords.filter(r => r.status === 'late').length;
              const totalHrs = userRecords.reduce((acc, r) => acc + (Number(r.total_hours) || 0), 0);
              
+             // Calendar generation
              const monthStart = startOfMonth(dateRange.start);
              const monthEnd = endOfMonth(dateRange.start);
              const monthDays = eachDayOfInterval({ start: monthStart, end: monthEnd });
