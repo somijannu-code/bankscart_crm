@@ -244,25 +244,6 @@ export function AdminAttendanceDashboard() {
     return Math.max(0, checkInMinutes - thresholdMinutes);
   };
 
-  const getReliabilityScore = (userRecords: AttendanceRecord[]) => {
-    if (userRecords.length === 0) return 0;
-    const present = userRecords.filter(r => r.status !== 'absent').length;
-    const lates = userRecords.filter(r => r.status === 'late').length;
-    
-    // Simple Score: Present is good, Late is slight penalty
-    const rawScore = ((present * 3) - (lates * 1)); 
-    const basis = Math.max(userRecords.length, 5) * 3; 
-    let score = (rawScore / basis) * 100;
-    return Math.min(100, Math.max(0, Math.round(score)));
-  };
-
-  const getScoreColor = (score: number) => {
-    if (score >= 90) return "text-emerald-600 bg-emerald-50 border-emerald-200";
-    if (score >= 75) return "text-blue-600 bg-blue-50 border-blue-200";
-    if (score >= 50) return "text-yellow-600 bg-yellow-50 border-yellow-200";
-    return "text-red-600 bg-red-50 border-red-200";
-  };
-
   const getLocationType = (data: any) => {
     if (!data) return { type: 'unknown', name: 'Unknown', distance: 0 };
     try {
@@ -306,6 +287,23 @@ export function AdminAttendanceDashboard() {
     if (info.type === 'office') return `On-Site (${info.name})`;
     if (info.type === 'remote') return `Remote (${info.distance}km)`;
     return "Unknown Location";
+  };
+
+  const getReliabilityScore = (userRecords: AttendanceRecord[]) => {
+    if (userRecords.length === 0) return 0;
+    const present = userRecords.filter(r => r.status !== 'absent').length;
+    const lates = userRecords.filter(r => r.status === 'late').length;
+    const rawScore = ((present * 3) - (lates * 1)); 
+    const basis = Math.max(userRecords.length, 5) * 3; 
+    let score = (rawScore / basis) * 100;
+    return Math.min(100, Math.max(0, Math.round(score)));
+  };
+
+  const getScoreColor = (score: number) => {
+    if (score >= 90) return "text-emerald-600 bg-emerald-50 border-emerald-200";
+    if (score >= 75) return "text-blue-600 bg-blue-50 border-blue-200";
+    if (score >= 50) return "text-yellow-600 bg-yellow-50 border-yellow-200";
+    return "text-red-600 bg-red-50 border-red-200";
   };
 
   // --- ACTIONS ---
@@ -494,10 +492,10 @@ export function AdminAttendanceDashboard() {
         </div>
         
         <div className="flex flex-wrap gap-2 items-center">
-          {/* SETTINGS POPOVER */}
+          {/* SETTINGS POPOVER (Fixed Z-Index) */}
           <Popover>
             <PopoverTrigger asChild><Button variant="outline" size="icon"><Settings className="h-4 w-4 text-slate-600"/></Button></PopoverTrigger>
-            <PopoverContent className="w-96 z-50"> 
+            <PopoverContent className="w-96 z-[999] bg-white shadow-xl" sideOffset={8}> 
               <div className="space-y-6">
                 <div>
                   <h4 className="font-medium mb-2">Late Threshold</h4>
@@ -815,7 +813,7 @@ export function AdminAttendanceDashboard() {
         </TabsContent>
       </Tabs>
 
-      {/* --- EMPLOYEE MODAL (WITH CALENDAR & EDIT) --- */}
+      {/* --- EMPLOYEE MODAL --- */}
       <Dialog open={!!selectedUser} onOpenChange={(open) => !open && setSelectedUser(null)}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           {selectedUser && (() => {
@@ -824,11 +822,19 @@ export function AdminAttendanceDashboard() {
              const lateCount = userRecords.filter(r => r.status === 'late').length;
              const totalHrs = userRecords.reduce((acc, r) => acc + (Number(r.total_hours) || 0), 0);
              
-             // Calendar generation
              const monthStart = startOfMonth(dateRange.start);
              const monthEnd = endOfMonth(dateRange.start);
              const monthDays = eachDayOfInterval({ start: monthStart, end: monthEnd });
-             const startDayOfWeek = getDay(monthStart); // 0 = Sunday
+             const startDayOfWeek = getDay(monthStart); 
+
+             const getDayStatusColor = (day: Date) => {
+                const dayStr = format(day, 'yyyy-MM-dd');
+                const record = userRecords.find(r => r.date === dayStr);
+                if (!record) return 'bg-slate-50 text-slate-300 border-slate-100'; 
+                if (record.status === 'late') return 'bg-yellow-50 text-yellow-700 border-yellow-200 font-medium';
+                if (record.status === 'present') return 'bg-emerald-50 text-emerald-700 border-emerald-200 font-medium';
+                return 'bg-slate-50 text-slate-400';
+             };
 
              return (
                <>
