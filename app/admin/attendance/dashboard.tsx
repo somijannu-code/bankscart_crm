@@ -244,6 +244,25 @@ export function AdminAttendanceDashboard() {
     return Math.max(0, checkInMinutes - thresholdMinutes);
   };
 
+  const getReliabilityScore = (userRecords: AttendanceRecord[]) => {
+    if (userRecords.length === 0) return 0;
+    const present = userRecords.filter(r => r.status !== 'absent').length;
+    const lates = userRecords.filter(r => r.status === 'late').length;
+    
+    // Simple Score: Present is good, Late is slight penalty
+    const rawScore = ((present * 3) - (lates * 1)); 
+    const basis = Math.max(userRecords.length, 5) * 3; 
+    let score = (rawScore / basis) * 100;
+    return Math.min(100, Math.max(0, Math.round(score)));
+  };
+
+  const getScoreColor = (score: number) => {
+    if (score >= 90) return "text-emerald-600 bg-emerald-50 border-emerald-200";
+    if (score >= 75) return "text-blue-600 bg-blue-50 border-blue-200";
+    if (score >= 50) return "text-yellow-600 bg-yellow-50 border-yellow-200";
+    return "text-red-600 bg-red-50 border-red-200";
+  };
+
   const getLocationType = (data: any) => {
     if (!data) return { type: 'unknown', name: 'Unknown', distance: 0 };
     try {
@@ -401,6 +420,38 @@ export function AdminAttendanceDashboard() {
 
   const departments = Array.from(new Set(users.map(u => u.department).filter(Boolean)));
 
+  // --- CHART DATA (RESTORED) ---
+  const chartData = useMemo(() => {
+    const days = eachDayOfInterval({ start: dateRange.start, end: dateRange.end });
+    const trend = days.map(day => {
+      const dayStr = format(day, "yyyy-MM-dd");
+      const records = processedData.filter(r => r.date === dayStr);
+      return {
+        date: format(day, "MMM dd"),
+        present: records.filter(r => r.status === 'present').length,
+        late: records.filter(r => r.status === 'late').length,
+        absent: users.length - records.length
+      };
+    }).slice(-14);
+
+    const deptStats: any = {};
+    processedData.forEach(r => {
+      if (!r.user?.department) return;
+      if (!deptStats[r.user.department]) deptStats[r.user.department] = { name: r.user.department, value: 0 };
+      if (r.status !== 'absent') deptStats[r.user.department].value += 1;
+    });
+    const deptPie = Object.values(deptStats);
+
+    const lateCounts: Record<string, number> = {};
+    processedData.filter(r => r.status === 'late').forEach(r => {
+        const name = r.user?.full_name || 'Unknown';
+        lateCounts[name] = (lateCounts[name] || 0) + 1;
+    });
+    const topViolators = Object.entries(lateCounts).map(([name, count]) => ({ name, count })).sort((a,b) => b.count - a.count).slice(0, 5);
+
+    return { trend, deptPie, topViolators };
+  }, [processedData, users.length, dateRange]);
+
   const stats = useMemo(() => {
     if (view === 'monthly') {
        return { present: processedData.filter(r => r.status === 'present').length, late: processedData.filter(r => r.status === 'late').length, absent: (users.length * 30) - processedData.length };
@@ -422,6 +473,15 @@ export function AdminAttendanceDashboard() {
 
   const handlePrint = () => { window.print(); };
   const handleExport = () => { setIsExporting(true); setTimeout(() => setIsExporting(false), 500); };
+
+  const getDayStatusColor = (day: Date) => {
+    const dayStr = format(day, 'yyyy-MM-dd');
+    const record = userMonthData.find(r => r.date === dayStr);
+    if (!record) return 'bg-slate-50 text-slate-300 border-slate-100'; 
+    if (record.status === 'late') return 'bg-yellow-50 text-yellow-700 border-yellow-200 font-medium';
+    if (record.status === 'present') return 'bg-emerald-50 text-emerald-700 border-emerald-200 font-medium';
+    return 'bg-slate-50 text-slate-400';
+  };
 
   return (
     <div className="p-6 space-y-6 bg-slate-50/50 min-h-screen print:p-0 print:bg-white">
@@ -566,10 +626,10 @@ export function AdminAttendanceDashboard() {
                           </>
                         ) : (
                           <>
-                            <TableHead>Present</TableHead>
+                            <TableHead>Reliability</TableHead>
+                            <TableHead>Days Present</TableHead>
                             <TableHead>Lates</TableHead>
                             <TableHead>Avg Hrs</TableHead>
-                            <TableHead>OT</TableHead>
                             <TableHead className="print:hidden">Action</TableHead>
                           </>
                         )}
@@ -638,6 +698,7 @@ export function AdminAttendanceDashboard() {
                             const totalHrs = userRecords.reduce((acc, r) => acc + (Number(r.total_hours) || 0), 0);
                             const totalOT = userRecords.reduce((acc, r) => acc + (Number(r.overtime_hours) || 0), 0);
                             const avgHrs = present > 0 ? (totalHrs / present).toFixed(1) : "0";
+                            const score = getReliabilityScore(userRecords);
 
                             return (
                               <TableRow key={user.id} className="hover:bg-slate-50 cursor-pointer print:cursor-default" onClick={() => openUserModal(user)}>
@@ -645,8 +706,16 @@ export function AdminAttendanceDashboard() {
                                   <div className="font-medium text-slate-900">{user.full_name}</div>
                                   <div className="text-xs text-slate-500">{user.department}</div>
                                 </TableCell>
-                                <TableCell className="font-medium text-slate-700">{present}</TableCell>
-                                <TableCell className={lates > 0 ? "text-yellow-600 font-medium" : "text-slate-400"}>{lates}</TableCell>
+                                <TableCell>
+                                   <Badge variant="outline" className={`${getScoreColor(score)} font-bold`}>{score}%</Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-bold text-slate-700">{present}</span>
+                                    <span className="text-xs text-slate-400">days</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell className={lates > 0 ? "text-yellow-600 font-medium" : "text-slate-400"}>{lates} Late</TableCell>
                                 <TableCell><span className="font-mono text-sm">{avgHrs}h</span></TableCell>
                                 <TableCell className={totalOT > 0 ? "text-green-600 font-medium" : "text-slate-400"}>{totalOT > 0 ? `+${totalOT.toFixed(1)}` : "-"}</TableCell>
                                 <TableCell className="print:hidden"><Button variant="ghost" size="icon" className="h-8 w-8"><ChevronRight className="h-4 w-4 text-slate-400"/></Button></TableCell>
@@ -760,15 +829,6 @@ export function AdminAttendanceDashboard() {
              const monthEnd = endOfMonth(dateRange.start);
              const monthDays = eachDayOfInterval({ start: monthStart, end: monthEnd });
              const startDayOfWeek = getDay(monthStart); // 0 = Sunday
-
-             const getDayStatusColor = (day: Date) => {
-                const dayStr = format(day, 'yyyy-MM-dd');
-                const record = userRecords.find(r => r.date === dayStr);
-                if (!record) return 'bg-slate-50 text-slate-300 border-slate-100'; 
-                if (record.status === 'late') return 'bg-yellow-50 text-yellow-700 border-yellow-200 font-medium';
-                if (record.status === 'present') return 'bg-emerald-50 text-emerald-700 border-emerald-200 font-medium';
-                return 'bg-slate-50 text-slate-400';
-             };
 
              return (
                <>
