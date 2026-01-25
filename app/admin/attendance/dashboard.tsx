@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { format, startOfMonth, endOfMonth, subMonths, addMonths, parseISO, isSameDay, setHours, setMinutes, isAfter, eachDayOfInterval, differenceInMinutes } from "date-fns";
+import { format, startOfMonth, endOfMonth, subMonths, addMonths, parseISO, isSameDay, setHours, setMinutes, isAfter, eachDayOfInterval, differenceInMinutes, getDay } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
   Calendar as CalendarIcon, Users, Clock, CheckCircle, XCircle, AlertCircle, 
   MapPin, Coffee, TrendingUp, Activity, UserCheck, 
-  FileSpreadsheet, Search, Settings, ChevronRight, BarChart3, List, Edit2, Save, X, MessageSquare
+  FileSpreadsheet, Search, Settings, ChevronRight, BarChart3, List, Edit2, Save, X, MessageSquare, Loader2
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -23,7 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { createClient } from "@/lib/supabase/client";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
-import { toast } from "sonner"; // Ensure you have this installed or replace with your toast lib
+import { toast } from "sonner";
 
 // --- TYPES ---
 type User = {
@@ -87,7 +87,11 @@ export function AdminAttendanceDashboard() {
   const [lateThresholdHour, setLateThresholdHour] = useState(9);
   const [lateThresholdMinute, setLateThresholdMinute] = useState(30);
   
+  // Modal Data State (NEW)
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [userMonthData, setUserMonthData] = useState<AttendanceRecord[]>([]);
+  const [loadingModal, setLoadingModal] = useState(false);
+
   const [activeEmployees, setActiveEmployees] = useState<number>(0);
   const [employeesOnBreak, setEmployeesOnBreak] = useState<number>(0);
 
@@ -102,7 +106,11 @@ export function AdminAttendanceDashboard() {
     loadData();
     const channel = supabase
       .channel('attendance-dashboard-updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => loadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
+        loadData();
+        // Refresh modal data if open
+        if(selectedUser) openUserModal(selectedUser);
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [dateRange, view]);
@@ -156,6 +164,32 @@ export function AdminAttendanceDashboard() {
     }
   };
 
+  // --- NEW: FETCH FULL MONTH FOR MODAL ---
+  const openUserModal = async (user: User) => {
+    setSelectedUser(user);
+    setLoadingModal(true);
+    
+    // Always fetch the FULL month for the modal calendar, regardless of main dashboard view
+    const monthStart = format(startOfMonth(dateRange.start), "yyyy-MM-dd");
+    const monthEnd = format(endOfMonth(dateRange.start), "yyyy-MM-dd");
+
+    const { data } = await supabase
+      .from("attendance")
+      .select("*")
+      .eq("user_id", user.id)
+      .gte("date", monthStart)
+      .lte("date", monthEnd);
+
+    if (data) {
+        // Process status immediately for the modal
+        const processed = data.map(r => ({ ...r, status: determineStatus(r) }));
+        setUserMonthData(processed);
+    } else {
+        setUserMonthData([]);
+    }
+    setLoadingModal(false);
+  };
+
   // --- HELPERS ---
   const determineStatus = (record: any) => {
     if (!record.check_in) return "absent";
@@ -175,7 +209,6 @@ export function AdminAttendanceDashboard() {
 
   const getReliabilityScore = (userRecords: AttendanceRecord[]) => {
     if (userRecords.length === 0) return 0;
-    const totalDays = 30; 
     const present = userRecords.filter(r => r.status !== 'absent').length;
     const lates = userRecords.filter(r => r.status === 'late').length;
     
@@ -198,9 +231,8 @@ export function AdminAttendanceDashboard() {
     if (!data) return null;
     try {
       const loc = typeof data === 'string' ? JSON.parse(data) : data;
-      // Fixed template literals
-      if (loc.latitude && loc.longitude) return `https://www.google.com/maps/search/?api=1&query=$${loc.latitude},${loc.longitude}`;
-      if (loc.coordinates) return `https://www.google.com/maps/search/?api=1&query=$${loc.coordinates}`;
+      if (loc.latitude && loc.longitude) return `https://www.google.com/maps/search/?api=1&query=${loc.latitude},${loc.longitude}`;
+      if (loc.coordinates) return `https://www.google.com/maps/search/?api=1&query=${loc.coordinates}`;
     } catch (e) { return null; }
     return null;
   };
@@ -298,7 +330,10 @@ export function AdminAttendanceDashboard() {
         const { error } = await supabase.from('attendance').update(updates).eq('id', editingRecord.id);
         if (error) throw error;
         
+        // Refresh both main list and modal list
         loadData(); 
+        if(selectedUser) openUserModal(selectedUser);
+
         setEditingRecord(null);
         toast("Record updated.");
     } catch (e) { console.error(e); toast("Failed to update."); }
@@ -529,7 +564,7 @@ export function AdminAttendanceDashboard() {
                             const progress = Math.min(100, (Number(record?.total_hours || 0) / 9) * 100);
                             
                             return (
-                              <TableRow key={user.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedUser(user)}>
+                              <TableRow key={user.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => openUserModal(user)}>
                                 <TableCell>
                                   <div className="font-medium text-slate-900">{user.full_name}</div>
                                   <div className="text-xs text-slate-500">{user.department}</div>
@@ -575,7 +610,7 @@ export function AdminAttendanceDashboard() {
                             const score = getReliabilityScore(userRecords);
 
                             return (
-                              <TableRow key={user.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedUser(user)}>
+                              <TableRow key={user.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => openUserModal(user)}>
                                 <TableCell>
                                   <div className="font-medium text-slate-900">{user.full_name}</div>
                                   <div className="text-xs text-slate-500">{user.department}</div>
@@ -693,7 +728,7 @@ export function AdminAttendanceDashboard() {
       <Dialog open={!!selectedUser} onOpenChange={(open) => !open && setSelectedUser(null)}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           {selectedUser && (() => {
-             const userRecords = processedData.filter(a => a.user_id === selectedUser.id);
+             const userRecords = userMonthData;
              const presentCount = userRecords.filter(r => r.status !== 'absent').length;
              const lateCount = userRecords.filter(r => r.status === 'late').length;
              const totalHrs = userRecords.reduce((acc, r) => acc + (Number(r.total_hours) || 0), 0);
@@ -715,6 +750,9 @@ export function AdminAttendanceDashboard() {
                    </div>
                  </DialogHeader>
                  
+                 {loadingModal ? (
+                    <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin text-slate-400"/></div>
+                 ) : (
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div className="col-span-1 space-y-6">
                        <div className="grid grid-cols-2 gap-3">
@@ -754,7 +792,7 @@ export function AdminAttendanceDashboard() {
                              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => <div key={d}>{d}</div>)}
                           </div>
                           <div className="grid grid-cols-7 gap-2">
-                             {Array.from({ length: (new Date(monthStart).getDay()) }).map((_, i) => <div key={`empty-${i}`} />)}
+                             {Array.from({ length: getDay(monthStart) }).map((_, i) => <div key={`empty-${i}`} />)}
                              {monthDays.map(day => {
                                 const dayStr = format(day, 'yyyy-MM-dd');
                                 const record = userRecords.find(r => r.date === dayStr);
@@ -779,6 +817,7 @@ export function AdminAttendanceDashboard() {
                        </div>
                     </div>
                  </div>
+                 )}
                </>
              )
           })()}
