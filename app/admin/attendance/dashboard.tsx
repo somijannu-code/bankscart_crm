@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { 
   Calendar as CalendarIcon, Users, Clock, CheckCircle, XCircle, AlertCircle, 
   MapPin, Coffee, TrendingUp, Activity, UserCheck, 
-  FileSpreadsheet, Search, Settings, ChevronRight, BarChart3, List, Edit2, Save, X, MessageSquare, Printer, Building2, Globe, Plus, Trash2
+  FileSpreadsheet, Search, Settings, ChevronRight, BarChart3, List, Edit2, Save, X, MessageSquare, Printer, Building2, Globe, Plus, Trash2, CheckSquare
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -66,7 +66,7 @@ type Office = {
   name: string;
   lat: number;
   lng: number;
-  radius: number; // in km (e.g., 0.5)
+  radius: number;
 };
 
 const COLORS = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6'];
@@ -74,7 +74,7 @@ const MAX_SHIFT_HOURS = 10;
 
 // --- HELPER: HAVERSINE DISTANCE (KM) ---
 function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371; // Radius of the earth in km
+  const R = 6371; 
   const dLat = deg2rad(lat2 - lat1);  
   const dLon = deg2rad(lon2 - lon1); 
   const a = 
@@ -113,9 +113,8 @@ export function AdminAttendanceDashboard() {
   const [lateThresholdHour, setLateThresholdHour] = useState(9);
   const [lateThresholdMinute, setLateThresholdMinute] = useState(30);
   
-  // Office Locations State
   const [offices, setOffices] = useState<Office[]>([
-    { id: '1', name: 'HQ (Bangalore)', lat: 12.9716, lng: 77.5946, radius: 0.5 } // Default
+    { id: '1', name: 'HQ', lat: 12.9716, lng: 77.5946, radius: 0.5 } 
   ]);
   const [newOfficeName, setNewOfficeName] = useState("");
   const [newOfficeLat, setNewOfficeLat] = useState("");
@@ -132,7 +131,11 @@ export function AdminAttendanceDashboard() {
   const [editCheckIn, setEditCheckIn] = useState("");
   const [editCheckOut, setEditCheckOut] = useState("");
   const [editNote, setEditNote] = useState("");
+  
+  // Missing Checkout Logic
   const [missingCheckoutCount, setMissingCheckoutCount] = useState(0);
+  const [missingRecords, setMissingRecords] = useState<AttendanceRecord[]>([]);
+  const [showReviewModal, setShowReviewModal] = useState(false);
 
   // --- REAL-TIME SUBSCRIPTION ---
   useEffect(() => {
@@ -154,12 +157,14 @@ export function AdminAttendanceDashboard() {
       const startDateStr = format(dateRange.start, "yyyy-MM-dd");
       const endDateStr = format(dateRange.end, "yyyy-MM-dd");
       const feedDateStr = format(new Date(), "yyyy-MM-dd"); 
+      const yesterdayStr = format(subDays(new Date(), 1), "yyyy-MM-dd");
 
       const [usersRes, attendanceRes, feedRes, missingRes] = await Promise.all([
         supabase.from("users").select("*").eq("is_active", true).order("full_name"),
         supabase.from("attendance").select(`*, user:users!attendance_user_id_fkey(full_name, email, department)`).gte("date", startDateStr).lte("date", endDateStr).order("date", { ascending: false }),
         supabase.from("attendance").select(`*, user:users!attendance_user_id_fkey(full_name)`).eq("date", feedDateStr),
-        supabase.from("attendance").select("id").eq("date", format(subDays(new Date(), 1), "yyyy-MM-dd")).not("check_in", "is", null).is("check_out", null)
+        // Fetch missing records with user details
+        supabase.from("attendance").select(`*, user:users!attendance_user_id_fkey(full_name)`).eq("date", yesterdayStr).not("check_in", "is", null).is("check_out", null)
       ]);
 
       if (usersRes.error) throw usersRes.error;
@@ -167,7 +172,9 @@ export function AdminAttendanceDashboard() {
 
       setUsers(usersRes.data || []);
       setAttendanceData(attendanceRes.data || []);
+      
       setMissingCheckoutCount(missingRes.data?.length || 0);
+      setMissingRecords(missingRes.data || []);
 
       if (feedRes.data) {
         let feed: ActivityItem[] = [];
@@ -237,7 +244,6 @@ export function AdminAttendanceDashboard() {
     return Math.max(0, checkInMinutes - thresholdMinutes);
   };
 
-  // --- UPDATED LOCATION LOGIC ---
   const getLocationType = (data: any) => {
     if (!data) return { type: 'unknown', name: 'Unknown', distance: 0 };
     try {
@@ -247,7 +253,6 @@ export function AdminAttendanceDashboard() {
       
       if (!lat || !lng) return { type: 'unknown', name: 'Unknown', distance: 0 };
 
-      // Check against all offices
       let closestOffice = null;
       let minDistance = Infinity;
 
@@ -280,7 +285,7 @@ export function AdminAttendanceDashboard() {
   const formatLocationText = (data: any) => {
     const info = getLocationType(data);
     if (info.type === 'office') return `On-Site (${info.name})`;
-    if (info.type === 'remote') return `Remote (${info.distance}km away)`;
+    if (info.type === 'remote') return `Remote (${info.distance}km)`;
     return "Unknown Location";
   };
 
@@ -302,81 +307,6 @@ export function AdminAttendanceDashboard() {
   const removeOffice = (id: string) => {
     setOffices(offices.filter(o => o.id !== id));
   };
-
-  // --- MEMOIZED DATA ---
-  const processedData = useMemo(() => {
-    return attendanceData.map(record => ({
-      ...record,
-      status: determineStatus(record)
-    }));
-  }, [attendanceData, lateThresholdHour, lateThresholdMinute]);
-
-  const filteredUsers = useMemo(() => {
-    return users.filter(user => {
-      const matchesSearch = user.full_name.toLowerCase().includes(searchTerm.toLowerCase()) || user.email.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesDept = departmentFilter === "all" || user.department === departmentFilter;
-      if (statusFilter === "all") return matchesSearch && matchesDept;
-      
-      const userRecords = processedData.filter(a => a.user_id === user.id);
-      if (view === 'daily') {
-        const record = userRecords.find(r => isSameDay(parseISO(r.date), dateRange.start));
-        const status = record ? record.status : 'absent';
-        return matchesSearch && matchesDept && status === statusFilter;
-      }
-      return matchesSearch && matchesDept;
-    });
-  }, [users, searchTerm, departmentFilter, statusFilter, processedData, view, dateRange]);
-
-  const departments = Array.from(new Set(users.map(u => u.department).filter(Boolean)));
-
-  // --- CHART DATA ---
-  const chartData = useMemo(() => {
-    const days = eachDayOfInterval({ start: dateRange.start, end: dateRange.end });
-    const trend = days.map(day => {
-      const dayStr = format(day, "yyyy-MM-dd");
-      const records = processedData.filter(r => r.date === dayStr);
-      return {
-        date: format(day, "MMM dd"),
-        present: records.filter(r => r.status === 'present').length,
-        late: records.filter(r => r.status === 'late').length,
-        absent: users.length - records.length
-      };
-    }).slice(-14);
-
-    const deptStats: any = {};
-    processedData.forEach(r => {
-      if (!r.user?.department) return;
-      if (!deptStats[r.user.department]) deptStats[r.user.department] = { name: r.user.department, value: 0 };
-      if (r.status !== 'absent') deptStats[r.user.department].value += 1;
-    });
-    const deptPie = Object.values(deptStats);
-
-    const lateCounts: Record<string, number> = {};
-    processedData.filter(r => r.status === 'late').forEach(r => {
-        const name = r.user?.full_name || 'Unknown';
-        lateCounts[name] = (lateCounts[name] || 0) + 1;
-    });
-    const topViolators = Object.entries(lateCounts).map(([name, count]) => ({ name, count })).sort((a,b) => b.count - a.count).slice(0, 5);
-
-    return { trend, deptPie, topViolators };
-  }, [processedData, users.length, dateRange]);
-
-  // --- STATS ---
-  const stats = useMemo(() => {
-    if (view === 'monthly') {
-       return {
-         present: processedData.filter(r => r.status === 'present').length,
-         late: processedData.filter(r => r.status === 'late').length,
-         absent: (users.length * 30) - processedData.length 
-       };
-    }
-    const dailyRecords = processedData.filter(r => isSameDay(parseISO(r.date), dateRange.start));
-    return {
-      present: dailyRecords.filter(r => r.status === 'present').length,
-      late: dailyRecords.filter(r => r.status === 'late').length,
-      absent: users.length - dailyRecords.length 
-    };
-  }, [processedData, users.length, view, dateRange]);
 
   const handleEdit = (record: AttendanceRecord) => {
     setEditingRecord(record);
@@ -408,9 +338,76 @@ export function AdminAttendanceDashboard() {
         loadData(); 
         if(selectedUser) openUserModal(selectedUser);
         setEditingRecord(null);
-        toast("Record updated.");
-    } catch (e) { console.error(e); toast("Failed to update."); }
+        toast.success("Record updated successfully");
+    } catch (e) { console.error(e); toast.error("Failed to update"); }
   };
+
+  // Bulk Fix for Missing Checkouts
+  const bulkFixCheckout = async () => {
+    try {
+      const updates = missingRecords.map(record => {
+        const checkOutTime = `${record.date}T18:00:00`; // Default 6 PM
+        const start = new Date(record.check_in!);
+        const end = new Date(checkOutTime);
+        const diffMs = end.getTime() - start.getTime();
+        const diffHours = diffMs / (1000 * 60 * 60);
+        
+        return {
+          id: record.id,
+          check_out: checkOutTime,
+          total_hours: parseFloat(diffHours.toFixed(2)),
+          overtime_hours: 0,
+          admin_note: "Auto-fixed missing checkout"
+        };
+      });
+
+      for (const update of updates) {
+        const { id, ...rest } = update;
+        await supabase.from('attendance').update(rest).eq('id', id);
+      }
+      
+      setShowReviewModal(false);
+      loadData();
+      toast.success(`${updates.length} records auto-corrected`);
+    } catch (e) {
+      console.error(e);
+      toast.error("Bulk fix failed");
+    }
+  };
+
+  // --- MEMOIZED DATA ---
+  const processedData = useMemo(() => {
+    return attendanceData.map(record => ({
+      ...record,
+      status: determineStatus(record)
+    }));
+  }, [attendanceData, lateThresholdHour, lateThresholdMinute]);
+
+  const filteredUsers = useMemo(() => {
+    return users.filter(user => {
+      const matchesSearch = user.full_name.toLowerCase().includes(searchTerm.toLowerCase()) || user.email.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesDept = departmentFilter === "all" || user.department === departmentFilter;
+      if (statusFilter === "all") return matchesSearch && matchesDept;
+      
+      const userRecords = processedData.filter(a => a.user_id === user.id);
+      if (view === 'daily') {
+        const record = userRecords.find(r => isSameDay(parseISO(r.date), dateRange.start));
+        const status = record ? record.status : 'absent';
+        return matchesSearch && matchesDept && status === statusFilter;
+      }
+      return matchesSearch && matchesDept;
+    });
+  }, [users, searchTerm, departmentFilter, statusFilter, processedData, view, dateRange]);
+
+  const departments = Array.from(new Set(users.map(u => u.department).filter(Boolean)));
+
+  const stats = useMemo(() => {
+    if (view === 'monthly') {
+       return { present: processedData.filter(r => r.status === 'present').length, late: processedData.filter(r => r.status === 'late').length, absent: (users.length * 30) - processedData.length };
+    }
+    const dailyRecords = processedData.filter(r => isSameDay(parseISO(r.date), dateRange.start));
+    return { present: dailyRecords.filter(r => r.status === 'present').length, late: dailyRecords.filter(r => r.status === 'late').length, absent: users.length - dailyRecords.length };
+  }, [processedData, users.length, view, dateRange]);
 
   const navigate = (dir: 'prev' | 'next') => {
     if (view === 'daily') {
@@ -423,15 +420,8 @@ export function AdminAttendanceDashboard() {
     }
   };
 
-  const handlePrint = () => {
-    window.print();
-  };
-
-  const handleExport = () => {
-    setIsExporting(true);
-    // ... csv logic same as before ...
-    setTimeout(() => setIsExporting(false), 500);
-  };
+  const handlePrint = () => { window.print(); };
+  const handleExport = () => { setIsExporting(true); setTimeout(() => setIsExporting(false), 500); };
 
   return (
     <div className="p-6 space-y-6 bg-slate-50/50 min-h-screen print:p-0 print:bg-white">
@@ -447,7 +437,7 @@ export function AdminAttendanceDashboard() {
           {/* SETTINGS POPOVER */}
           <Popover>
             <PopoverTrigger asChild><Button variant="outline" size="icon"><Settings className="h-4 w-4 text-slate-600"/></Button></PopoverTrigger>
-            <PopoverContent className="w-96">
+            <PopoverContent className="w-96 z-50"> 
               <div className="space-y-6">
                 <div>
                   <h4 className="font-medium mb-2">Late Threshold</h4>
@@ -508,7 +498,7 @@ export function AdminAttendanceDashboard() {
                  <p className="text-xs text-red-600">Please review attendance logs to correct hours.</p>
               </div>
            </div>
-           <Button size="sm" variant="destructive" className="h-8">Review</Button>
+           <Button size="sm" variant="destructive" className="h-8" onClick={() => setShowReviewModal(true)}>Review</Button>
         </div>
       )}
 
@@ -890,6 +880,36 @@ export function AdminAttendanceDashboard() {
                <Button type="submit" onClick={saveEdit}>Save changes</Button>
             </DialogFooter>
          </DialogContent>
+      </Dialog>
+
+      {/* --- REVIEW MISSING CHECKOUTS DIALOG --- */}
+      <Dialog open={showReviewModal} onOpenChange={setShowReviewModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Review Missing Checkouts</DialogTitle>
+            <DialogDescription>Employees who missed clocking out yesterday.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 my-4">
+             {missingRecords.length === 0 ? <p className="text-center text-slate-500">No issues found.</p> : (
+               <Table>
+                 <TableHeader><TableRow><TableHead>Employee</TableHead><TableHead>Check In</TableHead><TableHead>Action</TableHead></TableRow></TableHeader>
+                 <TableBody>
+                   {missingRecords.map(r => (
+                     <TableRow key={r.id}>
+                       <TableCell className="font-medium">{r.user?.full_name}</TableCell>
+                       <TableCell>{r.check_in ? format(parseISO(r.check_in), "hh:mm a") : "-"}</TableCell>
+                       <TableCell><Button variant="outline" size="sm" onClick={() => handleEdit(r)}>Fix</Button></TableCell>
+                     </TableRow>
+                   ))}
+                 </TableBody>
+               </Table>
+             )}
+          </div>
+          <DialogFooter>
+             <Button variant="ghost" onClick={() => setShowReviewModal(false)}>Close</Button>
+             {missingRecords.length > 0 && <Button onClick={bulkFixCheckout}>Auto-Fix All to 6:00 PM</Button>}
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
 
     </div>
