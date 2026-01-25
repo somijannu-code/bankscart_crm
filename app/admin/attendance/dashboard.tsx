@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { format, startOfMonth, endOfMonth, subMonths, addMonths, parseISO, isSameDay, setHours, setMinutes, isAfter, eachDayOfInterval, differenceInMinutes, subDays, startOfWeek, endOfWeek, getDay } from "date-fns";
+import { format, startOfMonth, endOfMonth, subMonths, addMonths, parseISO, isSameDay, setHours, setMinutes, isAfter, eachDayOfInterval, differenceInMinutes, subDays, startOfWeek, endOfWeek, getDay, isWeekend } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
   Calendar as CalendarIcon, Users, Clock, CheckCircle, XCircle, AlertCircle, 
   MapPin, Coffee, TrendingUp, Activity, UserCheck, 
-  FileSpreadsheet, Search, Settings, ChevronRight, BarChart3, List, Edit2, Save, X, MessageSquare, Printer, Building2, Globe, Plus, Trash2, CheckSquare
+  FileSpreadsheet, Search, Settings, ChevronRight, BarChart3, List, Edit2, Save, X, MessageSquare, Printer, Building2, Globe, Plus, Trash2, CheckSquare, ChevronLeft
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -70,7 +70,7 @@ type Office = {
 };
 
 const COLORS = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6'];
-const MAX_SHIFT_HOURS = 10;
+const ITEMS_PER_PAGE = 10;
 
 // --- HELPER: HAVERSINE DISTANCE (KM) ---
 function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -112,6 +112,7 @@ export function AdminAttendanceDashboard() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [lateThresholdHour, setLateThresholdHour] = useState(9);
   const [lateThresholdMinute, setLateThresholdMinute] = useState(30);
+  const [currentPage, setCurrentPage] = useState(1);
   
   const [offices, setOffices] = useState<Office[]>([
     { id: '1', name: 'HQ', lat: 12.9716, lng: 77.5946, radius: 0.5 } 
@@ -120,9 +121,8 @@ export function AdminAttendanceDashboard() {
   const [newOfficeLat, setNewOfficeLat] = useState("");
   const [newOfficeLng, setNewOfficeLng] = useState("");
 
-  // Modals State
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [showSettingsModal, setShowSettingsModal] = useState(false); // NEW: Explicit state for Settings
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [userMonthData, setUserMonthData] = useState<AttendanceRecord[]>([]);
   const [loadingModal, setLoadingModal] = useState(false);
 
@@ -134,7 +134,6 @@ export function AdminAttendanceDashboard() {
   const [editCheckOut, setEditCheckOut] = useState("");
   const [editNote, setEditNote] = useState("");
   
-  // Missing Checkout Logic
   const [missingCheckoutCount, setMissingCheckoutCount] = useState(0);
   const [missingRecords, setMissingRecords] = useState<AttendanceRecord[]>([]);
   const [showReviewModal, setShowReviewModal] = useState(false);
@@ -152,6 +151,11 @@ export function AdminAttendanceDashboard() {
     return () => { supabase.removeChannel(channel); };
   }, [dateRange, view]);
 
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, departmentFilter, statusFilter, view, dateRange]);
+
   // --- DATA LOADING ---
   const loadData = async () => {
     setLoading(true);
@@ -165,7 +169,6 @@ export function AdminAttendanceDashboard() {
         supabase.from("users").select("*").eq("is_active", true).order("full_name"),
         supabase.from("attendance").select(`*, user:users!attendance_user_id_fkey(full_name, email, department)`).gte("date", startDateStr).lte("date", endDateStr).order("date", { ascending: false }),
         supabase.from("attendance").select(`*, user:users!attendance_user_id_fkey(full_name)`).eq("date", feedDateStr),
-        // Fetch missing records with user details
         supabase.from("attendance").select(`*, user:users!attendance_user_id_fkey(full_name)`).eq("date", yesterdayStr).not("check_in", "is", null).is("check_out", null)
       ]);
 
@@ -361,11 +364,10 @@ export function AdminAttendanceDashboard() {
     } catch (e) { console.error(e); toast.error("Failed to update"); }
   };
 
-  // Bulk Fix for Missing Checkouts
   const bulkFixCheckout = async () => {
     try {
       const updates = missingRecords.map(record => {
-        const checkOutTime = `${record.date}T18:00:00`; // Default 6 PM
+        const checkOutTime = `${record.date}T18:00:00`;
         const start = new Date(record.check_in!);
         const end = new Date(checkOutTime);
         const diffMs = end.getTime() - start.getTime();
@@ -417,6 +419,13 @@ export function AdminAttendanceDashboard() {
       return matchesSearch && matchesDept;
     });
   }, [users, searchTerm, departmentFilter, statusFilter, processedData, view, dateRange]);
+
+  // --- PAGINATION LOGIC ---
+  const totalPages = Math.ceil(filteredUsers.length / ITEMS_PER_PAGE);
+  const paginatedUsers = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredUsers.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredUsers, currentPage]);
 
   const departments = Array.from(new Set(users.map(u => u.department).filter(Boolean)));
 
@@ -483,6 +492,45 @@ export function AdminAttendanceDashboard() {
     return 'bg-slate-50 text-slate-400';
   };
 
+  // --- NEW: Render Heatmap for Monthly View ---
+  const renderMonthlyHeatmap = (userRecords: AttendanceRecord[]) => {
+    const start = startOfMonth(dateRange.start);
+    const end = endOfMonth(dateRange.start);
+    const days = eachDayOfInterval({ start, end });
+    
+    // Display up to 15 days for compactness or all if screen allows. 
+    // We'll show all but as tiny dots.
+    return (
+      <div className="flex gap-1">
+        {days.map((day, i) => {
+           const dayStr = format(day, "yyyy-MM-dd");
+           const record = userRecords.find(r => r.date === dayStr);
+           const isWE = isWeekend(day);
+           
+           let color = "bg-slate-100"; // default empty
+           if(isWE) color = "bg-slate-50 border-dashed border-slate-200";
+           if(record?.status === 'present') color = "bg-emerald-500";
+           if(record?.status === 'late') color = "bg-yellow-400";
+           if(!record && !isWE && isAfter(new Date(), day)) color = "bg-red-200"; // Absent in past
+
+           return (
+             <TooltipProvider key={dayStr}>
+               <Tooltip>
+                 <TooltipTrigger>
+                    <div className={`w-2.5 h-6 rounded-sm ${color} transition-colors`} />
+                 </TooltipTrigger>
+                 <TooltipContent className="text-xs">
+                    <p className="font-bold">{format(day, "MMM dd")}</p>
+                    <p>{record ? `${record.status} (${record.check_in ? format(parseISO(record.check_in), "HH:mm") : "?"})` : isWE ? "Weekend" : "Absent"}</p>
+                 </TooltipContent>
+               </Tooltip>
+             </TooltipProvider>
+           )
+        })}
+      </div>
+    );
+  };
+
   return (
     <div className="p-6 space-y-6 bg-slate-50/50 min-h-screen print:p-0 print:bg-white">
       
@@ -495,7 +543,6 @@ export function AdminAttendanceDashboard() {
         
         <div className="flex flex-wrap gap-2 items-center">
           
-          {/* SETTINGS BUTTON (Explicit OnClick) */}
           <Button variant="outline" size="icon" onClick={() => setShowSettingsModal(true)}>
              <Settings className="h-4 w-4 text-slate-600"/>
           </Button>
@@ -593,8 +640,7 @@ export function AdminAttendanceDashboard() {
                         ) : (
                           <>
                             <TableHead>Reliability</TableHead>
-                            <TableHead>Days Present</TableHead>
-                            <TableHead>Lates</TableHead>
+                            <TableHead>Pattern</TableHead>
                             <TableHead>Avg Hrs</TableHead>
                             <TableHead className="print:hidden">Action</TableHead>
                           </>
@@ -604,10 +650,10 @@ export function AdminAttendanceDashboard() {
                     <TableBody>
                       {loading ? (
                         [...Array(5)].map((_, i) => <TableRow key={i}><TableCell colSpan={6}><div className="h-8 bg-slate-100 rounded animate-pulse" /></TableCell></TableRow>)
-                      ) : filteredUsers.length === 0 ? (
+                      ) : paginatedUsers.length === 0 ? (
                         <TableRow><TableCell colSpan={6} className="text-center py-8 text-slate-500">No records found.</TableCell></TableRow>
                       ) : (
-                        filteredUsers.map(user => {
+                        paginatedUsers.map(user => {
                           const userRecords = processedData.filter(a => a.user_id === user.id);
 
                           if (view === 'daily') {
@@ -660,9 +706,7 @@ export function AdminAttendanceDashboard() {
                             );
                           } else {
                             const present = userRecords.filter(r => r.status !== 'absent').length;
-                            const lates = userRecords.filter(r => r.status === 'late').length;
                             const totalHrs = userRecords.reduce((acc, r) => acc + (Number(r.total_hours) || 0), 0);
-                            const totalOT = userRecords.reduce((acc, r) => acc + (Number(r.overtime_hours) || 0), 0);
                             const avgHrs = present > 0 ? (totalHrs / present).toFixed(1) : "0";
                             const score = getReliabilityScore(userRecords);
 
@@ -676,14 +720,10 @@ export function AdminAttendanceDashboard() {
                                    <Badge variant="outline" className={`${getScoreColor(score)} font-bold`}>{score}%</Badge>
                                 </TableCell>
                                 <TableCell>
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-bold text-slate-700">{present}</span>
-                                    <span className="text-xs text-slate-400">days</span>
-                                  </div>
+                                   {/* NEW: VISUAL HEATMAP IN TABLE */}
+                                   {renderMonthlyHeatmap(userRecords)}
                                 </TableCell>
-                                <TableCell className={lates > 0 ? "text-yellow-600 font-medium" : "text-slate-400"}>{lates} Late</TableCell>
                                 <TableCell><span className="font-mono text-sm">{avgHrs}h</span></TableCell>
-                                <TableCell className={totalOT > 0 ? "text-green-600 font-medium" : "text-slate-400"}>{totalOT > 0 ? `+${totalOT.toFixed(1)}` : "-"}</TableCell>
                                 <TableCell className="print:hidden"><Button variant="ghost" size="icon" className="h-8 w-8"><ChevronRight className="h-4 w-4 text-slate-400"/></Button></TableCell>
                               </TableRow>
                             )
@@ -692,6 +732,17 @@ export function AdminAttendanceDashboard() {
                       )}
                     </TableBody>
                   </Table>
+                  
+                  {/* PAGINATION CONTROLS */}
+                  {filteredUsers.length > ITEMS_PER_PAGE && (
+                    <div className="p-4 border-t flex items-center justify-between">
+                       <span className="text-sm text-slate-500">Page {currentPage} of {totalPages}</span>
+                       <div className="flex gap-2">
+                          <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p-1))} disabled={currentPage === 1}><ChevronLeft className="h-4 w-4"/></Button>
+                          <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p+1))} disabled={currentPage === totalPages}><ChevronRight className="h-4 w-4"/></Button>
+                       </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
