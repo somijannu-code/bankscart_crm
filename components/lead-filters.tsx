@@ -10,13 +10,14 @@ import { Label } from "@/components/ui/label"
 
 interface LeadFiltersProps {
   telecallers: Array<{ id: string; full_name: string }>
-  telecallerStatus: Record<string, boolean> // NEW PROP
+  telecallerStatus: Record<string, boolean>
 }
 
 export function LeadFilters({ telecallers, telecallerStatus }: LeadFiltersProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
+  // Initialize from URL or defaults
   const [search, setSearch] = useState(searchParams.get("search") || "")
   const [status, setStatus] = useState(searchParams.get("status") || "all")
   const [priority, setPriority] = useState(searchParams.get("priority") || "all")
@@ -41,19 +42,13 @@ export function LeadFilters({ telecallers, telecallerStatus }: LeadFiltersProps)
         if (customEnd) params.set("to", customEnd)
       }
     }
-
     router.push(`/admin/leads?${params.toString()}`)
   }
 
   const clearFilters = () => {
-    setSearch("")
-    setStatus("all")
-    setPriority("all")
-    setAssignedTo("all")
-    setSource("all")
-    setDateRange("all")
-    setCustomStart("")
-    setCustomEnd("")
+    setSearch(""); setStatus("all"); setPriority("all");
+    setAssignedTo("all"); setSource("all"); setDateRange("all");
+    setCustomStart(""); setCustomEnd("");
     router.push("/admin/leads")
   }
 
@@ -61,32 +56,17 @@ export function LeadFilters({ telecallers, telecallerStatus }: LeadFiltersProps)
     <div className="space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4"> 
         <div className="relative col-span-2 lg:col-span-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-          <Input
-            placeholder="Search leads..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10"
-            onKeyDown={(e) => e.key === "Enter" && applyFilters()}
-          />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+          <Input placeholder="Search name, phone..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" onKeyDown={(e) => e.key === "Enter" && applyFilters()} />
         </div>
 
         <Select value={status} onValueChange={setStatus}>
           <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Statuses</SelectItem>
-            {/* ... keeping status list same ... */}
-            <SelectItem value="new">New</SelectItem>
-            <SelectItem value="contacted">Contacted</SelectItem>
-            <SelectItem value="Interested">Interested</SelectItem>
-            <SelectItem value="Documents_Sent">Documents Sent</SelectItem>
-            <SelectItem value="Login">Login</SelectItem>
-            <SelectItem value="Disbursed">Disbursed</SelectItem>
-            <SelectItem value="Not_Interested">Not Interested</SelectItem>
-            <SelectItem value="follow_up">Follow Up</SelectItem>
-            <SelectItem value="not_eligible">Not Eligible</SelectItem>
-            <SelectItem value="self_employed">Self Employed</SelectItem>
-            <SelectItem value="nr">Not Reachable</SelectItem>
+            {['new','contacted','Interested','Documents_Sent','Login','Disbursed','Not_Interested','follow_up','not_eligible','self_employed','nr'].map(s => (
+               <SelectItem key={s} value={s}>{s.replace('_',' ')}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
 
@@ -105,12 +85,11 @@ export function LeadFilters({ telecallers, telecallerStatus }: LeadFiltersProps)
           <SelectContent>
             <SelectItem value="all">All Telecallers</SelectItem>
             <SelectItem value="unassigned">Unassigned</SelectItem>
-            {telecallers.map((telecaller) => (
-              <SelectItem key={telecaller.id} value={telecaller.id}>
+            {telecallers.map((t) => (
+              <SelectItem key={t.id} value={t.id}>
                 <div className="flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full ${telecallerStatus[telecaller.id] ? 'bg-green-500' : 'bg-red-500'}`} 
-                       title={telecallerStatus[telecaller.id] ? 'Online' : 'Offline'} />
-                  {telecaller.full_name}
+                  <div className={`w-2 h-2 rounded-full ${telecallerStatus[t.id] ? 'bg-green-500' : 'bg-red-500'}`} />
+                  {t.full_name}
                 </div>
               </SelectItem>
             ))}
@@ -148,23 +127,23 @@ export function LeadFilters({ telecallers, telecallerStatus }: LeadFiltersProps)
       </div>
 
       {dateRange === "custom" && (
-        <div className="flex items-center gap-2 p-3 bg-slate-50 border rounded-md animate-in fade-in slide-in-from-top-2">
+        <div className="flex items-center gap-2 p-3 bg-slate-50 border rounded-md">
           <div className="flex items-center gap-2">
-            <Label className="text-xs text-muted-foreground whitespace-nowrap">From:</Label>
+            <Label className="text-xs text-muted-foreground">From:</Label>
             <Input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="h-8 w-auto bg-white"/>
           </div>
           <div className="flex items-center gap-2">
-            <Label className="text-xs text-muted-foreground whitespace-nowrap">To:</Label>
+            <Label className="text-xs text-muted-foreground">To:</Label>
             <Input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="h-8 w-auto bg-white"/>
           </div>
         </div>
       )}
 
       <div className="flex gap-2">
-        <Button onClick={applyFilters} className="flex items-center gap-2">
+        <Button onClick={applyFilters} className="flex items-center gap-2 h-9">
           <Search className="h-4 w-4" /> Apply Filters
         </Button>
-        <Button variant="outline" onClick={clearFilters} className="flex items-center gap-2 bg-transparent">
+        <Button variant="outline" onClick={clearFilters} className="flex items-center gap-2 h-9">
           <X className="h-4 w-4" /> Clear
         </Button>
       </div>
