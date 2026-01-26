@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -8,12 +8,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Phone, Clock, MessageSquare, IndianRupee, AlertCircle } from "lucide-react" 
+import { Phone, Clock, MessageSquare, IndianRupee, AlertCircle, Info } from "lucide-react" 
 import { useCallTracking } from "@/context/call-tracking-context"
 import { toast } from "sonner"
 import { ScheduleFollowUpModal } from "./schedule-follow-up-modal" 
-import { format } from "date-fns"
 import { cn } from "@/lib/utils"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 interface LeadStatusUpdaterProps {
   leadId: string
@@ -26,7 +26,7 @@ interface LeadStatusUpdaterProps {
   telecallerName: string | null | undefined
 }
 
-const statusOptions = [
+const STATUS_OPTIONS = [
   { value: "new", label: "New", color: "bg-blue-100 text-blue-800" },
   { value: "Interested", label: "Interested", color: "bg-green-100 text-green-800" },
   { value: "Documents_Sent", label: "Documents Sent", color: "bg-purple-100 text-purple-800" },
@@ -39,6 +39,8 @@ const statusOptions = [
   { value: "self_employed", label: "Self Employed", color: "bg-amber-100 text-amber-800" },
 ]
 
+const QUICK_NOTES = ["No Answer", "Busy", "Switch Off", "Asked to Call Later", "Wrong Number"];
+
 export function LeadStatusUpdater({ 
   leadId, 
   currentStatus, 
@@ -49,98 +51,85 @@ export function LeadStatusUpdater({
   leadPhoneNumber = "",
   telecallerName = "Telecaller",
 }: LeadStatusUpdaterProps) {
+  const supabase = createClient()
+  const { activeCall, endCall, updateCallDuration, formatDuration } = useCallTracking()
+
+  // --- STATE ---
   const [status, setStatus] = useState("")
   const [isUpdating, setIsUpdating] = useState(false)
-  const [note, setNote] = useState("") 
-  const [remarks, setRemarks] = useState("")
-  const [callDuration, setCallDuration] = useState<number | null>(null)
+  const [note, setNote] = useState("") // Specifically for Not Eligible reason
+  const [remarks, setRemarks] = useState("") // General Remarks
   const [loanAmount, setLoanAmount] = useState<number | null>(initialLoanAmount)
   const [isModalOpen, setIsModalOpen] = useState(false) 
-  const [tempStatus, setTempStatus] = useState(currentStatus) 
-
+  
+  // Call Timer State
+  const [callDuration, setCallDuration] = useState<number | null>(null)
   const [callMins, setCallMins] = useState<number | null>(null);
   const [callSecs, setCallSecs] = useState<number | null>(null);
+  
   const [notEligibleReason, setNotEligibleReason] = useState<string>("")
 
-  const supabase = createClient()
-  const { activeCall, startCall, endCall, updateCallDuration, formatDuration } = useCallTracking()
+  // --- DERIVED STATE ---
+  const currentStatusOption = useMemo(() => STATUS_OPTIONS.find((o) => o.value === currentStatus), [currentStatus]);
+  
+  const whatsappLink = useMemo(() => {
+      const cleaned = String(leadPhoneNumber || "").replace(/[^0-9]/g, '');
+      if (!cleaned) return "#"; 
+      const message = `hi sir this side ${telecallerName} from ICICI bank kindly share following documents`;
+      return `https://wa.me/${cleaned}?text=${encodeURIComponent(message)}`;
+  }, [leadPhoneNumber, telecallerName]);
 
-  const WHATSAPP_MESSAGE_BASE = "hi sir this side {telecaller_name} from ICICI bank kindly share following documents";
-  const cleanedPhoneNumber = String(leadPhoneNumber || "").replace(/[^0-9]/g, '');
+  const isWhatsappEnabled = whatsappLink !== "#";
 
-  const getWhatsappLink = () => {
-      if (!cleanedPhoneNumber) return "#"; 
-      const message = WHATSAPP_MESSAGE_BASE.replace("{telecaller_name}", telecallerName)
-      const encodedMessage = encodeURIComponent(message)
-      return `https://wa.me/${cleanedPhoneNumber}?text=${encodedMessage}`
-  }
-
-  useEffect(() => {
-    setLoanAmount(initialLoanAmount)
-  }, [initialLoanAmount])
+  // --- EFFECTS ---
+  useEffect(() => { setLoanAmount(initialLoanAmount) }, [initialLoanAmount]);
   
   useEffect(() => {
+    // Reset specific fields when status changes
     if (status !== 'not_eligible') {
       setNotEligibleReason("")
-      if (status !== "" && !isUpdating) {
-         setNote("")
-      }
+      if (status && !isUpdating) setNote("")
     }
-  }, [status, isUpdating]);
-
-  useEffect(() => {
+    // Auto-set duration to 0 for NR
     if (isCallInitiated && status === 'nr') {
-      setCallDuration(0);
-      setCallMins(0); 
-      setCallSecs(0);
+      setCallDuration(0); setCallMins(0); setCallSecs(0);
     } else if (status !== 'nr' && callDuration === 0) {
-      setCallDuration(null);
-      setCallMins(null); 
-      setCallSecs(null);
+      setCallDuration(null); setCallMins(null); setCallSecs(null);
     }
   }, [status, isCallInitiated]);
 
-  const calculateTotalSeconds = (minutes: number | null, seconds: number | null): number | null => {
-    const min = minutes ?? 0;
-    const sec = seconds ?? 0;
-    if (min < 0 || sec < 0) return null;
-    if (min === 0 && sec === 0 && (minutes === null && seconds === null)) return null;
-    return (min * 60) + sec;
+  // --- HANDLERS ---
+  const calculateTotalSeconds = (min: number | null, sec: number | null) => {
+    const m = min ?? 0; const s = sec ?? 0;
+    return (m * 60) + s;
   }
 
-  const handleMinsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    const minutes = value === "" ? null : Number(value);
-    setCallMins(minutes);
-    const totalSeconds = calculateTotalSeconds(minutes, callSecs);
-    setCallDuration(totalSeconds);
-  }
-
-  const handleSecsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    let seconds = value === "" ? null : Number(value);
-    if (seconds !== null && seconds > 59) seconds = 59;
-    setCallSecs(seconds);
-    const totalSeconds = calculateTotalSeconds(callMins, seconds);
-    setCallDuration(totalSeconds);
+  const handleDurationChange = (type: 'min' | 'sec', val: string) => {
+    const num = val === "" ? null : Number(val);
+    if (type === 'min') {
+        setCallMins(num);
+        setCallDuration(calculateTotalSeconds(num, callSecs));
+    } else {
+        const safeSec = num !== null && num > 59 ? 59 : num;
+        setCallSecs(safeSec);
+        setCallDuration(calculateTotalSeconds(callMins, safeSec));
+    }
   }
 
   const handleNotEligibleReasonChange = (reason: string) => {
     setNotEligibleReason(reason)
-    if (reason === "Other") {
-      setNote("") 
-    } else {
-      setNote(reason) 
-    }
+    setNote(reason === "Other" ? "" : reason) 
   }
 
+  const handleQuickNote = (text: string) => {
+      setRemarks(prev => prev ? `${prev}, ${text}` : text);
+  }
+
+  // --- CORE ACTIONS ---
   const updateLeadStatusToFollowUp = async () => {
     try {
-      const updateData: any = { 
-        status: "follow_up",
-        last_contacted: new Date().toISOString()
-      }
-      if (loanAmount !== null && !isNaN(loanAmount) && loanAmount >= 0) updateData.loan_amount = loanAmount
+      const updateData: any = { status: "follow_up", last_contacted: new Date().toISOString() }
+      if (loanAmount !== null && !isNaN(loanAmount)) updateData.loan_amount = loanAmount
       if (remarks.trim()) updateData.notes = remarks
 
       const { error } = await supabase.from("leads").update(updateData).eq("id", leadId)
@@ -148,280 +137,220 @@ export function LeadStatusUpdater({
       
       setStatus("follow_up")
       onStatusUpdate?.("follow_up", note) 
-      setRemarks("")
-      setNote("")
+      setRemarks(""); setNote("");
       toast.success("Lead status set to Call Back.");
-    } catch (error) {
-      console.error("Error", error)
-      toast.error("Failed to update status.")
-    }
+    } catch (error) { console.error(error); toast.error("Failed to update status.") }
   }
 
   const handleStatusUpdate = async () => {
-    // --- VALIDATION CHECKS ---
-    const isNotEligible = status === "not_eligible"
-    const isNoteEmpty = !note.trim()
-    const isNRStatus = status === 'nr'
-
-    if (!status) { toast.error("Validation Failed", { description: "Please select a status." }); return }
-    if (isNotEligible && isNoteEmpty) { toast.error("Validation Failed", { description: "Specify 'Reason for Not Eligible'." }); return }
-    if (status === "follow_up") { if (!isModalOpen) setIsModalOpen(true); return }
-    if (isCallInitiated && !isNRStatus && (callDuration === null || callDuration <= 0)) {
-        toast.error("Validation Failed", { description: "Call Duration must be > 0." }); return
-    }
-    if (isCallInitiated && isNRStatus && callDuration === null) setCallDuration(0)
+    // Validation
+    if (!status) { toast.error("Status Required", { description: "Please select a status." }); return }
+    if (status === "not_eligible" && !note.trim()) { toast.error("Reason Required", { description: "Specify why not eligible." }); return }
+    if (status === "follow_up") { setIsModalOpen(true); return }
     
+    // Call Duration Validation
+    if (isCallInitiated && status !== 'nr') {
+        if (callDuration === null || callDuration <= 0) {
+            toast.error("Invalid Duration", { description: "Call duration must be > 0 seconds." }); return
+        }
+    }
+
     setIsUpdating(true)
     try {
       let finalStatus = status; 
-      const updateData: any = { 
-        last_contacted: new Date().toISOString()
-      }
+      const updateData: any = { last_contacted: new Date().toISOString() }
       
-      if (loanAmount !== null && !isNaN(loanAmount) && loanAmount >= 0) updateData.loan_amount = loanAmount
+      if (loanAmount !== null && !isNaN(loanAmount)) updateData.loan_amount = loanAmount
       if (remarks.trim()) updateData.notes = remarks
-      if (isNotEligible && note.trim()) {
-        updateData.notes = updateData.notes ? `${updateData.notes}\n\nReason for Not Eligible: ${note}` : `Reason for Not Eligible: ${note}`
+      if (status === "not_eligible" && note.trim()) {
+        updateData.notes = updateData.notes ? `${updateData.notes}\n\nNot Eligible: ${note}` : `Not Eligible: ${note}`
       }
 
-      // --- NEW LOGIC: TWO-STRIKE RULE (NO RE-ASSIGNMENT) ---
+      // --- AUTOMATION: TWO-STRIKE RULE ---
       if (status === "Not_Interested") {
-        // 1. Fetch current lead tags
-        const { data: leadData } = await supabase
-          .from("leads")
-          .select("tags")
-          .eq("id", leadId)
-          .single()
-        
-        // --- Robust Tag Parsing ---
+        const { data: leadData } = await supabase.from("leads").select("tags").eq("id", leadId).single()
         let currentTags: string[] = [];
-        if (Array.isArray(leadData?.tags)) {
-             currentTags = leadData.tags;
-        } else if (typeof leadData?.tags === 'string') {
-             try {
-                const parsed = JSON.parse(leadData.tags);
-                if (Array.isArray(parsed)) currentTags = parsed;
-             } catch (e) {
-                currentTags = []; 
-             }
-        }
+        try { currentTags = Array.isArray(leadData?.tags) ? leadData.tags : JSON.parse(leadData?.tags || '[]'); } catch(e){}
         
-        // --- STRIKE CHECK ---
         if (currentTags.includes("NI_STRIKE_1")) {
-            // STRIKE 2: DEAD BUCKET
-            finalStatus = "dead_bucket"
-            // We DO NOT change assigned_to. It stays with the user.
+            finalStatus = "dead_bucket" // Strike 2
         } else {
-            // STRIKE 1: RECYCLE POOL
-            finalStatus = "recycle_pool"
-            // We DO NOT change assigned_to. It stays with the user.
+            finalStatus = "recycle_pool" // Strike 1
             updateData.tags = [...currentTags, "NI_STRIKE_1"]
         }
       }
       
-      // Update the status in our payload
       updateData.status = finalStatus;
 
-      // --- EXECUTE UPDATE ---
-      if (status !== currentStatus || isCallInitiated) {
-          const { error } = await supabase
-            .from("leads")
-            .update(updateData)
-            .eq("id", leadId)
-
-          if (error) {
-            console.error("Supabase Error:", error);
-            throw error;
-          }
-          
-          // Notify Parent with the FINAL calculated status
-          onStatusUpdate?.(finalStatus, note) 
-          
+      // Update DB
+      const { error } = await supabase.from("leads").update(updateData).eq("id", leadId)
+      if (error) throw error;
+      
+      onStatusUpdate?.(finalStatus, note) 
+      
+      // Log System Note
+      if (finalStatus !== status) {
+          const logContent = finalStatus === "recycle_pool" 
+            ? "System: Lead marked 'Not Interested' (Strike 1). Recycled." 
+            : "System: Lead marked 'Not Interested' twice. Moved to Dead Bucket.";
+            
           const { data: { user } } = await supabase.auth.getUser()
-
-          if (user && status !== currentStatus) {
-            // Log System Note about the automation
-            let logContent = `Status changed to: ${statusOptions.find(o => o.value === status)?.label || status}`;
-            
-            if (finalStatus === "recycle_pool") {
-                logContent = "System: Lead marked 'Not Interested' (Strike 1). Status set to Recycle Pool.";
-            } else if (finalStatus === "dead_bucket") {
-                logContent = "System: Lead marked 'Not Interested' twice. Status set to Dead Bucket.";
-            }
-
-            const { error: noteError } = await supabase
-              .from("notes")
-              .insert({
-                lead_id: leadId,
-                user_id: user.id,
-                content: logContent,
-                note_type: "status_change", 
-              })
-            
-            if (noteError) console.error("Error logging note:", noteError)
-          }
+          if(user) await supabase.from("notes").insert({ lead_id: leadId, user_id: user.id, content: logContent, note_type: "status_change" })
       }
 
+      // Log Call if needed
       if (isCallInitiated) {
-        await logCall(callDuration as number)
+        await logCall(callDuration || 0)
       }
       
-      // Cleanup
-      setNote("")
-      setRemarks("")
-      setCallDuration(null)
-      setCallMins(null)
-      setCallSecs(null)
-      setNotEligibleReason("")
-      setStatus("")
-      
-      if (finalStatus === "recycle_pool" || finalStatus === "dead_bucket") {
-        toast.success("Lead status updated (Recycled/Dead).")
-      } else {
-        toast.success("Lead status updated successfully!")
-      }
+      // Reset UI
+      setNote(""); setRemarks(""); setCallDuration(null); setCallMins(null); setCallSecs(null); setNotEligibleReason(""); setStatus("");
+      toast.success("Updated successfully!")
 
     } catch (error: any) {
-      console.error("Error updating lead status:", error)
-      toast.error(`Error: ${error.message || "Failed to update lead"}`)
+      console.error(error); toast.error(`Update failed: ${error.message}`)
     } finally {
       setIsUpdating(false)
     }
   }
 
-  const logCall = async (finalCallDuration: number) => {
+  const logCall = async (duration: number) => {
     try {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
-        let duration = finalCallDuration
-        if (activeCall && activeCall.leadId === leadId) duration = await updateCallDuration(leadId, "")
-        const { data, error } = await supabase.from("call_logs").insert({
+        
+        // Use context duration if active call matches
+        let finalDuration = duration
+        if (activeCall && activeCall.leadId === leadId) finalDuration = await updateCallDuration(leadId, "")
+        
+        const { data } = await supabase.from("call_logs").insert({
             lead_id: leadId, user_id: user.id, call_type: "outbound", call_status: "connected",
-            duration_seconds: duration, notes: remarks || "Call initiated from lead details",
+            duration_seconds: finalDuration, notes: remarks || "Call initiated from lead details",
         }).select().single()
-        if (error) throw error
-        toast.success("Call logged", { description: `Duration: ${formatDuration(duration)}` })
-        if (data && onCallLogged) onCallLogged(data.id)
+        
         if (activeCall && activeCall.leadId === leadId) endCall(leadId)
-    } catch (error) { console.error("Error logging call:", error) }
+        if (data && onCallLogged) onCallLogged(data.id)
+    } catch (error) { console.error("Call Log Error:", error) }
   }
 
-  const currentStatusOption = statusOptions.find((option) => option.value === currentStatus)
-  const isInvalidCallDuration = isCallInitiated && status !== 'nr' && (callDuration === null || callDuration <= 0)
-  const isFormInvalid = (status === "not_eligible" && !note.trim()) || (status === "follow_up" && !isCallInitiated) || isInvalidCallDuration 
-  const isButtonDisabled = isUpdating || status === "" || (status === currentStatus && !isCallInitiated && status !== "follow_up") || isFormInvalid || status === "follow_up" 
-  const whatsappLink = getWhatsappLink();
-  const isWhatsappEnabled = whatsappLink !== "#";
+  // --- RENDER HELPERS ---
+  const isButtonDisabled = isUpdating || !status || (status === "not_eligible" && !note.trim());
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-lg">
-          {isCallInitiated ? "Log Call & Update Status" : "Lead Status"}
+    <Card className="border-l-4 border-l-blue-500 shadow-sm">
+      <CardHeader className="flex flex-row items-center justify-between py-3 bg-slate-50/50">
+        <CardTitle className="text-base font-semibold flex items-center gap-2">
+          {isCallInitiated ? <Phone className="h-4 w-4 text-blue-600 animate-pulse"/> : <Activity className="h-4 w-4 text-slate-500"/>}
+          {isCallInitiated ? "Active Call Session" : "Update Status"}
         </CardTitle>
-        {isWhatsappEnabled ? (
-            <a href={whatsappLink} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center p-1 rounded-full bg-green-500 hover:bg-green-600 transition-colors shadow-md">
-                <MessageSquare className="h-4 w-4 text-white" /> 
-            </a>
-        ) : (
-             <div className="flex items-center justify-center p-1 rounded-full bg-gray-400 cursor-not-allowed shadow-md">
-                <MessageSquare className="h-4 w-4 text-white" /> 
-            </div>
-        )}
+        <TooltipProvider>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <a 
+                      href={whatsappLink} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className={cn("p-2 rounded-full transition-all shadow-sm", isWhatsappEnabled ? "bg-green-500 hover:bg-green-600 text-white" : "bg-slate-200 text-slate-400 cursor-not-allowed")}
+                      onClick={(e) => !isWhatsappEnabled && e.preventDefault()}
+                    >
+                        <MessageSquare className="h-4 w-4" /> 
+                    </a>
+                </TooltipTrigger>
+                <TooltipContent><p>{isWhatsappEnabled ? "Chat on WhatsApp" : "No Phone Number"}</p></TooltipContent>
+            </Tooltip>
+        </TooltipProvider>
       </CardHeader>
-      <CardContent className="space-y-4 max-h-[80vh] overflow-y-auto">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Current Status:</span>
-          <Badge className={currentStatusOption?.color}>{currentStatusOption?.label}</Badge>
+      
+      <CardContent className="space-y-5 pt-4">
+        {/* Current Status Badge */}
+        <div className="flex justify-between items-center bg-slate-50 p-2 rounded border">
+          <span className="text-xs font-medium text-slate-500">CURRENT STATUS</span>
+          <Badge className={cn("px-3 py-1", currentStatusOption?.color)}>{currentStatusOption?.label || currentStatus}</Badge>
         </div>
 
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Update Status:</label>
-            <Select 
-              value={status} 
-              onValueChange={(newStatus) => {
-                setTempStatus(newStatus)
-                if (newStatus === "follow_up") setIsModalOpen(true)
-                else setStatus(newStatus)
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a New Status..." /> 
-              </SelectTrigger>
+        {/* Status Selector */}
+        <div className="space-y-2">
+            <label className="text-xs font-semibold text-slate-700 uppercase">New Status</label>
+            <Select value={status} onValueChange={(val) => {
+                if (val === "follow_up") setIsModalOpen(true)
+                else setStatus(val)
+            }}>
+              <SelectTrigger className="h-10 bg-white"><SelectValue placeholder="Select outcome..." /></SelectTrigger>
               <SelectContent>
-                {statusOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                ))}
+                {STATUS_OPTIONS.map((o) => (<SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>))}
               </SelectContent>
             </Select>
-          </div>
-          
-          {status === "follow_up" && (
-            <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-indigo-800">Follow-up selected. Please schedule the time.</span>
-                <Button size="sm" variant="secondary" onClick={() => setIsModalOpen(true)}>Schedule Now</Button>
-              </div>
-            </div>
-          )}
+        </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-2">
-              <IndianRupee className="h-4 w-4" /> Loan Amount:
-            </label>
-            <Input type="number" placeholder="Enter desired loan amount" value={loanAmount !== null ? String(loanAmount) : ""} onChange={(e) => { const value = e.target.value; setLoanAmount(value === "" ? null : Number(value)) }} min="0" />
-          </div>
+        {/* Loan Amount Input */}
+        <div className="space-y-2">
+            <label className="text-xs font-semibold text-slate-700 uppercase flex items-center gap-1"><IndianRupee className="h-3 w-3"/> Loan Amount</label>
+            <Input type="number" placeholder="0.00" value={loanAmount ?? ""} onChange={e => setLoanAmount(e.target.value ? Number(e.target.value) : null)} min="0" />
+        </div>
 
-          {isCallInitiated && (
-            <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
-                <Clock className="h-4 w-4" /> Call Duration: {status !== 'nr' && <span className="text-red-500">* (Required &gt; 0 total seconds)</span>}
-              </label>
+        {/* Call Timer (Conditional) */}
+        {isCallInitiated && (
+            <div className="space-y-2 p-3 bg-blue-50 border border-blue-100 rounded-md">
+              <label className="text-xs font-bold text-blue-800 uppercase flex items-center gap-1"><Clock className="h-3 w-3"/> Call Duration {status !== 'nr' && <span className="text-red-500">*</span>}</label>
               <div className="flex gap-2 items-center">
-                <div className="flex-1">
-                  <Input type="number" placeholder="Mins" value={callMins !== null ? String(callMins) : ""} onChange={handleMinsChange} min="0" disabled={status === 'nr'} className={cn(isInvalidCallDuration && "border-red-500")} />
-                  <p className="text-xs text-gray-500 mt-1">Minutes</p>
+                <div className="flex-1 relative">
+                  <Input type="number" placeholder="00" value={callMins ?? ""} onChange={e => handleDurationChange('min', e.target.value)} min="0" disabled={status === 'nr'} className="pr-8 bg-white" />
+                  <span className="absolute right-3 top-2.5 text-xs text-slate-400">m</span>
                 </div>
-                <span className="text-2xl font-bold">:</span>
-                <div className="flex-1">
-                  <Input type="number" placeholder="Secs" value={callSecs !== null ? String(callSecs) : ""} onChange={handleSecsChange} min="0" max="59" disabled={status === 'nr'} className={cn(isInvalidCallDuration && "border-red-500")} />
-                  <p className="text-xs text-gray-500 mt-1">Seconds</p>
+                <span className="text-xl font-light text-slate-300">:</span>
+                <div className="flex-1 relative">
+                  <Input type="number" placeholder="00" value={callSecs ?? ""} onChange={e => handleDurationChange('sec', e.target.value)} min="0" max="59" disabled={status === 'nr'} className="pr-8 bg-white" />
+                  <span className="absolute right-3 top-2.5 text-xs text-slate-400">s</span>
                 </div>
               </div>
+              {status === 'nr' && <p className="text-[10px] text-blue-600 italic">Duration auto-set to 0 for NR.</p>}
             </div>
-          )}
+        )}
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Remarks/Notes:</label>
-            <Textarea placeholder="Add any remarks or notes..." value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} />
-          </div>
-
-          {status === "not_eligible" && (
-            <div className="space-y-3 p-4 bg-red-50 border border-red-100 rounded-md">
-              <label className="text-sm font-medium text-red-900 flex items-center gap-2"><AlertCircle className="h-4 w-4" /> Reason for Ineligibility: <span className="text-red-600">*</span></label>
-              <div className="flex flex-col gap-2 mt-2">
-                {["Salary in CASH", "Low CIBIL Score", "Other"].map((reason) => (
-                    <label key={reason} className="flex items-center space-x-2 cursor-pointer p-2 hover:bg-red-100/50 rounded transition-colors">
-                    <input type="radio" name="notEligibleReason" value={reason} checked={notEligibleReason === reason} onChange={() => handleNotEligibleReasonChange(reason)} className="w-4 h-4 text-red-600 border-gray-300 focus:ring-red-500" />
-                    <span className="text-sm text-gray-700">{reason}</span>
+        {/* Not Eligible Reason (Conditional) */}
+        {status === "not_eligible" && (
+            <div className="space-y-2 p-3 bg-red-50 border border-red-100 rounded-md animate-in fade-in zoom-in-95 duration-200">
+              <label className="text-xs font-bold text-red-800 uppercase flex items-center gap-1"><AlertCircle className="h-3 w-3"/> Ineligibility Reason <span className="text-red-600">*</span></label>
+              <div className="grid grid-cols-1 gap-1">
+                {["Salary in CASH", "Low CIBIL Score", "Other"].map((r) => (
+                    <label key={r} className="flex items-center space-x-2 cursor-pointer p-1.5 hover:bg-white/50 rounded">
+                        <input type="radio" name="reason" value={r} checked={notEligibleReason === r} onChange={() => handleNotEligibleReasonChange(r)} className="accent-red-600" />
+                        <span className="text-sm text-slate-700">{r}</span>
                     </label>
                 ))}
               </div>
               {notEligibleReason === "Other" && (
-                <div className="mt-2 animate-in fade-in slide-in-from-top-1">
-                   <Textarea placeholder="Please specify the reason..." value={note} onChange={(e) => setNote(e.target.value)} rows={2} className={cn("bg-white", isFormInvalid && "border-red-500")} />
-                </div>
+                <Textarea placeholder="Specific reason..." value={note} onChange={e => setNote(e.target.value)} className="bg-white mt-2" />
               )}
             </div>
-          )}
+        )}
 
-          <Button onClick={handleStatusUpdate} disabled={isButtonDisabled} className="w-full">
-            {isUpdating ? "Updating..." : isCallInitiated ? "Log Call & Update Status" : "Update Status"}
-          </Button>
+        {/* General Remarks */}
+        <div className="space-y-2">
+            <div className="flex justify-between items-center">
+                <label className="text-xs font-semibold text-slate-700 uppercase">Remarks</label>
+                {/* Quick Note Chips */}
+                <div className="flex gap-1">
+                    {QUICK_NOTES.slice(0,3).map(q => (
+                        <button key={q} onClick={() => handleQuickNote(q)} className="text-[10px] px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 rounded border transition-colors">{q}</button>
+                    ))}
+                </div>
+            </div>
+            <Textarea placeholder="Add notes..." value={remarks} onChange={e => setRemarks(e.target.value)} rows={3} className="resize-none" />
         </div>
+
+        {/* Submit Button */}
+        <Button onClick={handleStatusUpdate} disabled={isButtonDisabled} className="w-full h-10 text-sm font-semibold shadow-sm">
+            {isUpdating ? "Saving..." : isCallInitiated ? "End Call & Update" : "Update Status"}
+        </Button>
       </CardContent>
-      <ScheduleFollowUpModal open={isModalOpen} onOpenChange={(open) => { setIsModalOpen(open); if (!open) setStatus("") }} onScheduleSuccess={() => updateLeadStatusToFollowUp()} defaultLeadId={leadId} />
+
+      <ScheduleFollowUpModal 
+        open={isModalOpen} 
+        onOpenChange={(open) => { setIsModalOpen(open); if(!open) setStatus("") }} 
+        onScheduleSuccess={updateLeadStatusToFollowUp} 
+        defaultLeadId={leadId} 
+      />
     </Card>
   )
 }
