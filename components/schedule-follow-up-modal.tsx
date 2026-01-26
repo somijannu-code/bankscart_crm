@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -29,6 +29,7 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
+  CommandSeparator
 } from "@/components/ui/command";
 import {
   Popover,
@@ -41,9 +42,9 @@ import { Badge } from "@/components/ui/badge";
 import { 
   Plus, Loader2, Calendar as CalendarIcon, Check, ChevronsUpDown, 
   Phone, Users, Mail, MessageSquare, ExternalLink, CalendarCheck, Download, Flag,
-  Clock, AlertTriangle
+  Clock, AlertTriangle, AlertCircle, CalendarDays
 } from "lucide-react";
-import { format, addDays, nextMonday, setHours, setMinutes, isPast, isToday, isTomorrow, addMinutes } from "date-fns";
+import { format, addDays, nextMonday, setHours, setMinutes, isPast, isToday, isTomorrow, addMinutes, nextFriday } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -79,9 +80,8 @@ const ACTIVITY_TYPES = [
 
 const QUICK_NOTES = ["Discuss Rates", "Collect Docs", "Negotiation", "Final Closing", "Intro Call"];
 
-// Helper for Lead Status Colors
 const getStatusColor = (status: string) => {
-  switch (status.toLowerCase()) {
+  switch (status?.toLowerCase()) {
     case 'interested': return 'bg-green-100 text-green-800 border-green-200';
     case 'new': return 'bg-blue-100 text-blue-800 border-blue-200';
     case 'nr': return 'bg-gray-100 text-gray-800 border-gray-200';
@@ -103,11 +103,11 @@ export function ScheduleFollowUpModal({
   // Form State
   const [date, setDate] = useState<Date | undefined>(undefined);
   const [time, setTime] = useState("10:00");
-  const [duration, setDuration] = useState("30"); // minutes
+  const [duration, setDuration] = useState("30"); 
   const [leadId, setLeadId] = useState("");
   const [notes, setNotes] = useState("");
   const [activityType, setActivityType] = useState("call");
-  const [priority, setPriority] = useState("normal"); // normal | high
+  const [priority, setPriority] = useState("normal");
   
   // UI State
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -116,6 +116,7 @@ export function ScheduleFollowUpModal({
   const [leadOpen, setLeadOpen] = useState(false);
   const [successData, setSuccessData] = useState<{ google: string; ics: string } | null>(null);
   const [conflictCount, setConflictCount] = useState(0);
+  const [existingFollowUp, setExistingFollowUp] = useState<string | null>(null);
 
   const supabase = createClient();
   const router = useRouter();
@@ -128,6 +129,7 @@ export function ScheduleFollowUpModal({
       setSuccessData(null);
       setPriority("normal");
       setConflictCount(0);
+      setExistingFollowUp(null);
       if (!date) {
         const tomorrow = addDays(new Date(), 1);
         setDate(tomorrow);
@@ -137,15 +139,18 @@ export function ScheduleFollowUpModal({
       setNotes("");
       setActivityType("call");
       setConflictCount(0);
+      setExistingFollowUp(null);
     }
   }, [isOpen, defaultLeadId]);
 
-  // Conflict Detection Effect
+  // Conflict & Duplicate Check Effect
   useEffect(() => {
-    if (isOpen && date && time) {
-      checkConflicts();
-    }
+    if (isOpen && date && time) checkConflicts();
   }, [date, time, isOpen]);
+
+  useEffect(() => {
+    if (isOpen && leadId) checkExistingFollowUp();
+  }, [leadId, isOpen]);
 
   const fetchLeads = async () => {
     setFetching(true);
@@ -177,7 +182,6 @@ export function ScheduleFollowUpModal({
       const [hours, minutes] = time.split(":").map(Number);
       const scheduledTime = setMinutes(setHours(date, hours), minutes);
       
-      // Check +/- 30 mins window
       const startTime = addMinutes(scheduledTime, -29).toISOString();
       const endTime = addMinutes(scheduledTime, 29).toISOString();
 
@@ -185,19 +189,33 @@ export function ScheduleFollowUpModal({
         .from("follow_ups")
         .select("id", { count: 'exact', head: true })
         .eq("user_id", user.id)
-        .neq("status", "completed") // Only check pending
+        .neq("status", "completed") 
         .gte("scheduled_at", startTime)
         .lte("scheduled_at", endTime);
 
-      if (!error) {
-        setConflictCount(count || 0);
-      }
-    } catch (error) {
-      console.error("Conflict check failed:", error);
-    }
+      if (!error) setConflictCount(count || 0);
+    } catch (error) { console.error(error); }
   };
 
-  const setQuickSchedule = (type: "tomorrow" | "3days" | "next_week") => {
+  const checkExistingFollowUp = async () => {
+    if (!leadId) return;
+    try {
+      const { data, error } = await supabase
+        .from("follow_ups")
+        .select("scheduled_at")
+        .eq("lead_id", leadId)
+        .eq("status", "pending")
+        .gt("scheduled_at", new Date().toISOString())
+        .order("scheduled_at", { ascending: true })
+        .limit(1)
+        .single();
+
+      if (data) setExistingFollowUp(data.scheduled_at);
+      else setExistingFollowUp(null);
+    } catch (error) { setExistingFollowUp(null); }
+  };
+
+  const setQuickSchedule = (type: "tomorrow" | "3days" | "next_week" | "friday") => {
     const now = new Date();
     let newDate = new Date();
 
@@ -205,17 +223,13 @@ export function ScheduleFollowUpModal({
       case "tomorrow": newDate = addDays(now, 1); setTime("10:00"); break;
       case "3days": newDate = addDays(now, 3); setTime("11:00"); break;
       case "next_week": newDate = nextMonday(now); setTime("10:00"); break;
+      case "friday": newDate = nextFriday(now); setTime("15:00"); break;
     }
     setDate(newDate);
   };
 
   const handleQuickNote = (text: string) => {
-    setNotes(prev => {
-        const trimmed = prev.trim();
-        if (!trimmed) return text;
-        if (trimmed.endsWith(',') || trimmed.endsWith('.')) return `${trimmed} ${text}`;
-        return `${trimmed}, ${text}`;
-    });
+    setNotes(prev => prev ? `${prev}, ${text}` : text);
   };
 
   // --- CALENDAR GENERATORS ---
@@ -229,18 +243,7 @@ export function ScheduleFollowUpModal({
   const generateICSFile = (title: string, dateObj: Date, durationMins: number) => {
     const start = dateObj.toISOString().replace(/-|:|\.\d\d\d/g, "");
     const end = addMinutes(dateObj, durationMins).toISOString().replace(/-|:|\.\d\d\d/g, "");
-    
-    const icsContent = `BEGIN:VCALENDAR
-VERSION:2.0
-BEGIN:VEVENT
-URL:${document.location.href}
-DTSTART:${start}
-DTEND:${end}
-SUMMARY:${title}
-DESCRIPTION:${notes || "Follow up"}
-END:VEVENT
-END:VCALENDAR`;
-
+    const icsContent = `BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nURL:${document.location.href}\nDTSTART:${start}\nDTEND:${end}\nSUMMARY:${title}\nDESCRIPTION:${notes || "Follow up"}\nEND:VEVENT\nEND:VCALENDAR`;
     const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
     return URL.createObjectURL(blob);
   };
@@ -259,6 +262,26 @@ END:VCALENDAR`;
     if (isTomorrow(dateObj)) return <span className="font-medium text-blue-600">Tomorrow</span>;
     return <span>{format(dateObj, "PPP")}</span>;
   }
+
+  // --- GROUPED LEADS LOGIC ---
+  const groupedLeads = useMemo(() => {
+    const groups: Record<string, Lead[]> = {};
+    leads.forEach(lead => {
+        const status = lead.status || 'Unknown';
+        if (!groups[status]) groups[status] = [];
+        groups[status].push(lead);
+    });
+    // Sort keys to put "Interested" and "New" at top
+    const priority = ['Interested', 'new', 'follow_up'];
+    return Object.keys(groups).sort((a,b) => {
+        const idxA = priority.indexOf(a);
+        const idxB = priority.indexOf(b);
+        if (idxA > -1 && idxB > -1) return idxA - idxB;
+        if (idxA > -1) return -1;
+        if (idxB > -1) return 1;
+        return a.localeCompare(b);
+    }).map(status => ({ status, items: groups[status] }));
+  }, [leads]);
 
   const handleSchedule = async () => {
     if (!date || !leadId) {
@@ -298,7 +321,6 @@ END:VCALENDAR`;
 
       if (error) throw error;
 
-      // Success State Calculation
       const durationMins = parseInt(duration);
       const gLink = generateGCalLink(title, scheduledDateTime, durationMins);
       const iLink = generateICSFile(title, scheduledDateTime, durationMins);
@@ -376,10 +398,11 @@ END:VCALENDAR`;
             <div className="flex gap-2">
               <Button variant="outline" size="xs" onClick={() => setQuickSchedule("tomorrow")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Tomorrow</Button>
               <Button variant="outline" size="xs" onClick={() => setQuickSchedule("3days")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">In 3 Days</Button>
+              <Button variant="outline" size="xs" onClick={() => setQuickSchedule("friday")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Friday</Button>
               <Button variant="outline" size="xs" onClick={() => setQuickSchedule("next_week")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Next Week</Button>
             </div>
 
-            {/* Lead Selection (Rich Context) */}
+            {/* Lead Selection (Grouped & Rich Context) */}
             <div className="grid gap-2">
               <Label className="text-xs font-semibold text-slate-500 uppercase">Select Lead</Label>
               <Popover open={leadOpen} onOpenChange={setLeadOpen}>
@@ -394,26 +417,34 @@ END:VCALENDAR`;
                     <CommandInput placeholder="Search lead name..." />
                     <CommandList>
                       <CommandEmpty>No lead found.</CommandEmpty>
-                      <CommandGroup>
-                        {leads.map((lead) => (
-                          <CommandItem key={lead.id} value={lead.name} onSelect={() => { setLeadId(lead.id); setLeadOpen(false); }}>
-                            <Check className={cn("mr-2 h-4 w-4", leadId === lead.id ? "opacity-100" : "opacity-0")} />
-                            <div className="flex flex-col flex-1">
-                              <div className="flex justify-between items-center w-full">
-                                <span className="font-medium text-sm">{lead.name}</span>
-                                <Badge variant="outline" className={cn("text-[10px] h-5 px-1.5 font-medium border-0", getStatusColor(lead.status))}>
-                                    {lead.status}
-                                </Badge>
-                              </div>
-                              {lead.company && <span className="text-xs text-muted-foreground">{lead.company}</span>}
-                            </div>
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
+                      {groupedLeads.map((group) => (
+                        <CommandGroup key={group.status} heading={group.status} className="text-muted-foreground">
+                            {group.items.map(lead => (
+                                <CommandItem key={lead.id} value={lead.name} onSelect={() => { setLeadId(lead.id); setLeadOpen(false); }}>
+                                    <Check className={cn("mr-2 h-4 w-4", leadId === lead.id ? "opacity-100" : "opacity-0")} />
+                                    <div className="flex flex-col flex-1">
+                                    <div className="flex justify-between items-center w-full">
+                                        <span className="font-medium text-sm">{lead.name}</span>
+                                        <Badge variant="outline" className={cn("text-[10px] h-5 px-1.5 font-medium border-0", getStatusColor(lead.status))}>
+                                            {lead.status}
+                                        </Badge>
+                                    </div>
+                                    {lead.company && <span className="text-xs text-muted-foreground">{lead.company}</span>}
+                                    </div>
+                                </CommandItem>
+                            ))}
+                        </CommandGroup>
+                      ))}
                     </CommandList>
                   </Command>
                 </PopoverContent>
               </Popover>
+              {existingFollowUp && (
+                  <div className="flex items-center gap-2 p-2 bg-amber-50 text-amber-800 text-xs rounded border border-amber-200 mt-1 animate-in slide-in-from-top-2">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>Warning: Pending follow-up on <strong>{format(new Date(existingFollowUp), "MMM d, h:mm a")}</strong></span>
+                  </div>
+              )}
             </div>
 
             {/* Date & Time Row */}
