@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Phone, Clock, MessageSquare, IndianRupee, AlertCircle, Sparkles, Send } from "lucide-react" 
+import { Phone, Clock, MessageSquare, IndianRupee, AlertCircle, Sparkles, Send, Command } from "lucide-react" 
 import { useCallTracking } from "@/context/call-tracking-context"
 import { toast } from "sonner"
 import { ScheduleFollowUpModal } from "./schedule-follow-up-modal" 
@@ -27,19 +27,19 @@ interface LeadStatusUpdaterProps {
 }
 
 const STATUS_OPTIONS = [
-  { value: "new", label: "New", color: "bg-blue-100 text-blue-800" },
-  { value: "Interested", label: "Interested", color: "bg-green-100 text-green-800" },
-  { value: "Documents_Sent", label: "Documents Sent", color: "bg-purple-100 text-purple-800" },
-  { value: "Login", label: "Login", color: "bg-orange-100 text-orange-800" },
-  { value: "Disbursed", label: "Disbursed", color: "bg-emerald-100 text-emerald-800" },
-  { value: "Not_Interested", label: "Not Interested", color: "bg-red-100 text-red-800" },
-  { value: "follow_up", label: "Call Back", color: "bg-indigo-100 text-indigo-800" },
-  { value: "not_eligible", label: "Not Eligible", color: "bg-red-100 text-red-800" },
-  { value: "nr", label: "NR", color: "bg-gray-100 text-gray-800" },
-  { value: "self_employed", label: "Self Employed", color: "bg-amber-100 text-amber-800" },
+  { value: "new", label: "New", color: "bg-blue-100 text-blue-800", btnColor: "bg-blue-600 hover:bg-blue-700" },
+  { value: "Interested", label: "Interested", color: "bg-green-100 text-green-800", btnColor: "bg-green-600 hover:bg-green-700" },
+  { value: "Documents_Sent", label: "Documents Sent", color: "bg-purple-100 text-purple-800", btnColor: "bg-purple-600 hover:bg-purple-700" },
+  { value: "Login", label: "Login", color: "bg-orange-100 text-orange-800", btnColor: "bg-orange-600 hover:bg-orange-700" },
+  { value: "Disbursed", label: "Disbursed", color: "bg-emerald-100 text-emerald-800", btnColor: "bg-emerald-600 hover:bg-emerald-700" },
+  { value: "Not_Interested", label: "Not Interested", color: "bg-red-100 text-red-800", btnColor: "bg-red-600 hover:bg-red-700" },
+  { value: "follow_up", label: "Call Back", color: "bg-indigo-100 text-indigo-800", btnColor: "bg-indigo-600 hover:bg-indigo-700" },
+  { value: "not_eligible", label: "Not Eligible", color: "bg-rose-100 text-rose-800", btnColor: "bg-rose-600 hover:bg-rose-700" },
+  { value: "nr", label: "NR", color: "bg-gray-100 text-gray-800", btnColor: "bg-slate-600 hover:bg-slate-700" },
+  { value: "self_employed", label: "Self Employed", color: "bg-amber-100 text-amber-800", btnColor: "bg-amber-600 hover:bg-amber-700" },
 ]
 
-const QUICK_NOTES = ["No Answer", "Busy", "Switch Off", "Call Later", "Wrong Number", "Docs Pending"];
+const QUICK_NOTES = ["No Answer", "Busy", "Switch Off", "Call Later", "Wrong Number", "Docs Pending", "Rate Issue"];
 
 export function LeadStatusUpdater({ 
   leadId, 
@@ -70,6 +70,7 @@ export function LeadStatusUpdater({
 
   // --- DERIVED STATE ---
   const currentStatusOption = useMemo(() => STATUS_OPTIONS.find((o) => o.value === currentStatus), [currentStatus])
+  const selectedStatusOption = useMemo(() => STATUS_OPTIONS.find((o) => o.value === status), [status])
   
   const whatsappLink = useMemo(() => {
       const cleaned = String(leadPhoneNumber || "").replace(/[^0-9]/g, '');
@@ -112,6 +113,15 @@ export function LeadStatusUpdater({
     return { m, s };
   }
 
+  const formatCurrency = (value: number | null) => {
+    if (value === null || isNaN(value)) return "";
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0
+    }).format(value);
+  }
+
   const handleManualTimeChange = (type: 'min' | 'sec', val: string) => {
     const num = val === "" ? 0 : parseInt(val);
     const current = formatTime(callDurationOverride ?? elapsedTime);
@@ -130,11 +140,17 @@ export function LeadStatusUpdater({
   }
 
   const handleQuickNote = (text: string) => {
-      setRemarks(prev => prev ? `${prev}, ${text}` : text);
+      setRemarks(prev => {
+          const trimmed = prev.trim();
+          if (!trimmed) return text;
+          if (trimmed.endsWith(',') || trimmed.endsWith('.')) return `${trimmed} ${text}`;
+          return `${trimmed}, ${text}`;
+      });
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault(); // Prevent newline in textarea
         handleStatusUpdate();
     }
   }
@@ -251,11 +267,12 @@ export function LeadStatusUpdater({
   // --- RENDER HELPERS ---
   const isButtonDisabled = isUpdating || !status || (status === "not_eligible" && !note.trim());
   const timerDisplay = formatTime(callDurationOverride ?? elapsedTime);
+  const formattedLoanAmount = formatCurrency(loanAmount);
 
   return (
-    <Card className="border-l-4 border-l-blue-500 shadow-sm relative overflow-hidden">
+    <Card className="border-l-4 border-l-blue-500 shadow-sm relative overflow-hidden transition-all hover:shadow-md">
       {/* Celebration Effect for Conversion */}
-      {status === 'Disbursed' && <div className="absolute inset-0 pointer-events-none bg-emerald-500/5 animate-pulse" />}
+      {status === 'Disbursed' && <div className="absolute inset-0 pointer-events-none bg-emerald-500/10 animate-pulse z-0" />}
 
       <CardHeader className="flex flex-row items-center justify-between py-3 bg-slate-50/50">
         <CardTitle className="text-base font-semibold flex items-center gap-2">
@@ -280,11 +297,11 @@ export function LeadStatusUpdater({
         </TooltipProvider>
       </CardHeader>
       
-      <CardContent className="space-y-5 pt-4">
+      <CardContent className="space-y-5 pt-4 relative z-10">
         {/* Current Status Badge */}
-        <div className="flex justify-between items-center bg-slate-50 p-2 rounded border">
-          <span className="text-xs font-medium text-slate-500">CURRENT</span>
-          <Badge className={cn("px-3 py-1", currentStatusOption?.color)}>{currentStatusOption?.label || currentStatus}</Badge>
+        <div className="flex justify-between items-center bg-slate-50 p-2 rounded border border-slate-100">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">CURRENT STAGE</span>
+          <Badge className={cn("px-3 py-1 shadow-sm", currentStatusOption?.color)}>{currentStatusOption?.label || currentStatus}</Badge>
         </div>
 
         {/* Status Selector */}
@@ -294,7 +311,9 @@ export function LeadStatusUpdater({
                 if (val === "follow_up") setIsModalOpen(true)
                 else setStatus(val)
             }}>
-              <SelectTrigger className="h-10 bg-white"><SelectValue placeholder="Select outcome..." /></SelectTrigger>
+              <SelectTrigger className={cn("h-10 bg-white transition-colors", status ? "border-blue-300 ring-1 ring-blue-100" : "")}>
+                <SelectValue placeholder="Select outcome..." />
+              </SelectTrigger>
               <SelectContent>
                 {STATUS_OPTIONS.map((o) => (
                     <SelectItem key={o.value} value={o.value}>
@@ -308,31 +327,41 @@ export function LeadStatusUpdater({
             </Select>
         </div>
 
-        {/* Loan Amount Input */}
+        {/* Loan Amount Input with Helper */}
         <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-700 uppercase flex items-center gap-1"><IndianRupee className="h-3 w-3"/> Loan Amount</label>
-            <Input type="number" placeholder="0.00" value={loanAmount ?? ""} onChange={e => setLoanAmount(e.target.value ? Number(e.target.value) : null)} min="0" />
+            <label className="text-xs font-semibold text-slate-700 uppercase flex items-center justify-between">
+                <span className="flex items-center gap-1"><IndianRupee className="h-3 w-3"/> Loan Amount</span>
+                {loanAmount && loanAmount > 0 && <span className="text-[10px] text-green-600 font-bold bg-green-50 px-1 rounded">{formattedLoanAmount}</span>}
+            </label>
+            <Input 
+                type="number" 
+                placeholder="0.00" 
+                value={loanAmount ?? ""} 
+                onChange={e => setLoanAmount(e.target.value ? Number(e.target.value) : null)} 
+                min="0" 
+                className="font-mono"
+            />
         </div>
 
         {/* Call Timer (Interactive) */}
         {isCallInitiated && (
-            <div className={cn("space-y-2 p-3 border rounded-md transition-colors", status === 'nr' ? "bg-gray-50 border-gray-200 opacity-60" : "bg-blue-50 border-blue-200")}>
+            <div className={cn("space-y-2 p-3 border rounded-md transition-all duration-300", status === 'nr' ? "bg-gray-50 border-gray-200 opacity-60" : "bg-blue-50 border-blue-200 shadow-sm")}>
               <div className="flex justify-between items-center">
                  <label className="text-xs font-bold text-blue-800 uppercase flex items-center gap-1"><Clock className="h-3 w-3"/> Duration</label>
-                 {!callDurationOverride && status !== 'nr' && <span className="text-[10px] text-blue-600 animate-pulse">● Live Recording</span>}
+                 {!callDurationOverride && status !== 'nr' && <span className="text-[10px] text-blue-600 animate-pulse font-medium flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-600 block"/> Live Recording</span>}
               </div>
               <div className="flex gap-2 items-center">
                 <div className="flex-1 relative">
-                  <Input type="number" placeholder="00" value={timerDisplay.m} onChange={e => handleManualTimeChange('min', e.target.value)} disabled={status === 'nr'} className="pr-8 bg-white font-mono" />
-                  <span className="absolute right-3 top-2.5 text-xs text-slate-400">m</span>
+                  <Input type="number" placeholder="00" value={timerDisplay.m} onChange={e => handleManualTimeChange('min', e.target.value)} disabled={status === 'nr'} className="pr-8 bg-white font-mono text-center" />
+                  <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-medium">m</span>
                 </div>
                 <span className="text-xl font-light text-slate-400">:</span>
                 <div className="flex-1 relative">
-                  <Input type="number" placeholder="00" value={timerDisplay.s} onChange={e => handleManualTimeChange('sec', e.target.value)} disabled={status === 'nr'} className="pr-8 bg-white font-mono" />
-                  <span className="absolute right-3 top-2.5 text-xs text-slate-400">s</span>
+                  <Input type="number" placeholder="00" value={timerDisplay.s} onChange={e => handleManualTimeChange('sec', e.target.value)} disabled={status === 'nr'} className="pr-8 bg-white font-mono text-center" />
+                  <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-medium">s</span>
                 </div>
               </div>
-              {status === 'nr' && <p className="text-[10px] text-gray-500 italic">Duration auto-set to 0 for NR.</p>}
+              {status === 'nr' && <p className="text-[10px] text-gray-500 italic text-center mt-1">Duration auto-set to 0 for NR.</p>}
             </div>
         )}
 
@@ -349,34 +378,59 @@ export function LeadStatusUpdater({
                 ))}
               </div>
               {notEligibleReason === "Other" && (
-                <Textarea placeholder="Specific reason..." value={note} onChange={e => setNote(e.target.value)} className="bg-white mt-2" />
+                <Textarea placeholder="Specific reason..." value={note} onChange={e => setNote(e.target.value)} className="bg-white mt-2 resize-none" />
               )}
             </div>
         )}
 
         {/* General Remarks with Quick Chips */}
         <div className="space-y-2">
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center flex-wrap gap-2">
                 <label className="text-xs font-semibold text-slate-700 uppercase">Remarks</label>
-                <div className="flex gap-1">
-                    {QUICK_NOTES.slice(0,3).map(q => (
-                        <button key={q} onClick={() => handleQuickNote(q)} className="text-[10px] px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 rounded border transition-colors">{q}</button>
+                <div className="flex gap-1 flex-wrap justify-end">
+                    {QUICK_NOTES.slice(0, 4).map(q => (
+                        <button 
+                            key={q} 
+                            onClick={() => handleQuickNote(q)} 
+                            className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full border border-slate-200 transition-colors"
+                        >
+                            {q}
+                        </button>
                     ))}
                 </div>
             </div>
-            <Textarea 
-                placeholder="Add notes... (Ctrl+Enter to save)" 
-                value={remarks} 
-                onChange={e => setRemarks(e.target.value)} 
-                onKeyDown={handleKeyDown}
-                rows={3} 
-                className="resize-none focus-visible:ring-blue-500" 
-            />
+            <div className="relative">
+                <Textarea 
+                    placeholder="Add notes..." 
+                    value={remarks} 
+                    onChange={e => setRemarks(e.target.value)} 
+                    onKeyDown={handleKeyDown}
+                    rows={3} 
+                    className="resize-none focus-visible:ring-blue-500 pr-8" 
+                />
+                <div className="absolute bottom-2 right-2">
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger>
+                                <Command className="h-3 w-3 text-slate-300" />
+                            </TooltipTrigger>
+                            <TooltipContent><p className="text-xs">Press Ctrl+Enter to save</p></TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                </div>
+            </div>
         </div>
 
         {/* Submit Button */}
-        <Button onClick={handleStatusUpdate} disabled={isButtonDisabled} className={cn("w-full h-10 text-sm font-semibold shadow-sm transition-all", status === 'Disbursed' ? "bg-emerald-600 hover:bg-emerald-700" : "")}>
-            {isUpdating ? "Updating..." : status === 'Disbursed' ? <><Sparkles className="w-4 h-4 mr-2"/> Confirm Disbursal</> : isCallInitiated ? "End Call & Update" : "Update Status"}
+        <Button 
+            onClick={handleStatusUpdate} 
+            disabled={isButtonDisabled} 
+            className={cn(
+                "w-full h-10 text-sm font-semibold shadow-sm transition-all duration-300", 
+                selectedStatusOption?.btnColor || "bg-primary hover:bg-primary/90"
+            )}
+        >
+            {isUpdating ? "Saving..." : status === 'Disbursed' ? <><Sparkles className="w-4 h-4 mr-2 animate-spin-slow"/> Confirm Disbursal</> : isCallInitiated ? "End Call & Update" : "Update Status"}
         </Button>
       </CardContent>
 
