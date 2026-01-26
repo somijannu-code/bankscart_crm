@@ -9,8 +9,8 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -20,11 +20,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Loader2 } from "lucide-react";
-import { format } from "date-fns";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { Plus, Loader2, Calendar as CalendarIcon, Check, ChevronsUpDown, Clock } from "lucide-react";
+import { format, addDays, nextMonday, setHours, setMinutes } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 interface Lead {
   id: string;
@@ -37,300 +52,313 @@ interface ScheduleFollowUpModalProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   defaultLeadId?: string;
-  defaultTime?: Date;
+  onScheduleSuccess?: () => void; // Callback to refresh parent data
 }
+
+// Generate time slots (09:00 to 19:00 in 30 min increments)
+const TIME_SLOTS = Array.from({ length: 21 }).map((_, i) => {
+  const hour = Math.floor(i / 2) + 9;
+  const minute = i % 2 === 0 ? "00" : "30";
+  return `${hour.toString().padStart(2, "0")}:${minute}`;
+});
 
 export function ScheduleFollowUpModal({ 
   open: controlledOpen, 
   onOpenChange: controlledOnOpenChange,
   defaultLeadId,
-  defaultTime
+  onScheduleSuccess
 }: ScheduleFollowUpModalProps) {
+  // Logic to handle controlled vs uncontrolled state
   const [internalOpen, setInternalOpen] = useState(false);
+  const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = controlledOnOpenChange !== undefined ? controlledOnOpenChange : setInternalOpen;
+
+  // Form State
   const [date, setDate] = useState<Date | undefined>(undefined);
-  const [time, setTime] = useState("09:00");
+  const [time, setTime] = useState("10:00");
   const [leadId, setLeadId] = useState("");
   const [notes, setNotes] = useState("");
+  
+  // Data & UI State
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
-  
-  const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
-  const setOpen = controlledOnOpenChange !== undefined ? controlledOnOpenChange : setInternalOpen;
-  
+  const [leadOpen, setLeadOpen] = useState(false); // For Combobox
+
   const supabase = createClient();
   const router = useRouter();
 
-  // Set default values when modal opens
+  // Reset and Fetch logic
   useEffect(() => {
     if (isOpen) {
       fetchLeads();
+      setLeadId(defaultLeadId || "");
       
-      // Set default values if provided
-      if (defaultLeadId) {
-        setLeadId(defaultLeadId);
-      }
-      
-      if (defaultTime) {
-        // Ensure we're working with a clean date object
-        const cleanDate = new Date(defaultTime);
-        cleanDate.setHours(0, 0, 0, 0); // Reset time part
-        setDate(cleanDate);
-        setTime(format(defaultTime, "HH:mm"));
-      } else {
-        // Set to tomorrow at 9 AM by default
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        tomorrow.setHours(0, 0, 0, 0); // Reset time part for clean date
+      // Default to tomorrow if no date set
+      if (!date) {
+        const tomorrow = addDays(new Date(), 1);
         setDate(tomorrow);
-        setTime("09:00");
       }
-      
-      // Debug logging
-      console.log("Modal opened with default date:", defaultTime);
-      console.log("Setting date to:", defaultTime || new Date(Date.now() + 86400000));
     } else {
-      // Reset form when closing
-      setLeadId("");
+      // Cleanup on close
+      if (!defaultLeadId) setLeadId("");
       setNotes("");
-      setDate(undefined);
-      setTime("09:00");
     }
-  }, [isOpen, defaultLeadId, defaultTime]);
+  }, [isOpen, defaultLeadId]);
 
   const fetchLeads = async () => {
     setFetching(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        toast.error("Please sign in to schedule follow-ups");
-        return;
-      }
+      if (!user) return;
 
-      // Fetch leads that the current user can assign follow-ups to
       const { data: leadsData, error } = await supabase
         .from("leads")
         .select("id, name, company, phone")
         .eq("assigned_to", user.id)
         .order("name", { ascending: true });
 
-      if (error) {
-        console.error("Error fetching leads:", error);
-        toast.error("Failed to fetch leads");
-        return;
-      }
-
+      if (error) throw error;
       setLeads(leadsData || []);
     } catch (error) {
-      console.error("Error:", error);
-      toast.error("An error occurred");
+      console.error("Error fetching leads:", error);
+      toast.error("Failed to load leads list");
     } finally {
       setFetching(false);
     }
   };
 
+  // Quick Action Handlers
+  const setQuickSchedule = (type: "tomorrow" | "3days" | "next_week") => {
+    const now = new Date();
+    let newDate = new Date();
+
+    switch (type) {
+      case "tomorrow":
+        newDate = addDays(now, 1);
+        setTime("10:00");
+        break;
+      case "3days":
+        newDate = addDays(now, 3);
+        setTime("11:00");
+        break;
+      case "next_week":
+        newDate = nextMonday(now);
+        setTime("10:00");
+        break;
+    }
+    setDate(newDate);
+  };
+
   const handleSchedule = async () => {
     if (!date || !leadId) {
-      toast.error("Please select a lead and date");
+      toast.error("Missing Information", { description: "Please select both a lead and a date." });
       return;
     }
 
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
       if (!user) {
-        toast.error("Please sign in to schedule follow-ups");
+        toast.error("Session expired. Please login.");
         return;
       }
 
-      // Find the selected lead to create a title
       const selectedLead = leads.find(lead => lead.id === leadId);
-      const title = selectedLead ? `Follow-up with ${selectedLead.name}` : "Follow-up";
+      const title = selectedLead ? `Follow-up: ${selectedLead.name}` : "Follow-up";
 
-      // Debug logging
-      console.log("Selected date:", date);
-      console.log("Selected time:", time);
-      console.log("Lead ID:", leadId);
-      console.log("User ID:", user.id);
-
-      // Create a proper datetime by combining date and time
-      const scheduledDateTime = new Date(date);
+      // Combine Date and Time
       const [hours, minutes] = time.split(":").map(Number);
-      scheduledDateTime.setHours(hours, minutes, 0, 0); // Set hours, minutes, seconds, milliseconds
+      const scheduledDateTime = setMinutes(setHours(date, hours), minutes);
 
-      // Debug logging
-      console.log("Combined datetime:", scheduledDateTime);
-      console.log("ISO datetime:", scheduledDateTime.toISOString());
-
-      // Check if the scheduled time is in the past
-      const now = new Date();
-      if (scheduledDateTime < now) {
-        toast.error("Please select a future date and time");
+      // Past date validation
+      if (scheduledDateTime < new Date()) {
+        toast.error("Invalid Time", { description: "You cannot schedule a follow-up in the past." });
+        setLoading(false);
         return;
       }
-
-      console.log("Scheduling follow-up with datetime:", scheduledDateTime.toISOString());
 
       const { error } = await supabase
         .from("follow_ups")
         .insert({
           lead_id: leadId,
-          user_id: user.id, // Changed from assigned_to to user_id
-          title: title, // Added required title field
-          scheduled_at: scheduledDateTime.toISOString(), // Changed from scheduled_time to scheduled_at
+          user_id: user.id,
+          title: title,
+          scheduled_at: scheduledDateTime.toISOString(),
           notes: notes,
-          status: "pending" // Changed from scheduled to pending
+          status: "pending"
         });
 
-      if (error) {
-        console.error("Error scheduling follow-up:", error);
-        toast.error("Failed to schedule follow-up: " + error.message);
-        return;
-      }
+      if (error) throw error;
 
-      toast.success("Follow-up scheduled successfully!");
-      setOpen(false);
+      toast.success("Follow-up Scheduled", { description: `Reminding you on ${format(scheduledDateTime, "MMM d 'at' h:mm a")}` });
       
-      // Refresh the page to show the new follow-up
+      setOpen(false);
+      if (onScheduleSuccess) onScheduleSuccess();
       router.refresh();
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error:", error);
-      toast.error("An error occurred while scheduling follow-up");
+      toast.error("Failed to schedule", { description: error.message });
     } finally {
       setLoading(false);
     }
   };
 
-  // Function to handle date input change
-  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const dateValue = e.target.value;
-    if (dateValue) {
-      const selectedDate = new Date(dateValue);
-      selectedDate.setHours(0, 0, 0, 0); // Reset time part
-      setDate(selectedDate);
-      console.log("Date changed:", selectedDate);
-    } else {
-      setDate(undefined);
-    }
-  };
-
-  // Format date for input field (YYYY-MM-DD)
-  const formatDateForInput = (date: Date | undefined): string => {
-    if (!date) return "";
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  // Set min date to today for date input
-  const today = new Date();
-  const minDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
   return (
     <Dialog open={isOpen} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {!controlledOpen && (
-          <Button>
+          <Button variant="secondary" size="sm">
             <Plus className="h-4 w-4 mr-2" />
-            Schedule Follow-up
+            Schedule
           </Button>
         )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>Schedule New Follow-up</DialogTitle>
+          <DialogTitle>Schedule Follow-up</DialogTitle>
           <DialogDescription>
-            Set a reminder for a callback or follow-up activity.
+            Set a reminder to call or contact this lead.
           </DialogDescription>
         </DialogHeader>
         
-        <div className="grid gap-4 py-4">
-          <div className="grid gap-2">
-            <Label htmlFor="lead">Select Lead *</Label>
-            <Select 
-              value={leadId} 
-              onValueChange={setLeadId} 
-              disabled={fetching}
-              defaultValue={defaultLeadId}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={fetching ? "Loading leads..." : "Choose a lead"} />
-              </SelectTrigger>
-              <SelectContent>
-                {leads.map((lead) => (
-                  <SelectItem key={lead.id} value={lead.id}>
-                    {lead.name} {lead.company && `(${lead.company})`}
-                  </SelectItem>
-                ))}
-                {leads.length === 0 && !fetching && (
-                  <div className="px-2 py-1.5 text-sm text-gray-500">
-                    No leads available
-                  </div>
-                )}
-              </SelectContent>
-            </Select>
+        <div className="grid gap-5 py-4">
+          
+          {/* Quick Actions */}
+          <div className="flex gap-2">
+            <Button variant="outline" size="xs" onClick={() => setQuickSchedule("tomorrow")} className="text-xs h-7">
+              Tomorrow AM
+            </Button>
+            <Button variant="outline" size="xs" onClick={() => setQuickSchedule("3days")} className="text-xs h-7">
+              In 3 Days
+            </Button>
+            <Button variant="outline" size="xs" onClick={() => setQuickSchedule("next_week")} className="text-xs h-7">
+              Next Monday
+            </Button>
           </div>
 
+          {/* Lead Selection (Combobox) */}
+          <div className="grid gap-2">
+            <Label>Select Lead</Label>
+            <Popover open={leadOpen} onOpenChange={setLeadOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={leadOpen}
+                  className="w-full justify-between"
+                  disabled={!!defaultLeadId || fetching}
+                >
+                  {leadId
+                    ? leads.find((lead) => lead.id === leadId)?.name
+                    : fetching ? "Loading leads..." : "Search leads..."}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[460px] p-0">
+                <Command>
+                  <CommandInput placeholder="Search lead name..." />
+                  <CommandList>
+                    <CommandEmpty>No lead found.</CommandEmpty>
+                    <CommandGroup>
+                      {leads.map((lead) => (
+                        <CommandItem
+                          key={lead.id}
+                          value={lead.name}
+                          onSelect={() => {
+                            setLeadId(lead.id);
+                            setLeadOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              leadId === lead.id ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          <div className="flex flex-col">
+                            <span>{lead.name}</span>
+                            {lead.company && <span className="text-xs text-muted-foreground">{lead.company}</span>}
+                          </div>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {/* Date & Time Row */}
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2">
-              <Label htmlFor="date">Date *</Label>
-              <Input
-                type="date"
-                value={formatDateForInput(date)}
-                onChange={handleDateChange}
-                min={minDate}
-                required
-              />
+              <Label>Date</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant={"outline"}
+                    className={cn(
+                      "w-full justify-start text-left font-normal",
+                      !date && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {date ? format(date, "PPP") : <span>Pick a date</span>}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0">
+                  <Calendar
+                    mode="single"
+                    selected={date}
+                    onSelect={setDate}
+                    initialFocus
+                    disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="time">Time *</Label>
-              <Input
-                type="time"
-                value={time}
-                onChange={(e) => {
-                  console.log("Time changed:", e.target.value);
-                  setTime(e.target.value);
-                }}
-                required
-              />
+              <Label>Time</Label>
+              <Select value={time} onValueChange={setTime}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select time" />
+                </SelectTrigger>
+                <SelectContent className="max-h-[200px]">
+                  {TIME_SLOTS.map((slot) => (
+                    <SelectItem key={slot} value={slot}>
+                      {slot}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
+          {/* Notes */}
           <div className="grid gap-2">
-            <Label htmlFor="notes">Notes</Label>
+            <Label htmlFor="notes">Notes (Optional)</Label>
             <Textarea
               id="notes"
-              placeholder="Add any specific notes for this follow-up..."
+              placeholder="e.g. Discuss loan interest rates..."
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
+              className="resize-none"
               rows={3}
             />
           </div>
         </div>
 
-        <div className="flex justify-end gap-3">
+        <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)} disabled={loading}>
             Cancel
           </Button>
-          <Button 
-            onClick={handleSchedule} 
-            disabled={!date || !leadId || loading}
-          >
-            {loading ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Scheduling...
-              </>
-            ) : (
-              "Schedule Follow-up"
-            )}
+          <Button onClick={handleSchedule} disabled={!date || !leadId || loading}>
+            {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            Confirm Schedule
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
