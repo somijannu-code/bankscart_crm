@@ -29,22 +29,20 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-  CommandSeparator
 } from "@/components/ui/command";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar } from "@/components/ui/calendar";
 import { Badge } from "@/components/ui/badge"; 
 import { 
   Plus, Loader2, Calendar as CalendarIcon, Check, ChevronsUpDown, 
-  Phone, Users, Mail, MessageSquare, ExternalLink, CalendarCheck, Download, Flag,
-  Clock, AlertTriangle, AlertCircle, CalendarDays
+  Phone, Users, Mail, MessageSquare, ExternalLink, CalendarCheck, Download,
+  Clock, AlertTriangle, AlertCircle
 } from "lucide-react";
-import { format, addDays, nextMonday, setHours, setMinutes, isPast, isToday, isTomorrow, addMinutes, nextFriday } from "date-fns";
+import { format, addDays, nextMonday, setHours, setMinutes, isPast, isToday, isTomorrow, addMinutes, nextFriday, startOfToday } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -271,7 +269,6 @@ export function ScheduleFollowUpModal({
         if (!groups[status]) groups[status] = [];
         groups[status].push(lead);
     });
-    // Sort keys to put "Interested" and "New" at top
     const priority = ['Interested', 'new', 'follow_up'];
     return Object.keys(groups).sort((a,b) => {
         const idxA = priority.indexOf(a);
@@ -316,7 +313,6 @@ export function ScheduleFollowUpModal({
         scheduled_at: scheduledDateTime.toISOString(),
         notes: notes,
         status: "pending",
-        // priority: priority // Uncomment if column exists
       });
 
       if (error) throw error;
@@ -382,17 +378,22 @@ export function ScheduleFollowUpModal({
         ) : (
           /* FORM VIEW */
           <div className="grid gap-5 py-4">
-            {/* Activity Type Tabs */}
-            <Tabs value={activityType} onValueChange={setActivityType} className="w-full">
-              <TabsList className="grid w-full grid-cols-4 bg-slate-100 p-1">
+            {/* FIXED: Activity Type Buttons (Replaced Tabs) */}
+            <div className="grid grid-cols-4 gap-2 bg-slate-100 p-1 rounded-lg">
                 {ACTIVITY_TYPES.map((type) => (
-                  <TabsTrigger key={type.id} value={type.id} className="text-xs gap-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                  <button 
+                    key={type.id} 
+                    onClick={() => setActivityType(type.id)}
+                    className={cn(
+                        "flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-md transition-all",
+                        activityType === type.id ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                    )}
+                  >
                     <type.icon className="h-3.5 w-3.5" />
                     <span className="hidden sm:inline">{type.label}</span>
-                  </TabsTrigger>
+                  </button>
                 ))}
-              </TabsList>
-            </Tabs>
+            </div>
 
             {/* Quick Actions */}
             <div className="flex gap-2">
@@ -451,6 +452,7 @@ export function ScheduleFollowUpModal({
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label className="text-xs font-semibold text-slate-500 uppercase">Date</Label>
+                {/* FIXED: Z-Index on Popover Content */}
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal h-10", !date && "text-muted-foreground")}>
@@ -458,8 +460,8 @@ export function ScheduleFollowUpModal({
                       {getSmartDateLabel(date)}
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar mode="single" selected={date} onSelect={setDate} initialFocus disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))} />
+                  <PopoverContent className="w-auto p-0 z-[9999]" align="start">
+                    <Calendar mode="single" selected={date} onSelect={setDate} initialFocus disabled={(date) => date < startOfToday()} />
                   </PopoverContent>
                 </Popover>
               </div>
@@ -469,7 +471,7 @@ export function ScheduleFollowUpModal({
                 <div className="flex gap-2">
                     <Select value={time} onValueChange={setTime}>
                         <SelectTrigger className="h-10 flex-1"><SelectValue placeholder="Time" /></SelectTrigger>
-                        <SelectContent className="max-h-[250px]">
+                        <SelectContent className="max-h-[250px] z-[9999]">
                             {TIME_SLOTS.map((group) => (
                             <SelectGroup key={group.label}>
                                 <SelectLabel className="text-xs text-slate-400 font-normal mt-1 bg-slate-50 py-1 pl-2">{group.label}</SelectLabel>
@@ -482,7 +484,7 @@ export function ScheduleFollowUpModal({
                     </Select>
                     <Select value={duration} onValueChange={setDuration}>
                         <SelectTrigger className="h-10 w-[80px]"><SelectValue placeholder="Dur" /></SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="z-[9999]">
                             <SelectItem value="15">15m</SelectItem>
                             <SelectItem value="30">30m</SelectItem>
                             <SelectItem value="45">45m</SelectItem>
