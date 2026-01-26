@@ -12,7 +12,7 @@ import {
   Phone, Clock, MessageSquare, IndianRupee, AlertCircle, Sparkles, 
   Send, Command, Copy, RotateCcw, ThumbsUp, ThumbsDown, 
   FileText, LogIn, CheckCircle2, XCircle, PhoneForwarded, 
-  PhoneMissed, Briefcase, HelpCircle
+  PhoneMissed, Briefcase, Plus, X
 } from "lucide-react" 
 import { useCallTracking } from "@/context/call-tracking-context"
 import { toast } from "sonner"
@@ -31,7 +31,6 @@ interface LeadStatusUpdaterProps {
   telecallerName: string | null | undefined
 }
 
-// Enhanced Status Options with Icons
 const STATUS_OPTIONS = [
   { value: "new", label: "New", color: "bg-blue-100 text-blue-800", btnColor: "bg-blue-600 hover:bg-blue-700", icon: Sparkles },
   { value: "Interested", label: "Interested", color: "bg-green-100 text-green-800", btnColor: "bg-green-600 hover:bg-green-700", icon: ThumbsUp },
@@ -46,6 +45,12 @@ const STATUS_OPTIONS = [
 ]
 
 const QUICK_NOTES = ["No Answer", "Busy", "Switch Off", "Call Later", "Wrong Number", "Docs Pending", "Rate Issue"];
+const QUICK_AMOUNTS = [
+    { label: "5L", value: 500000 },
+    { label: "10L", value: 1000000 },
+    { label: "20L", value: 2000000 },
+    { label: "50L", value: 5000000 },
+];
 
 export function LeadStatusUpdater({ 
   leadId, 
@@ -70,7 +75,7 @@ export function LeadStatusUpdater({
   
   // Call Timer State
   const [elapsedTime, setElapsedTime] = useState(0)
-  const [callDurationOverride, setCallDurationOverride] = useState<number | null>(null)
+  const [callDurationOverride, setCallDurationOverride] = useState<number | null>(null) // Manual override
   
   const [notEligibleReason, setNotEligibleReason] = useState<string>("")
 
@@ -88,10 +93,14 @@ export function LeadStatusUpdater({
   const isWhatsappEnabled = whatsappLink !== "#";
   const hasUnsavedChanges = status !== "" || remarks !== "" || (loanAmount !== initialLoanAmount);
 
+  // Critical Status Check for Loan Amount
+  const isRevenueStatus = status === "Login" || status === "Disbursed";
+  const isLoanAmountMissing = isRevenueStatus && (!loanAmount || loanAmount <= 0);
+
   // --- EFFECTS ---
   useEffect(() => { setLoanAmount(initialLoanAmount) }, [initialLoanAmount]);
   
-  // Live Timer
+  // Live Timer for Active Call
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isCallInitiated && !callDurationOverride) {
@@ -154,6 +163,10 @@ export function LeadStatusUpdater({
       });
   }
 
+  const handleQuickAmount = (amount: number) => {
+      setLoanAmount(amount);
+  }
+
   const handleCopyNumber = () => {
     if (leadPhoneNumber) {
         navigator.clipboard.writeText(leadPhoneNumber);
@@ -181,6 +194,7 @@ export function LeadStatusUpdater({
     if (!status) { toast.error("Status Required", { description: "Please select a status." }); return }
     if (status === "not_eligible" && !note.trim()) { toast.error("Reason Required", { description: "Specify why not eligible." }); return }
     if (status === "follow_up") { setIsModalOpen(true); return }
+    if (isLoanAmountMissing) { toast.error("Loan Amount Required", { description: "Please enter a valid loan amount for this status." }); return; }
     
     const finalDuration = callDurationOverride ?? elapsedTime;
     if (isCallInitiated && status !== 'nr' && finalDuration <= 0) {
@@ -273,7 +287,7 @@ export function LeadStatusUpdater({
   }
 
   // --- RENDER HELPERS ---
-  const isButtonDisabled = isUpdating || !status || (status === "not_eligible" && !note.trim());
+  const isButtonDisabled = isUpdating || !status || (status === "not_eligible" && !note.trim()) || isLoanAmountMissing;
   const timerDisplay = formatTime(callDurationOverride ?? elapsedTime);
   const formattedLoanAmount = formatCurrency(loanAmount);
 
@@ -355,20 +369,35 @@ export function LeadStatusUpdater({
             </Select>
         </div>
 
-        {/* Loan Amount Input */}
+        {/* Loan Amount Input & Shortcuts */}
         <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-700 uppercase flex items-center justify-between">
-                <span className="flex items-center gap-1"><IndianRupee className="h-3 w-3"/> Loan Amount</span>
+            <div className="flex justify-between items-end">
+                <label className="text-xs font-semibold text-slate-700 uppercase flex items-center gap-1">
+                    <IndianRupee className="h-3 w-3"/> Loan Amount
+                    {isLoanAmountMissing && <span className="text-red-500 text-[10px] ml-1">(Required for {status})</span>}
+                </label>
                 {loanAmount && loanAmount > 0 && <span className="text-[10px] text-green-600 font-bold bg-green-50 px-1 rounded">{formattedLoanAmount}</span>}
-            </label>
+            </div>
             <Input 
                 type="number" 
                 placeholder="0.00" 
                 value={loanAmount ?? ""} 
                 onChange={e => setLoanAmount(e.target.value ? Number(e.target.value) : null)} 
                 min="0" 
-                className="font-mono"
+                className={cn("font-mono", isLoanAmountMissing ? "border-red-500 ring-1 ring-red-100" : "")}
             />
+            {/* Quick Amount Chips */}
+            <div className="flex gap-1.5 flex-wrap">
+                {QUICK_AMOUNTS.map((amt) => (
+                    <button 
+                        key={amt.label} 
+                        onClick={() => handleQuickAmount(amt.value)} 
+                        className="text-[10px] px-2 py-0.5 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-full transition-colors font-medium"
+                    >
+                        +{amt.label}
+                    </button>
+                ))}
+            </div>
         </div>
 
         {/* Call Timer */}
@@ -423,14 +452,17 @@ export function LeadStatusUpdater({
             </div>
             <div className="relative">
                 <Textarea 
-                    placeholder="Add notes... (Ctrl+Enter to save)" 
+                    placeholder="Add notes..." 
                     value={remarks} 
                     onChange={e => setRemarks(e.target.value)} 
                     onKeyDown={handleKeyDown}
                     rows={3} 
                     className="resize-none focus-visible:ring-blue-500 pr-8" 
                 />
-                <div className="absolute bottom-2 right-2">
+                <div className="absolute bottom-2 right-2 flex gap-1 items-center">
+                    {remarks.length > 0 && (
+                        <button onClick={() => setRemarks("")} className="p-1 hover:bg-slate-100 rounded-full text-slate-400 hover:text-red-500"><X className="h-3 w-3"/></button>
+                    )}
                     <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger>
