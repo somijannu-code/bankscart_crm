@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Users, Filter, TrendingUp, Clock, LogIn, CheckCircle2, PhoneMissed } from "lucide-react"
+import { Users, Filter, TrendingUp, Clock, LogIn, CheckCircle2 } from "lucide-react"
 import { TelecallerLeadsTable } from "@/components/telecaller-leads-table"
 import { TelecallerLeadFilters } from "@/components/telecaller-lead-filters"
 import { redirect } from "next/navigation"
@@ -24,11 +24,9 @@ export default async function TelecallerLeadsPage({
 }) {
   const supabase = await createClient()
 
-  // 1. Auth Check
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect("/auth/login")
 
-  // 2. Pagination & Sorting Params
   const page = Number(searchParams.page) || 1
   const pageSize = 50
   const from = (page - 1) * pageSize
@@ -36,7 +34,7 @@ export default async function TelecallerLeadsPage({
   const sortBy = searchParams.sort_by || 'created_at'
   const sortOrder = searchParams.sort_order === 'asc'
 
-  // 3. Parallel Stats Query (Fast Count)
+  // Parallel Stats Fetching
   const baseQuery = supabase.from("leads").select("*", { count: 'exact', head: true }).eq("assigned_to", user.id)
   
   const [
@@ -44,21 +42,17 @@ export default async function TelecallerLeadsPage({
     { count: newCount },
     { count: contactedCount },
     { count: loginCount },
-    { count: disbursedCount },
-    { count: nrCount } // Not Reachable count
+    { count: disbursedCount }
   ] = await Promise.all([
     baseQuery,
-    supabase.from("leads").select("*", { count: 'exact', head: true }).eq("assigned_to", user.id).in('status', ['new']),
+    supabase.from("leads").select("*", { count: 'exact', head: true }).eq("assigned_to", user.id).in('status', ['new', 'New Lead']),
     supabase.from("leads").select("*", { count: 'exact', head: true }).eq("assigned_to", user.id).in('status', ['contacted', 'Interested']),
-    supabase.from("leads").select("*", { count: 'exact', head: true }).eq("assigned_to", user.id).in('status', ['Login']),
-    supabase.from("leads").select("*", { count: 'exact', head: true }).eq("assigned_to", user.id).in('status', ['Disbursed']),
-    supabase.from("leads").select("*", { count: 'exact', head: true }).eq("assigned_to", user.id).in('status', ['nr'])
+    supabase.from("leads").select("*", { count: 'exact', head: true }).eq("assigned_to", user.id).in('status', ['Login', 'Login Done']),
+    supabase.from("leads").select("*", { count: 'exact', head: true }).eq("assigned_to", user.id).in('status', ['Disbursed', 'converted'])
   ])
 
-  // Calculate Progress
   const contactRate = totalCount ? Math.round(((contactedCount || 0) / totalCount) * 100) : 0;
 
-  // 4. Data Query
   let query = supabase
     .from("leads")
     .select("*", { count: "exact" })
@@ -66,7 +60,6 @@ export default async function TelecallerLeadsPage({
     .order(sortBy, { ascending: sortOrder })
     .range(from, to)
 
-  // Filters
   if (searchParams.status && searchParams.status !== "all") query = query.eq("status", searchParams.status)
   if (searchParams.priority && searchParams.priority !== "all") query = query.eq("priority", searchParams.priority)
   if (searchParams.search) {
@@ -76,16 +69,14 @@ export default async function TelecallerLeadsPage({
   const { data: leads, count } = await query
 
   return (
-    <div className="p-6 space-y-6 bg-slate-50 min-h-screen">
-      {/* Header */}
+    <div className="p-4 sm:p-6 space-y-6 bg-slate-50 min-h-screen">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">My Leads</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">My Leads</h1>
           <p className="text-slate-500 mt-1">Manage assignments and track conversions</p>
         </div>
       </div>
 
-      {/* Stats Dashboard */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <Card className="border-l-4 border-l-blue-500 shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -144,7 +135,6 @@ export default async function TelecallerLeadsPage({
         </Card>
       </div>
 
-      {/* Filters & Data */}
       <Card className="shadow-sm border-slate-200">
         <CardHeader className="pb-3 border-b bg-slate-50/50">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
