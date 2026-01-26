@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, X, SlidersHorizontal } from "lucide-react"
+import { Search, X, SlidersHorizontal, RefreshCcw } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useState, useEffect } from "react"
 
@@ -15,7 +15,6 @@ export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchPa
   const [status, setStatus] = useState(initialSearchParams.status || "all")
   const [priority, setPriority] = useState(initialSearchParams.priority || "all")
 
-  // Sync state with URL if URL changes externally (e.g. back button)
   useEffect(() => {
     setSearch(searchParams.get("search") || "")
     setStatus(searchParams.get("status") || "all")
@@ -24,9 +23,7 @@ export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchPa
 
   const applyFilters = () => {
     const params = new URLSearchParams(searchParams.toString())
-    
-    // Reset to page 1 on new filter
-    params.set("page", "1")
+    params.set("page", "1") // Reset page on filter
 
     if (search) params.set("search", search); else params.delete("search")
     if (status !== "all") params.set("status", status); else params.delete("status")
@@ -43,26 +40,26 @@ export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchPa
   }
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4">
+    <div className="flex flex-col lg:flex-row gap-3 p-1">
       <div className="flex-1 relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-4 w-4" />
         <Input
-          placeholder="Search name, phone, email or company..."
+          placeholder="Search by name, phone, company..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="pl-10"
+          className="pl-10 bg-white"
           onKeyDown={(e) => e.key === "Enter" && applyFilters()}
         />
       </div>
 
-      <div className="flex gap-2 w-full lg:w-auto">
+      <div className="flex gap-2 w-full lg:w-auto overflow-x-auto pb-1 lg:pb-0">
         <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-full lg:w-[180px]">
+          <SelectTrigger className="w-[160px] bg-white">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="new">New</SelectItem>
+            <SelectItem value="new">New Lead</SelectItem>
             <SelectItem value="contacted">Contacted</SelectItem>
             <SelectItem value="Interested">Interested</SelectItem>
             <SelectItem value="Documents_Sent">Docs Sent</SelectItem>
@@ -75,7 +72,7 @@ export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchPa
         </Select>
 
         <Select value={priority} onValueChange={setPriority}>
-          <SelectTrigger className="w-full lg:w-[180px]">
+          <SelectTrigger className="w-[140px] bg-white">
             <SelectValue placeholder="Priority" />
           </SelectTrigger>
           <SelectContent>
@@ -86,11 +83,11 @@ export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchPa
           </SelectContent>
         </Select>
 
-        <Button onClick={applyFilters} className="px-4">
-          <SlidersHorizontal className="h-4 w-4 mr-2" /> Apply
+        <Button onClick={applyFilters} className="bg-slate-900 hover:bg-slate-800">
+          <SlidersHorizontal className="h-4 w-4 mr-2" /> Filter
         </Button>
-        <Button variant="outline" onClick={clearFilters} className="px-3" title="Reset Filters">
-          <X className="h-4 w-4" />
+        <Button variant="outline" onClick={clearFilters} title="Reset">
+          <RefreshCcw className="h-4 w-4 text-slate-500" />
         </Button>
       </div>
     </div>
