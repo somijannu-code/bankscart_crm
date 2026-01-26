@@ -3,23 +3,34 @@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, X } from "lucide-react"
+import { Search, X, SlidersHorizontal } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 
-export function TelecallerLeadFilters() {
+export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchParams: any }) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  const [search, setSearch] = useState(searchParams.get("search") || "")
-  const [status, setStatus] = useState(searchParams.get("status") || "all")
-  const [priority, setPriority] = useState(searchParams.get("priority") || "all")
+  const [search, setSearch] = useState(initialSearchParams.search || "")
+  const [status, setStatus] = useState(initialSearchParams.status || "all")
+  const [priority, setPriority] = useState(initialSearchParams.priority || "all")
+
+  // Sync state with URL if URL changes externally (e.g. back button)
+  useEffect(() => {
+    setSearch(searchParams.get("search") || "")
+    setStatus(searchParams.get("status") || "all")
+    setPriority(searchParams.get("priority") || "all")
+  }, [searchParams])
 
   const applyFilters = () => {
-    const params = new URLSearchParams()
-    if (search) params.set("search", search)
-    if (status !== "all") params.set("status", status)
-    if (priority !== "all") params.set("priority", priority)
+    const params = new URLSearchParams(searchParams.toString())
+    
+    // Reset to page 1 on new filter
+    params.set("page", "1")
+
+    if (search) params.set("search", search); else params.delete("search")
+    if (status !== "all") params.set("status", status); else params.delete("status")
+    if (priority !== "all") params.set("priority", priority); else params.delete("priority")
 
     router.push(`/telecaller/leads?${params.toString()}`)
   }
@@ -32,62 +43,54 @@ export function TelecallerLeadFilters() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-          <Input
-            placeholder="Search leads..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10"
-            onKeyDown={(e) => e.key === "Enter" && applyFilters()}
-          />
-        </div>
+    <div className="flex flex-col lg:flex-row gap-4">
+      <div className="flex-1 relative">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+        <Input
+          placeholder="Search name, phone, email or company..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-10"
+          onKeyDown={(e) => e.key === "Enter" && applyFilters()}
+        />
+      </div>
 
+      <div className="flex gap-2 w-full lg:w-auto">
         <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger>
-            <SelectValue placeholder="Filter by status" />
+          <SelectTrigger className="w-full lg:w-[180px]">
+            <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Statuses</SelectItem>
             <SelectItem value="new">New</SelectItem>
             <SelectItem value="contacted">Contacted</SelectItem>
             <SelectItem value="Interested">Interested</SelectItem>
-            <SelectItem value="Documents_Sent">Documents Sent</SelectItem>
+            <SelectItem value="Documents_Sent">Docs Sent</SelectItem>
             <SelectItem value="Login">Login</SelectItem>
             <SelectItem value="Disbursed">Disbursed</SelectItem>
-            <SelectItem value="Not_Interested">Not Interested</SelectItem>
             <SelectItem value="Call_Back">Call Back</SelectItem>
-            <SelectItem value="not_eligible">not eligible</SelectItem>
-            <SelectItem value="nr">nr</SelectItem>
-            <SelectItem value="self_employed">self employed</SelectItem>
-            
+            <SelectItem value="nr">Not Reachable</SelectItem>
+            <SelectItem value="not_eligible">Not Eligible</SelectItem>
           </SelectContent>
         </Select>
 
         <Select value={priority} onValueChange={setPriority}>
-          <SelectTrigger>
-            <SelectValue placeholder="Filter by priority" />
+          <SelectTrigger className="w-full lg:w-[180px]">
+            <SelectValue placeholder="Priority" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Priorities</SelectItem>
-            <SelectItem value="low">Low</SelectItem>
-            <SelectItem value="medium">Medium</SelectItem>
             <SelectItem value="high">High</SelectItem>
-            <SelectItem value="urgent">Urgent</SelectItem>
+            <SelectItem value="medium">Medium</SelectItem>
+            <SelectItem value="low">Low</SelectItem>
           </SelectContent>
         </Select>
-      </div>
 
-      <div className="flex gap-2">
-        <Button onClick={applyFilters} className="flex items-center gap-2">
-          <Search className="h-4 w-4" />
-          Apply Filters
+        <Button onClick={applyFilters} className="px-4">
+          <SlidersHorizontal className="h-4 w-4 mr-2" /> Apply
         </Button>
-        <Button variant="outline" onClick={clearFilters} className="flex items-center gap-2 bg-transparent">
+        <Button variant="outline" onClick={clearFilters} className="px-3" title="Reset Filters">
           <X className="h-4 w-4" />
-          Clear Filters
         </Button>
       </div>
     </div>
