@@ -8,7 +8,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Phone, Clock, MessageSquare, IndianRupee, AlertCircle, Sparkles, Send, Command } from "lucide-react" 
+import { 
+  Phone, Clock, MessageSquare, IndianRupee, AlertCircle, Sparkles, 
+  Send, Command, Copy, RotateCcw, ThumbsUp, ThumbsDown, 
+  FileText, LogIn, CheckCircle2, XCircle, PhoneForwarded, 
+  PhoneMissed, Briefcase, HelpCircle
+} from "lucide-react" 
 import { useCallTracking } from "@/context/call-tracking-context"
 import { toast } from "sonner"
 import { ScheduleFollowUpModal } from "./schedule-follow-up-modal" 
@@ -26,17 +31,18 @@ interface LeadStatusUpdaterProps {
   telecallerName: string | null | undefined
 }
 
+// Enhanced Status Options with Icons
 const STATUS_OPTIONS = [
-  { value: "new", label: "New", color: "bg-blue-100 text-blue-800", btnColor: "bg-blue-600 hover:bg-blue-700" },
-  { value: "Interested", label: "Interested", color: "bg-green-100 text-green-800", btnColor: "bg-green-600 hover:bg-green-700" },
-  { value: "Documents_Sent", label: "Documents Sent", color: "bg-purple-100 text-purple-800", btnColor: "bg-purple-600 hover:bg-purple-700" },
-  { value: "Login", label: "Login", color: "bg-orange-100 text-orange-800", btnColor: "bg-orange-600 hover:bg-orange-700" },
-  { value: "Disbursed", label: "Disbursed", color: "bg-emerald-100 text-emerald-800", btnColor: "bg-emerald-600 hover:bg-emerald-700" },
-  { value: "Not_Interested", label: "Not Interested", color: "bg-red-100 text-red-800", btnColor: "bg-red-600 hover:bg-red-700" },
-  { value: "follow_up", label: "Call Back", color: "bg-indigo-100 text-indigo-800", btnColor: "bg-indigo-600 hover:bg-indigo-700" },
-  { value: "not_eligible", label: "Not Eligible", color: "bg-rose-100 text-rose-800", btnColor: "bg-rose-600 hover:bg-rose-700" },
-  { value: "nr", label: "NR", color: "bg-gray-100 text-gray-800", btnColor: "bg-slate-600 hover:bg-slate-700" },
-  { value: "self_employed", label: "Self Employed", color: "bg-amber-100 text-amber-800", btnColor: "bg-amber-600 hover:bg-amber-700" },
+  { value: "new", label: "New", color: "bg-blue-100 text-blue-800", btnColor: "bg-blue-600 hover:bg-blue-700", icon: Sparkles },
+  { value: "Interested", label: "Interested", color: "bg-green-100 text-green-800", btnColor: "bg-green-600 hover:bg-green-700", icon: ThumbsUp },
+  { value: "Documents_Sent", label: "Docs Sent", color: "bg-purple-100 text-purple-800", btnColor: "bg-purple-600 hover:bg-purple-700", icon: FileText },
+  { value: "Login", label: "Login", color: "bg-orange-100 text-orange-800", btnColor: "bg-orange-600 hover:bg-orange-700", icon: LogIn },
+  { value: "Disbursed", label: "Disbursed", color: "bg-emerald-100 text-emerald-800", btnColor: "bg-emerald-600 hover:bg-emerald-700", icon: CheckCircle2 },
+  { value: "Not_Interested", label: "Not Interested", color: "bg-red-100 text-red-800", btnColor: "bg-red-600 hover:bg-red-700", icon: ThumbsDown },
+  { value: "follow_up", label: "Call Back", color: "bg-indigo-100 text-indigo-800", btnColor: "bg-indigo-600 hover:bg-indigo-700", icon: PhoneForwarded },
+  { value: "not_eligible", label: "Not Eligible", color: "bg-rose-100 text-rose-800", btnColor: "bg-rose-600 hover:bg-rose-700", icon: XCircle },
+  { value: "nr", label: "NR", color: "bg-gray-100 text-gray-800", btnColor: "bg-slate-600 hover:bg-slate-700", icon: PhoneMissed },
+  { value: "self_employed", label: "Self Employed", color: "bg-amber-100 text-amber-800", btnColor: "bg-amber-600 hover:bg-amber-700", icon: Briefcase },
 ]
 
 const QUICK_NOTES = ["No Answer", "Busy", "Switch Off", "Call Later", "Wrong Number", "Docs Pending", "Rate Issue"];
@@ -64,7 +70,7 @@ export function LeadStatusUpdater({
   
   // Call Timer State
   const [elapsedTime, setElapsedTime] = useState(0)
-  const [callDurationOverride, setCallDurationOverride] = useState<number | null>(null) // Manual override
+  const [callDurationOverride, setCallDurationOverride] = useState<number | null>(null)
   
   const [notEligibleReason, setNotEligibleReason] = useState<string>("")
 
@@ -80,16 +86,16 @@ export function LeadStatusUpdater({
   }, [leadPhoneNumber, telecallerName]);
 
   const isWhatsappEnabled = whatsappLink !== "#";
+  const hasUnsavedChanges = status !== "" || remarks !== "" || (loanAmount !== initialLoanAmount);
 
   // --- EFFECTS ---
   useEffect(() => { setLoanAmount(initialLoanAmount) }, [initialLoanAmount]);
   
-  // Live Timer for Active Call
+  // Live Timer
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isCallInitiated && !callDurationOverride) {
         const startTime = activeCall?.startTime || Date.now();
-        // Update timer every second
         interval = setInterval(() => {
             const seconds = Math.floor((Date.now() - startTime) / 1000);
             setElapsedTime(seconds);
@@ -148,26 +154,37 @@ export function LeadStatusUpdater({
       });
   }
 
+  const handleCopyNumber = () => {
+    if (leadPhoneNumber) {
+        navigator.clipboard.writeText(leadPhoneNumber);
+        toast.success("Number copied to clipboard");
+    }
+  }
+
+  const handleReset = () => {
+      setStatus("");
+      setRemarks("");
+      setNote("");
+      setLoanAmount(initialLoanAmount);
+      setNotEligibleReason("");
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-        e.preventDefault(); // Prevent newline in textarea
+        e.preventDefault();
         handleStatusUpdate();
     }
   }
 
   // --- CORE ACTIONS ---
   const handleStatusUpdate = async () => {
-    // Validation
     if (!status) { toast.error("Status Required", { description: "Please select a status." }); return }
     if (status === "not_eligible" && !note.trim()) { toast.error("Reason Required", { description: "Specify why not eligible." }); return }
     if (status === "follow_up") { setIsModalOpen(true); return }
     
-    // Call Duration Validation
     const finalDuration = callDurationOverride ?? elapsedTime;
-    if (isCallInitiated && status !== 'nr') {
-        if (finalDuration <= 0) {
-            toast.error("Invalid Duration", { description: "Call duration must be > 0 seconds." }); return
-        }
+    if (isCallInitiated && status !== 'nr' && finalDuration <= 0) {
+        toast.error("Invalid Duration", { description: "Call duration must be > 0 seconds." }); return
     }
 
     setIsUpdating(true)
@@ -181,44 +198,37 @@ export function LeadStatusUpdater({
         updateData.notes = updateData.notes ? `${updateData.notes}\n\nNot Eligible: ${note}` : `Not Eligible: ${note}`
       }
 
-      // --- AUTOMATION: TWO-STRIKE RULE ---
+      // Automation Rule: Strike System
       if (status === "Not_Interested") {
         const { data: leadData } = await supabase.from("leads").select("tags").eq("id", leadId).single()
         let currentTags: string[] = [];
         try { currentTags = Array.isArray(leadData?.tags) ? leadData.tags : JSON.parse(leadData?.tags || '[]'); } catch(e){}
         
         if (currentTags.includes("NI_STRIKE_1")) {
-            finalStatus = "dead_bucket" // Strike 2
+            finalStatus = "dead_bucket" 
         } else {
-            finalStatus = "recycle_pool" // Strike 1
+            finalStatus = "recycle_pool" 
             updateData.tags = [...currentTags, "NI_STRIKE_1"]
         }
       }
       
       updateData.status = finalStatus;
 
-      // Update DB
       const { error } = await supabase.from("leads").update(updateData).eq("id", leadId)
       if (error) throw error;
       
       onStatusUpdate?.(finalStatus, note) 
       
-      // Log System Note
       if (finalStatus !== status) {
           const logContent = finalStatus === "recycle_pool" 
-            ? "System: Lead marked 'Not Interested' (Strike 1). Recycled." 
-            : "System: Lead marked 'Not Interested' twice. Moved to Dead Bucket.";
-            
+            ? "System: Strike 1 (Not Interested). Lead Recycled." 
+            : "System: Strike 2 (Not Interested). Lead moved to Dead Bucket.";
           const { data: { user } } = await supabase.auth.getUser()
           if(user) await supabase.from("notes").insert({ lead_id: leadId, user_id: user.id, content: logContent, note_type: "status_change" })
       }
 
-      // Log Call if needed
-      if (isCallInitiated) {
-        await logCall(finalDuration)
-      }
+      if (isCallInitiated) await logCall(finalDuration)
       
-      // Reset UI
       setNote(""); setRemarks(""); setCallDurationOverride(null); setElapsedTime(0); setNotEligibleReason(""); setStatus("");
       toast.success("Updated successfully!")
 
@@ -230,7 +240,6 @@ export function LeadStatusUpdater({
   }
 
   const updateLeadStatusToFollowUp = async () => {
-    // Helper to handle the modal callback
     try {
       const updateData: any = { status: "follow_up", last_contacted: new Date().toISOString() }
       if (remarks.trim()) updateData.notes = remarks
@@ -251,7 +260,6 @@ export function LeadStatusUpdater({
         if (!user) return
         
         let finalDuration = duration
-        // Sync with context if active
         if (activeCall && activeCall.leadId === leadId) finalDuration = await updateCallDuration(leadId, "") || duration
         
         const { data } = await supabase.from("call_logs").insert({
@@ -271,7 +279,7 @@ export function LeadStatusUpdater({
 
   return (
     <Card className="border-l-4 border-l-blue-500 shadow-sm relative overflow-hidden transition-all hover:shadow-md">
-      {/* Celebration Effect for Conversion */}
+      {/* Celebration Effect */}
       {status === 'Disbursed' && <div className="absolute inset-0 pointer-events-none bg-emerald-500/10 animate-pulse z-0" />}
 
       <CardHeader className="flex flex-row items-center justify-between py-3 bg-slate-50/50">
@@ -279,29 +287,49 @@ export function LeadStatusUpdater({
           {isCallInitiated ? <Phone className="h-4 w-4 text-blue-600 animate-pulse"/> : <Activity className="h-4 w-4 text-slate-500"/>}
           {isCallInitiated ? "Active Call Session" : "Update Status"}
         </CardTitle>
-        <TooltipProvider>
-            <Tooltip>
-                <TooltipTrigger asChild>
-                    <a 
-                      href={whatsappLink} 
-                      target="_blank" 
-                      rel="noopener noreferrer" 
-                      className={cn("p-2 rounded-full transition-all shadow-sm", isWhatsappEnabled ? "bg-green-500 hover:bg-green-600 text-white" : "bg-slate-200 text-slate-400 cursor-not-allowed")}
-                      onClick={(e) => !isWhatsappEnabled && e.preventDefault()}
-                    >
-                        <MessageSquare className="h-4 w-4" /> 
-                    </a>
-                </TooltipTrigger>
-                <TooltipContent><p>{isWhatsappEnabled ? "Chat on WhatsApp" : "No Phone Number"}</p></TooltipContent>
-            </Tooltip>
-        </TooltipProvider>
+        <div className="flex gap-1">
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button onClick={handleCopyNumber} className="p-2 rounded-full hover:bg-slate-200 text-slate-500 transition-colors">
+                            <Copy className="h-4 w-4" />
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent><p>Copy Number</p></TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+            
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <a 
+                          href={whatsappLink} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className={cn("p-2 rounded-full transition-all shadow-sm", isWhatsappEnabled ? "bg-green-500 hover:bg-green-600 text-white" : "bg-slate-200 text-slate-400 cursor-not-allowed")}
+                          onClick={(e) => !isWhatsappEnabled && e.preventDefault()}
+                        >
+                            <MessageSquare className="h-4 w-4" /> 
+                        </a>
+                    </TooltipTrigger>
+                    <TooltipContent><p>{isWhatsappEnabled ? "Chat on WhatsApp" : "No Phone Number"}</p></TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+        </div>
       </CardHeader>
       
       <CardContent className="space-y-5 pt-4 relative z-10">
-        {/* Current Status Badge */}
+        {/* Current Status & Reset */}
         <div className="flex justify-between items-center bg-slate-50 p-2 rounded border border-slate-100">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">CURRENT STAGE</span>
-          <Badge className={cn("px-3 py-1 shadow-sm", currentStatusOption?.color)}>{currentStatusOption?.label || currentStatus}</Badge>
+          <div className="flex items-center gap-2">
+             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">CURRENT</span>
+             <Badge className={cn("px-2 py-0.5 text-xs shadow-sm", currentStatusOption?.color)}>{currentStatusOption?.label || currentStatus}</Badge>
+          </div>
+          {hasUnsavedChanges && (
+             <Button variant="ghost" size="sm" onClick={handleReset} className="h-6 px-2 text-[10px] text-slate-500 hover:text-red-500">
+                <RotateCcw className="h-3 w-3 mr-1" /> Reset
+             </Button>
+          )}
         </div>
 
         {/* Status Selector */}
@@ -318,7 +346,7 @@ export function LeadStatusUpdater({
                 {STATUS_OPTIONS.map((o) => (
                     <SelectItem key={o.value} value={o.value}>
                         <div className="flex items-center gap-2">
-                            <span className={cn("w-2 h-2 rounded-full", o.color.split(" ")[0].replace("100", "500"))} />
+                            <o.icon className={cn("h-4 w-4", o.color.split(' ')[1])} />
                             {o.label}
                         </div>
                     </SelectItem>
@@ -327,7 +355,7 @@ export function LeadStatusUpdater({
             </Select>
         </div>
 
-        {/* Loan Amount Input with Helper */}
+        {/* Loan Amount Input */}
         <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-700 uppercase flex items-center justify-between">
                 <span className="flex items-center gap-1"><IndianRupee className="h-3 w-3"/> Loan Amount</span>
@@ -343,7 +371,7 @@ export function LeadStatusUpdater({
             />
         </div>
 
-        {/* Call Timer (Interactive) */}
+        {/* Call Timer */}
         {isCallInitiated && (
             <div className={cn("space-y-2 p-3 border rounded-md transition-all duration-300", status === 'nr' ? "bg-gray-50 border-gray-200 opacity-60" : "bg-blue-50 border-blue-200 shadow-sm")}>
               <div className="flex justify-between items-center">
@@ -365,7 +393,7 @@ export function LeadStatusUpdater({
             </div>
         )}
 
-        {/* Not Eligible Reason (Conditional) */}
+        {/* Not Eligible Reason */}
         {status === "not_eligible" && (
             <div className="space-y-2 p-3 bg-red-50 border border-red-100 rounded-md animate-in fade-in zoom-in-95 duration-200">
               <label className="text-xs font-bold text-red-800 uppercase flex items-center gap-1"><AlertCircle className="h-3 w-3"/> Ineligibility Reason <span className="text-red-600">*</span></label>
@@ -383,25 +411,19 @@ export function LeadStatusUpdater({
             </div>
         )}
 
-        {/* General Remarks with Quick Chips */}
+        {/* Remarks */}
         <div className="space-y-2">
             <div className="flex justify-between items-center flex-wrap gap-2">
-                <label className="text-xs font-semibold text-slate-700 uppercase">Remarks</label>
+                <label className="text-xs font-semibold text-slate-700 uppercase">Remarks <span className="text-[10px] text-slate-400 font-normal lowercase">({remarks.length} chars)</span></label>
                 <div className="flex gap-1 flex-wrap justify-end">
                     {QUICK_NOTES.slice(0, 4).map(q => (
-                        <button 
-                            key={q} 
-                            onClick={() => handleQuickNote(q)} 
-                            className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full border border-slate-200 transition-colors"
-                        >
-                            {q}
-                        </button>
+                        <button key={q} onClick={() => handleQuickNote(q)} className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full border border-slate-200 transition-colors">{q}</button>
                     ))}
                 </div>
             </div>
             <div className="relative">
                 <Textarea 
-                    placeholder="Add notes..." 
+                    placeholder="Add notes... (Ctrl+Enter to save)" 
                     value={remarks} 
                     onChange={e => setRemarks(e.target.value)} 
                     onKeyDown={handleKeyDown}
