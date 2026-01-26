@@ -61,7 +61,7 @@ export function TelecallerLeadsTable({
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
   const [isCallInitiated, setIsCallInitiated] = useState(false)
-  
+   
   // Bulk Actions State
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
@@ -218,10 +218,15 @@ export function TelecallerLeadsTable({
                 <TableHead className="w-10">
                   <input type="checkbox" checked={selectedIds.length === leads.length && leads.length > 0} onChange={toggleSelectAll} className="rounded border-gray-300"/>
                 </TableHead>
+                
+                {/* --- CHANGED: Contact (Phone) Column Moved Here --- */}
+                <TableHead className="w-[120px]">Contact</TableHead>
+
+                {/* --- CHANGED: Name Column Moved Here --- */}
                 <TableHead className="w-[200px] md:w-[250px] cursor-pointer hover:bg-slate-100" onClick={() => handleSort('name')}>
                     <div className="flex items-center">Name <SortIcon field="name"/></div>
                 </TableHead>
-                <TableHead>Contact</TableHead>
+
                 <TableHead className="hidden md:table-cell">Status</TableHead>
                 <TableHead className="cursor-pointer hover:bg-slate-100" onClick={() => handleSort('loan_amount')}>
                     <div className="flex items-center">Amount <SortIcon field="loan_amount"/></div>
@@ -247,23 +252,7 @@ export function TelecallerLeadsTable({
                       <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(lead.id)} className="rounded border-gray-300"/>
                     </TableCell>
                     
-                    <TableCell>
-                      <div className="flex flex-col">
-                        <Link href={`/telecaller/leads/${lead.id}`} className="font-semibold text-slate-900 hover:text-blue-600 flex items-center gap-2">
-                            {lead.name}
-                            <ArrowUpRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity text-slate-400" />
-                        </Link>
-                        {lead.company && (
-                            <span className="text-xs text-slate-500 flex items-center gap-1 mt-0.5 truncate max-w-[150px]">
-                                <Building className="h-3 w-3" /> {lead.company}
-                            </span>
-                        )}
-                        <div className="md:hidden mt-1">
-                           <Badge variant="outline" className="text-[10px] px-1 py-0 h-5">{lead.status?.replace(/_/g, " ")}</Badge>
-                        </div>
-                      </div>
-                    </TableCell>
-                    
+                    {/* --- CHANGED: Contact Cell (Phone) Moved Here --- */}
                     <TableCell>
                         <div className="flex items-center gap-1">
                             <QuickActions 
@@ -295,16 +284,34 @@ export function TelecallerLeadsTable({
                         </div>
                     </TableCell>
 
+                    {/* --- CHANGED: Name Cell Moved Here --- */}
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <Link href={`/telecaller/leads/${lead.id}`} className="font-semibold text-slate-900 hover:text-blue-600 flex items-center gap-2">
+                            {lead.name}
+                            <ArrowUpRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity text-slate-400" />
+                        </Link>
+                        {lead.company && (
+                            <span className="text-xs text-slate-500 flex items-center gap-1 mt-0.5 truncate max-w-[150px]">
+                                <Building className="h-3 w-3" /> {lead.company}
+                            </span>
+                        )}
+                        <div className="md:hidden mt-1">
+                           <Badge variant="outline" className="text-[10px] px-1 py-0 h-5">{lead.status?.replace(/_/g, " ")}</Badge>
+                        </div>
+                      </div>
+                    </TableCell>
+                    
                     <TableCell className="hidden md:table-cell">
-                       <Badge variant="outline" className={cn(
+                        <Badge variant="outline" className={cn(
                            "capitalize font-medium border-0 px-2.5 py-0.5 rounded-md", 
                            lead.status === 'new' ? 'bg-blue-50 text-blue-700 border-blue-100' :
                            lead.status === 'Interested' ? 'bg-green-50 text-green-700 border-green-100' :
                            lead.status === 'Disbursed' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
                            'bg-slate-100 text-slate-700 border-slate-200'
-                       )}>
+                        )}>
                          {lead.status?.replace(/_/g, " ")}
-                       </Badge>
+                        </Badge>
                     </TableCell>
 
                     <TableCell className="font-mono text-sm text-slate-600">
