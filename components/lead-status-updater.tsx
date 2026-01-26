@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Phone, Clock, MessageSquare, IndianRupee, AlertCircle, Info } from "lucide-react" 
+import { Phone, Clock, MessageSquare, IndianRupee, AlertCircle, Sparkles, Send } from "lucide-react" 
 import { useCallTracking } from "@/context/call-tracking-context"
 import { toast } from "sonner"
 import { ScheduleFollowUpModal } from "./schedule-follow-up-modal" 
@@ -31,7 +31,7 @@ const STATUS_OPTIONS = [
   { value: "Interested", label: "Interested", color: "bg-green-100 text-green-800" },
   { value: "Documents_Sent", label: "Documents Sent", color: "bg-purple-100 text-purple-800" },
   { value: "Login", label: "Login", color: "bg-orange-100 text-orange-800" },
-  { value: "Disbursed", label: "Disbursed", color: "bg-green-100 text-green-800" },
+  { value: "Disbursed", label: "Disbursed", color: "bg-emerald-100 text-emerald-800" },
   { value: "Not_Interested", label: "Not Interested", color: "bg-red-100 text-red-800" },
   { value: "follow_up", label: "Call Back", color: "bg-indigo-100 text-indigo-800" },
   { value: "not_eligible", label: "Not Eligible", color: "bg-red-100 text-red-800" },
@@ -39,7 +39,7 @@ const STATUS_OPTIONS = [
   { value: "self_employed", label: "Self Employed", color: "bg-amber-100 text-amber-800" },
 ]
 
-const QUICK_NOTES = ["No Answer", "Busy", "Switch Off", "Asked to Call Later", "Wrong Number"];
+const QUICK_NOTES = ["No Answer", "Busy", "Switch Off", "Call Later", "Wrong Number", "Docs Pending"];
 
 export function LeadStatusUpdater({ 
   leadId, 
@@ -52,30 +52,29 @@ export function LeadStatusUpdater({
   telecallerName = "Telecaller",
 }: LeadStatusUpdaterProps) {
   const supabase = createClient()
-  const { activeCall, endCall, updateCallDuration, formatDuration } = useCallTracking()
+  const { activeCall, endCall, updateCallDuration } = useCallTracking()
 
   // --- STATE ---
   const [status, setStatus] = useState("")
   const [isUpdating, setIsUpdating] = useState(false)
-  const [note, setNote] = useState("") // Specifically for Not Eligible reason
-  const [remarks, setRemarks] = useState("") // General Remarks
+  const [note, setNote] = useState("") // For Not Eligible Reason
+  const [remarks, setRemarks] = useState("") // General Notes
   const [loanAmount, setLoanAmount] = useState<number | null>(initialLoanAmount)
   const [isModalOpen, setIsModalOpen] = useState(false) 
   
   // Call Timer State
-  const [callDuration, setCallDuration] = useState<number | null>(null)
-  const [callMins, setCallMins] = useState<number | null>(null);
-  const [callSecs, setCallSecs] = useState<number | null>(null);
+  const [elapsedTime, setElapsedTime] = useState(0)
+  const [callDurationOverride, setCallDurationOverride] = useState<number | null>(null) // Manual override
   
   const [notEligibleReason, setNotEligibleReason] = useState<string>("")
 
   // --- DERIVED STATE ---
-  const currentStatusOption = useMemo(() => STATUS_OPTIONS.find((o) => o.value === currentStatus), [currentStatus]);
+  const currentStatusOption = useMemo(() => STATUS_OPTIONS.find((o) => o.value === currentStatus), [currentStatus])
   
   const whatsappLink = useMemo(() => {
       const cleaned = String(leadPhoneNumber || "").replace(/[^0-9]/g, '');
       if (!cleaned) return "#"; 
-      const message = `hi sir this side ${telecallerName} from ICICI bank kindly share following documents`;
+      const message = `Hi, this is ${telecallerName} from ICICI Bank. Regarding your loan application...`;
       return `https://wa.me/${cleaned}?text=${encodeURIComponent(message)}`;
   }, [leadPhoneNumber, telecallerName]);
 
@@ -84,36 +83,45 @@ export function LeadStatusUpdater({
   // --- EFFECTS ---
   useEffect(() => { setLoanAmount(initialLoanAmount) }, [initialLoanAmount]);
   
+  // Live Timer for Active Call
   useEffect(() => {
-    // Reset specific fields when status changes
+    let interval: NodeJS.Timeout;
+    if (isCallInitiated && !callDurationOverride) {
+        const startTime = activeCall?.startTime || Date.now();
+        // Update timer every second
+        interval = setInterval(() => {
+            const seconds = Math.floor((Date.now() - startTime) / 1000);
+            setElapsedTime(seconds);
+        }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isCallInitiated, activeCall, callDurationOverride]);
+
+  // Reset fields on status change
+  useEffect(() => {
     if (status !== 'not_eligible') {
       setNotEligibleReason("")
       if (status && !isUpdating) setNote("")
     }
-    // Auto-set duration to 0 for NR
-    if (isCallInitiated && status === 'nr') {
-      setCallDuration(0); setCallMins(0); setCallSecs(0);
-    } else if (status !== 'nr' && callDuration === 0) {
-      setCallDuration(null); setCallMins(null); setCallSecs(null);
-    }
-  }, [status, isCallInitiated]);
+  }, [status, isUpdating]);
 
   // --- HANDLERS ---
-  const calculateTotalSeconds = (min: number | null, sec: number | null) => {
-    const m = min ?? 0; const s = sec ?? 0;
-    return (m * 60) + s;
+  const formatTime = (totalSeconds: number) => {
+    const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+    const s = (totalSeconds % 60).toString().padStart(2, '0');
+    return { m, s };
   }
 
-  const handleDurationChange = (type: 'min' | 'sec', val: string) => {
-    const num = val === "" ? null : Number(val);
-    if (type === 'min') {
-        setCallMins(num);
-        setCallDuration(calculateTotalSeconds(num, callSecs));
-    } else {
-        const safeSec = num !== null && num > 59 ? 59 : num;
-        setCallSecs(safeSec);
-        setCallDuration(calculateTotalSeconds(callMins, safeSec));
-    }
+  const handleManualTimeChange = (type: 'min' | 'sec', val: string) => {
+    const num = val === "" ? 0 : parseInt(val);
+    const current = formatTime(callDurationOverride ?? elapsedTime);
+    let newM = parseInt(current.m);
+    let newS = parseInt(current.s);
+
+    if (type === 'min') newM = num;
+    if (type === 'sec') newS = num > 59 ? 59 : num;
+
+    setCallDurationOverride((newM * 60) + newS);
   }
 
   const handleNotEligibleReasonChange = (reason: string) => {
@@ -125,23 +133,13 @@ export function LeadStatusUpdater({
       setRemarks(prev => prev ? `${prev}, ${text}` : text);
   }
 
-  // --- CORE ACTIONS ---
-  const updateLeadStatusToFollowUp = async () => {
-    try {
-      const updateData: any = { status: "follow_up", last_contacted: new Date().toISOString() }
-      if (loanAmount !== null && !isNaN(loanAmount)) updateData.loan_amount = loanAmount
-      if (remarks.trim()) updateData.notes = remarks
-
-      const { error } = await supabase.from("leads").update(updateData).eq("id", leadId)
-      if (error) throw error
-      
-      setStatus("follow_up")
-      onStatusUpdate?.("follow_up", note) 
-      setRemarks(""); setNote("");
-      toast.success("Lead status set to Call Back.");
-    } catch (error) { console.error(error); toast.error("Failed to update status.") }
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        handleStatusUpdate();
+    }
   }
 
+  // --- CORE ACTIONS ---
   const handleStatusUpdate = async () => {
     // Validation
     if (!status) { toast.error("Status Required", { description: "Please select a status." }); return }
@@ -149,8 +147,9 @@ export function LeadStatusUpdater({
     if (status === "follow_up") { setIsModalOpen(true); return }
     
     // Call Duration Validation
+    const finalDuration = callDurationOverride ?? elapsedTime;
     if (isCallInitiated && status !== 'nr') {
-        if (callDuration === null || callDuration <= 0) {
+        if (finalDuration <= 0) {
             toast.error("Invalid Duration", { description: "Call duration must be > 0 seconds." }); return
         }
     }
@@ -200,11 +199,11 @@ export function LeadStatusUpdater({
 
       // Log Call if needed
       if (isCallInitiated) {
-        await logCall(callDuration || 0)
+        await logCall(finalDuration)
       }
       
       // Reset UI
-      setNote(""); setRemarks(""); setCallDuration(null); setCallMins(null); setCallSecs(null); setNotEligibleReason(""); setStatus("");
+      setNote(""); setRemarks(""); setCallDurationOverride(null); setElapsedTime(0); setNotEligibleReason(""); setStatus("");
       toast.success("Updated successfully!")
 
     } catch (error: any) {
@@ -214,14 +213,30 @@ export function LeadStatusUpdater({
     }
   }
 
+  const updateLeadStatusToFollowUp = async () => {
+    // Helper to handle the modal callback
+    try {
+      const updateData: any = { status: "follow_up", last_contacted: new Date().toISOString() }
+      if (remarks.trim()) updateData.notes = remarks
+      await supabase.from("leads").update(updateData).eq("id", leadId)
+      
+      if (isCallInitiated) await logCall(callDurationOverride ?? elapsedTime)
+
+      setStatus("follow_up")
+      onStatusUpdate?.("follow_up", note) 
+      setRemarks(""); setNote(""); setCallDurationOverride(null); setElapsedTime(0);
+      toast.success("Call Back Scheduled.");
+    } catch (error) { console.error(error); toast.error("Failed to update status.") }
+  }
+
   const logCall = async (duration: number) => {
     try {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
         
-        // Use context duration if active call matches
         let finalDuration = duration
-        if (activeCall && activeCall.leadId === leadId) finalDuration = await updateCallDuration(leadId, "")
+        // Sync with context if active
+        if (activeCall && activeCall.leadId === leadId) finalDuration = await updateCallDuration(leadId, "") || duration
         
         const { data } = await supabase.from("call_logs").insert({
             lead_id: leadId, user_id: user.id, call_type: "outbound", call_status: "connected",
@@ -235,9 +250,13 @@ export function LeadStatusUpdater({
 
   // --- RENDER HELPERS ---
   const isButtonDisabled = isUpdating || !status || (status === "not_eligible" && !note.trim());
+  const timerDisplay = formatTime(callDurationOverride ?? elapsedTime);
 
   return (
-    <Card className="border-l-4 border-l-blue-500 shadow-sm">
+    <Card className="border-l-4 border-l-blue-500 shadow-sm relative overflow-hidden">
+      {/* Celebration Effect for Conversion */}
+      {status === 'Disbursed' && <div className="absolute inset-0 pointer-events-none bg-emerald-500/5 animate-pulse" />}
+
       <CardHeader className="flex flex-row items-center justify-between py-3 bg-slate-50/50">
         <CardTitle className="text-base font-semibold flex items-center gap-2">
           {isCallInitiated ? <Phone className="h-4 w-4 text-blue-600 animate-pulse"/> : <Activity className="h-4 w-4 text-slate-500"/>}
@@ -264,20 +283,27 @@ export function LeadStatusUpdater({
       <CardContent className="space-y-5 pt-4">
         {/* Current Status Badge */}
         <div className="flex justify-between items-center bg-slate-50 p-2 rounded border">
-          <span className="text-xs font-medium text-slate-500">CURRENT STATUS</span>
+          <span className="text-xs font-medium text-slate-500">CURRENT</span>
           <Badge className={cn("px-3 py-1", currentStatusOption?.color)}>{currentStatusOption?.label || currentStatus}</Badge>
         </div>
 
         {/* Status Selector */}
         <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-700 uppercase">New Status</label>
+            <label className="text-xs font-semibold text-slate-700 uppercase">New Outcome</label>
             <Select value={status} onValueChange={(val) => {
                 if (val === "follow_up") setIsModalOpen(true)
                 else setStatus(val)
             }}>
               <SelectTrigger className="h-10 bg-white"><SelectValue placeholder="Select outcome..." /></SelectTrigger>
               <SelectContent>
-                {STATUS_OPTIONS.map((o) => (<SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>))}
+                {STATUS_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                        <div className="flex items-center gap-2">
+                            <span className={cn("w-2 h-2 rounded-full", o.color.split(" ")[0].replace("100", "500"))} />
+                            {o.label}
+                        </div>
+                    </SelectItem>
+                ))}
               </SelectContent>
             </Select>
         </div>
@@ -288,22 +314,25 @@ export function LeadStatusUpdater({
             <Input type="number" placeholder="0.00" value={loanAmount ?? ""} onChange={e => setLoanAmount(e.target.value ? Number(e.target.value) : null)} min="0" />
         </div>
 
-        {/* Call Timer (Conditional) */}
+        {/* Call Timer (Interactive) */}
         {isCallInitiated && (
-            <div className="space-y-2 p-3 bg-blue-50 border border-blue-100 rounded-md">
-              <label className="text-xs font-bold text-blue-800 uppercase flex items-center gap-1"><Clock className="h-3 w-3"/> Call Duration {status !== 'nr' && <span className="text-red-500">*</span>}</label>
+            <div className={cn("space-y-2 p-3 border rounded-md transition-colors", status === 'nr' ? "bg-gray-50 border-gray-200 opacity-60" : "bg-blue-50 border-blue-200")}>
+              <div className="flex justify-between items-center">
+                 <label className="text-xs font-bold text-blue-800 uppercase flex items-center gap-1"><Clock className="h-3 w-3"/> Duration</label>
+                 {!callDurationOverride && status !== 'nr' && <span className="text-[10px] text-blue-600 animate-pulse">● Live Recording</span>}
+              </div>
               <div className="flex gap-2 items-center">
                 <div className="flex-1 relative">
-                  <Input type="number" placeholder="00" value={callMins ?? ""} onChange={e => handleDurationChange('min', e.target.value)} min="0" disabled={status === 'nr'} className="pr-8 bg-white" />
+                  <Input type="number" placeholder="00" value={timerDisplay.m} onChange={e => handleManualTimeChange('min', e.target.value)} disabled={status === 'nr'} className="pr-8 bg-white font-mono" />
                   <span className="absolute right-3 top-2.5 text-xs text-slate-400">m</span>
                 </div>
-                <span className="text-xl font-light text-slate-300">:</span>
+                <span className="text-xl font-light text-slate-400">:</span>
                 <div className="flex-1 relative">
-                  <Input type="number" placeholder="00" value={callSecs ?? ""} onChange={e => handleDurationChange('sec', e.target.value)} min="0" max="59" disabled={status === 'nr'} className="pr-8 bg-white" />
+                  <Input type="number" placeholder="00" value={timerDisplay.s} onChange={e => handleManualTimeChange('sec', e.target.value)} disabled={status === 'nr'} className="pr-8 bg-white font-mono" />
                   <span className="absolute right-3 top-2.5 text-xs text-slate-400">s</span>
                 </div>
               </div>
-              {status === 'nr' && <p className="text-[10px] text-blue-600 italic">Duration auto-set to 0 for NR.</p>}
+              {status === 'nr' && <p className="text-[10px] text-gray-500 italic">Duration auto-set to 0 for NR.</p>}
             </div>
         )}
 
@@ -313,7 +342,7 @@ export function LeadStatusUpdater({
               <label className="text-xs font-bold text-red-800 uppercase flex items-center gap-1"><AlertCircle className="h-3 w-3"/> Ineligibility Reason <span className="text-red-600">*</span></label>
               <div className="grid grid-cols-1 gap-1">
                 {["Salary in CASH", "Low CIBIL Score", "Other"].map((r) => (
-                    <label key={r} className="flex items-center space-x-2 cursor-pointer p-1.5 hover:bg-white/50 rounded">
+                    <label key={r} className="flex items-center space-x-2 cursor-pointer p-1.5 hover:bg-white/50 rounded transition-colors">
                         <input type="radio" name="reason" value={r} checked={notEligibleReason === r} onChange={() => handleNotEligibleReasonChange(r)} className="accent-red-600" />
                         <span className="text-sm text-slate-700">{r}</span>
                     </label>
@@ -325,23 +354,29 @@ export function LeadStatusUpdater({
             </div>
         )}
 
-        {/* General Remarks */}
+        {/* General Remarks with Quick Chips */}
         <div className="space-y-2">
             <div className="flex justify-between items-center">
                 <label className="text-xs font-semibold text-slate-700 uppercase">Remarks</label>
-                {/* Quick Note Chips */}
                 <div className="flex gap-1">
                     {QUICK_NOTES.slice(0,3).map(q => (
                         <button key={q} onClick={() => handleQuickNote(q)} className="text-[10px] px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 rounded border transition-colors">{q}</button>
                     ))}
                 </div>
             </div>
-            <Textarea placeholder="Add notes..." value={remarks} onChange={e => setRemarks(e.target.value)} rows={3} className="resize-none" />
+            <Textarea 
+                placeholder="Add notes... (Ctrl+Enter to save)" 
+                value={remarks} 
+                onChange={e => setRemarks(e.target.value)} 
+                onKeyDown={handleKeyDown}
+                rows={3} 
+                className="resize-none focus-visible:ring-blue-500" 
+            />
         </div>
 
         {/* Submit Button */}
-        <Button onClick={handleStatusUpdate} disabled={isButtonDisabled} className="w-full h-10 text-sm font-semibold shadow-sm">
-            {isUpdating ? "Saving..." : isCallInitiated ? "End Call & Update" : "Update Status"}
+        <Button onClick={handleStatusUpdate} disabled={isButtonDisabled} className={cn("w-full h-10 text-sm font-semibold shadow-sm transition-all", status === 'Disbursed' ? "bg-emerald-600 hover:bg-emerald-700" : "")}>
+            {isUpdating ? "Updating..." : status === 'Disbursed' ? <><Sparkles className="w-4 h-4 mr-2"/> Confirm Disbursal</> : isCallInitiated ? "End Call & Update" : "Update Status"}
         </Button>
       </CardContent>
 
