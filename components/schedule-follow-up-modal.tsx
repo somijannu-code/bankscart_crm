@@ -40,7 +40,7 @@ import { Badge } from "@/components/ui/badge";
 import { 
   Plus, Loader2, Calendar as CalendarIcon, Check, ChevronsUpDown, 
   Phone, Users, Mail, MessageSquare, ExternalLink, CalendarCheck, Download,
-  Clock, AlertTriangle, AlertCircle
+  AlertTriangle, AlertCircle
 } from "lucide-react";
 import { format, addDays, nextMonday, setHours, setMinutes, isPast, isToday, isTomorrow, addMinutes, nextFriday, startOfToday } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
@@ -378,15 +378,18 @@ export function ScheduleFollowUpModal({
         ) : (
           /* FORM VIEW */
           <div className="grid gap-5 py-4">
-            {/* FIXED: Activity Type Buttons (Replaced Tabs) */}
+            
+            {/* FIXED: Simple Button Grid instead of Tabs */}
             <div className="grid grid-cols-4 gap-2 bg-slate-100 p-1 rounded-lg">
                 {ACTIVITY_TYPES.map((type) => (
                   <button 
                     key={type.id} 
                     onClick={() => setActivityType(type.id)}
                     className={cn(
-                        "flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-md transition-all",
-                        activityType === type.id ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                        "flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-md transition-all shadow-sm",
+                        activityType === type.id 
+                          ? "bg-white text-blue-700 ring-1 ring-black/5" 
+                          : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"
                     )}
                   >
                     <type.icon className="h-3.5 w-3.5" />
@@ -403,7 +406,7 @@ export function ScheduleFollowUpModal({
               <Button variant="outline" size="xs" onClick={() => setQuickSchedule("next_week")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Next Week</Button>
             </div>
 
-            {/* Lead Selection (Grouped & Rich Context) */}
+            {/* Lead Selection */}
             <div className="grid gap-2">
               <Label className="text-xs font-semibold text-slate-500 uppercase">Select Lead</Label>
               <Popover open={leadOpen} onOpenChange={setLeadOpen}>
@@ -452,8 +455,8 @@ export function ScheduleFollowUpModal({
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label className="text-xs font-semibold text-slate-500 uppercase">Date</Label>
-                {/* FIXED: Z-Index on Popover Content */}
-                <Popover>
+                {/* FIXED: Modal Prop Added for Z-Index handling */}
+                <Popover modal={true}>
                   <PopoverTrigger asChild>
                     <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal h-10", !date && "text-muted-foreground")}>
                       <CalendarIcon className="mr-2 h-4 w-4" />
