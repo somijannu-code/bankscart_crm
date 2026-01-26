@@ -1,20 +1,21 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { 
-  User, Building, Clock, Eye, Phone, Mail, 
-  Search, ChevronDown, ChevronUp, MessageSquare
+  User, Building, Clock, Eye, MessageSquare, 
+  ChevronDown, ChevronUp, AlertCircle, Phone, ArrowUpRight
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
 import { LeadStatusDialog } from "@/components/lead-status-dialog"
 import { QuickActions } from "@/components/quick-actions"
 import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination"
+import { useRouter, useSearchParams } from "next/navigation"
+import { cn } from "@/lib/utils"
 import Link from "next/link"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 interface Lead {
   id: string
@@ -29,9 +30,7 @@ interface Lead {
   loan_amount: number | null
   loan_type: string | null
   source: string | null
-  assignee_id: string | null
   city: string | null
-  follow_up_date: string | null
 }
 
 interface TelecallerLeadsTableProps {
@@ -39,112 +38,44 @@ interface TelecallerLeadsTableProps {
   totalCount: number
   currentPage: number
   pageSize: number
+  sortBy: string
+  sortOrder: string
 }
 
 export function TelecallerLeadsTable({ 
   leads = [], 
   totalCount = 0, 
   currentPage = 1, 
-  pageSize = 20 
+  pageSize = 20,
+  sortBy,
+  sortOrder
 }: TelecallerLeadsTableProps) {
-  const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
-  const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
-  const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState<string>("all")
-  const [priorityFilter, setPriorityFilter] = useState<string>("all")
-  
-  const [sortField, setSortField] = useState<string>("created_at")
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
-  
-  const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>({
-    name: true,
-    contact: true,
-    company: true,
-    status: true,
-    priority: true,
-    loanAmount: true,
-    lastContacted: true,
-    actions: true
-  })
-  const [isCallInitiated, setIsCallInitiated] = useState(false) 
-  
-  const [telecallerName, setTelecallerName] = useState("ICICI Telecaller")
-
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
 
-  useEffect(() => {
-    const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        const name = user.user_metadata.name 
-          || user.email?.split('@')[0]
-          || "ICICI Telecaller"
-        setTelecallerName(name)
-      }
-    }
-    fetchUser()
-  }, [supabase])
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
+  const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
+  const [isCallInitiated, setIsCallInitiated] = useState(false)
 
-  const getSafeValue = (value: any, defaultValue: string = 'N/A') => {
-    return value ?? defaultValue
-  }
-
-  const getWhatsAppLink = (phoneNumber: string) => {
-    if (!phoneNumber) return "#";
-    const cleanedPhone = phoneNumber.replace(/\D/g, '')
-
-    const message = `Dear *Patron* Thank you for showing interest with the *ICICI Bank Personal Loan!* We’re excited to offer you one of the best deals with attractive *ROI (9.99 %) and Zero processing fee* and for a quick *approval*
-
-Please share below documents. 
- Adhaar,
- PAN,
- 3 Salary Slips & months and Bank statement`
-    
-    const encodedMessage = encodeURIComponent(message)
-    
-    return `https://wa.me/${cleanedPhone}?text=${encodedMessage}`
-  }
-
-  // --- FIX APPLIED HERE: Added null checks ---
-  const filteredLeads = leads.filter(lead => {
-    const lowerSearch = searchTerm.toLowerCase();
-    
-    // We check if the field exists (&&) before calling .toLowerCase() or .includes()
-    const matchesSearch = searchTerm === "" || 
-      (lead.name && lead.name.toLowerCase().includes(lowerSearch)) ||
-      (lead.email && lead.email.toLowerCase().includes(lowerSearch)) ||
-      (lead.phone && lead.phone.includes(searchTerm)) ||
-      (lead.company && lead.company.toLowerCase().includes(lowerSearch));
-    
-    const matchesStatus = statusFilter === "all" || lead.status === statusFilter
-    const matchesPriority = priorityFilter === "all" || lead.priority === priorityFilter
-    
-    return matchesSearch && matchesStatus && matchesPriority
-  }).sort((a, b) => {
-    let aValue = a[sortField as keyof Lead]
-    let bValue = b[sortField as keyof Lead]
-    
-    // Safety check for sorting as well
-    if (typeof aValue === 'string' && typeof bValue === 'string') {
-      aValue = aValue.toLowerCase()
-      bValue = bValue.toLowerCase()
-    }
-    
-    if (aValue === null || aValue === undefined) return sortDirection === 'asc' ? -1 : 1
-    if (bValue === null || bValue === undefined) return sortDirection === 'asc' ? 1 : -1
-    
-    if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1
-    if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1
-    return 0
-  })
-
+  // --- 1. HANDLE SORTING VIA URL ---
   const handleSort = (field: string) => {
-    if (sortField === field) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    const params = new URLSearchParams(searchParams.toString())
+    if (sortBy === field) {
+      params.set('sort_order', sortOrder === 'asc' ? 'desc' : 'asc')
     } else {
-      setSortField(field)
-      setSortDirection('desc')
+      params.set('sort_by', field)
+      params.set('sort_order', 'desc') // Default to desc for new field
     }
+    router.push(`?${params.toString()}`)
+  }
+
+  // --- 2. RENDER SORT ICON ---
+  const SortIcon = ({ field }: { field: string }) => {
+    if (sortBy !== field) return <ChevronDown className="ml-1 h-3 w-3 opacity-20" />
+    return sortOrder === 'asc' 
+      ? <ChevronUp className="ml-1 h-3 w-3 text-blue-600" /> 
+      : <ChevronDown className="ml-1 h-3 w-3 text-blue-600" />
   }
 
   const handleCallInitiated = (lead: Lead) => {
@@ -153,349 +84,199 @@ Please share below documents.
     setIsCallInitiated(true)
   }
 
-  const handleCallLogged = (callLogId: string) => {
-    setIsCallInitiated(false)
+  // --- 3. WHATSAPP LINK GENERATOR ---
+  const getWhatsAppLink = (phone: string, name: string) => {
+    if (!phone) return "#"
+    const cleanedPhone = phone.replace(/\D/g, '')
+    const message = `Hi ${name || "there"}, this is from ICICI Bank. regarding your loan inquiry...`
+    return `https://wa.me/${cleanedPhone}?text=${encodeURIComponent(message)}`
   }
 
-  const handleStatusUpdate = async (newStatus: string, note?: string, callbackDate?: string) => {
-    try {
-      if (!selectedLead?.id) return
-      
-      const updateData: any = { 
-        status: newStatus,
-        last_contacted: new Date().toISOString()
-      }
-
-      if (newStatus === "not_eligible" && note) {
-        const { error: noteError } = await supabase
-          .from("notes")
-          .insert({
-            lead_id: selectedLead.id,
-            note: note,
-            note_type: "status_change"
-          })
-
-        if (noteError) throw noteError
-      }
-
-      if (newStatus === "follow_up" && callbackDate) {
-        const { error: followUpError } = await supabase
-          .from("follow_ups")
-          .insert({
-            lead_id: selectedLead.id,
-            scheduled_date: callbackDate,
-            status: "scheduled"
-          })
-
-        if (followUpError) throw followUpError
-        
-        updateData.follow_up_date = callbackDate
-      }
-
-      const { error } = await supabase
-        .from("leads")
-        .update(updateData)
-        .eq("id", selectedLead.id)
-
-      if (error) throw error
-
-      console.log(`Status updated for lead ${selectedLead.id} to ${newStatus}`)
-      window.location.reload()
-      
-    } catch (error) {
-      console.error("Error updating lead status:", error)
-    }
-  }
-
-  const getPriorityVariant = (priority: string) => {
-    switch (priority) {
-      case "high": return "destructive"
-      case "medium": return "default"
-      case "low": return "secondary"
-      default: return "secondary"
-    }
-  }
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "new": return "bg-blue-100 text-blue-800"
-      case "contacted": return "bg-yellow-100 text-yellow-800"
-      case "Interested": return "bg-green-100 text-green-800"
-      case "Documents_Sent": return "bg-purple-100 text-purple-800"
-      case "Login": return "bg-orange-100 text-orange-800"
-      case "Disbursed": return "bg-green-100 text-green-800"
-      case "Not_Interested": return "bg-red-100 text-red-800"
-      case "Call_Back": return "bg-indigo-100 text-indigo-800"
-      case "not_eligible": return "bg-red-100 text-red-800"
-      case "nr": return "bg-gray-100 text-gray-800"
-      case "self_employed": return "bg-amber-100 text-amber-800"
-      default: return "bg-gray-100 text-gray-800"
-    }
+  // --- 4. STALE CHECK ---
+  const isStale = (lastContacted: string | null, status: string) => {
+    if(!lastContacted) return true;
+    if(['Disbursed', 'Not_Interested', 'not_eligible'].includes(status)) return false;
+    const diff = new Date().getTime() - new Date(lastContacted).getTime();
+    return diff > (48 * 60 * 60 * 1000); // 48 Hours
   }
 
   const formatCurrency = (amount: number | null) => {
-    if (!amount) return 'N/A'
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 0
-    }).format(amount)
+    if (!amount) return '-'
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount)
+  }
+
+  // --- 5. STATUS UPDATER ---
+  const handleStatusUpdate = async (newStatus: string, note?: string, callbackDate?: string) => {
+    if (!selectedLead) return
+    try {
+        const updateData: any = { 
+            status: newStatus,
+            last_contacted: new Date().toISOString()
+        }
+        
+        if (newStatus === "follow_up" && callbackDate) {
+            await supabase.from("follow_ups").insert({
+                lead_id: selectedLead.id,
+                scheduled_date: callbackDate,
+                status: "scheduled"
+            })
+            updateData.follow_up_date = callbackDate
+        }
+
+        if (note) {
+             await supabase.from("notes").insert({
+                lead_id: selectedLead.id,
+                note: note,
+                note_type: "status_change"
+             })
+        }
+
+        await supabase.from("leads").update(updateData).eq("id", selectedLead.id)
+        router.refresh() // Refresh Server Component
+    } catch (e) {
+        console.error(e)
+    }
   }
 
   const totalPages = Math.ceil(totalCount / pageSize)
 
-  if (!leads || leads.length === 0) {
-    return (
-      <div className="text-center py-8">
-        <p className="text-gray-500">No leads found</p>
-      </div>
-    )
+  if (leads.length === 0) {
+    return <div className="p-8 text-center text-gray-500">No leads found matching your filters.</div>
   }
 
   return (
-    <div className="space-y-4">
-      {/* Filters and Search */}
-      <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-        <div className="relative w-full sm:w-64">
-          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search leads..."
-            className="pl-8"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-        
-        <div className="flex gap-2 w-full sm:w-auto">
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-full sm:w-40">
-              <SelectValue placeholder="Filter by status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="new">New</SelectItem>
-              <SelectItem value="contacted">Contacted</SelectItem>
-              <SelectItem value="Interested">Interested</SelectItem>
-              <SelectItem value="Documents_Sent">Documents Sent</SelectItem>
-              <SelectItem value="Login">Login</SelectItem>
-              <SelectItem value="Disbursed">Disbursed</SelectItem>
-              <SelectItem value="Not_Interested">Not Interested</SelectItem>
-              <SelectItem value="Call_Back">Call Back</SelectItem>
-              <SelectItem value="not_eligible">Not Eligible</SelectItem>
-              <SelectItem value="nr">NR</SelectItem>
-              <SelectItem value="self_employed">Self Employed</SelectItem>
-            </SelectContent>
-          </Select>
-          
-          <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-            <SelectTrigger className="w-full sm:w-40">
-              <SelectValue placeholder="Filter by priority" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Priorities</SelectItem>
-              <SelectItem value="high">High</SelectItem>
-              <SelectItem value="medium">Medium</SelectItem>
-              <SelectItem value="low">Low</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              {visibleColumns.contact && <TableHead>Contact</TableHead>}
-              {visibleColumns.name && (
-                <TableHead 
-                  className="cursor-pointer" 
-                  onClick={() => handleSort('name')}
-                >
-                  Name {sortField === 'name' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
-                </TableHead>
-              )}
-              {visibleColumns.company && (
-                <TableHead 
-                  className="cursor-pointer" 
-                  onClick={() => handleSort('company')}
-                >
-                  Company {sortField === 'company' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
-                </TableHead>
-              )}
-              {visibleColumns.status && <TableHead>Status</TableHead>}
-              {visibleColumns.priority && <TableHead>Priority</TableHead>}
-              {visibleColumns.loanAmount && (
-                <TableHead 
-                  className="cursor-pointer" 
-                  onClick={() => handleSort('loan_amount')}
-                >
-                  Loan Amount {sortField === 'loan_amount' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
-                </TableHead>
-              )}
-              {visibleColumns.loanType && <TableHead>Loan Type</TableHead>}
-              {visibleColumns.source && <TableHead>Source</TableHead>}
-              {visibleColumns.lastContacted && (
-                <TableHead 
-                  className="cursor-pointer" 
-                  onClick={() => handleSort('last_contacted')}
-                >
-                  Last Contacted {sortField === 'last_contacted' && (sortDirection === 'asc' ? <ChevronUp className="inline h-4 w-4" /> : <ChevronDown className="inline h-4 w-4" />)}
-                </TableHead>
-              )}
-              {visibleColumns.actions && <TableHead>Actions</TableHead>}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredLeads.map((lead) => (
-              <TableRow key={lead.id} className="cursor-pointer hover:bg-gray-50">
-                {visibleColumns.contact && (
-                  <TableCell>
-                    <QuickActions
-                      phone={getSafeValue(lead.phone, '')}
-                      email={getSafeValue(lead.email, '')}
-                      leadId={lead.id}
-                      onCallInitiated={() => handleCallInitiated(lead)}
-                    />
-                  </TableCell>
-                )}
-                {visibleColumns.name && (
-                  <TableCell className="font-medium">
-                    <Link href={`/telecaller/leads/${lead.id}`} className="flex items-center gap-2">
-                      <User className="h-4 w-4" />
-                      {getSafeValue(lead.name, 'Unknown')}
-                      
-                      {lead.phone && (
-                        <a 
-                          href={getWhatsAppLink(lead.phone)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-green-500 hover:text-green-600 transition-colors ml-1"
-                          onClick={(e) => e.stopPropagation()}
-                          title="WhatsApp Chat"
-                        >
-                          <MessageSquare className="h-4 w-4" />
-                        </a>
-                      )}
+    <div>
+      <Table>
+        <TableHeader className="bg-slate-50">
+          <TableRow>
+            <TableHead className="w-[250px] cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleSort('name')}>
+                <div className="flex items-center">Name <SortIcon field="name"/></div>
+            </TableHead>
+            <TableHead>Contact</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="cursor-pointer hover:bg-slate-100" onClick={() => handleSort('loan_amount')}>
+                <div className="flex items-center">Amount <SortIcon field="loan_amount"/></div>
+            </TableHead>
+            <TableHead className="cursor-pointer hover:bg-slate-100" onClick={() => handleSort('priority')}>
+                <div className="flex items-center">Priority <SortIcon field="priority"/></div>
+            </TableHead>
+            <TableHead className="cursor-pointer hover:bg-slate-100" onClick={() => handleSort('last_contacted')}>
+                <div className="flex items-center">Last Contact <SortIcon field="last_contacted"/></div>
+            </TableHead>
+            <TableHead className="text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {leads.map((lead) => {
+            const stale = isStale(lead.last_contacted, lead.status);
+            return (
+              <TableRow key={lead.id} className="group hover:bg-slate-50 transition-colors">
+                <TableCell>
+                  <div className="flex flex-col">
+                    <Link href={`/telecaller/leads/${lead.id}`} className="font-semibold text-slate-900 hover:text-blue-600 flex items-center gap-2">
+                        {lead.name}
+                        <ArrowUpRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </Link>
-                  </TableCell>
-                )}
-                {visibleColumns.company && (
-                  <TableCell>
+                    {lead.company && (
+                        <span className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                            <Building className="h-3 w-3" /> {lead.company}
+                        </span>
+                    )}
+                  </div>
+                </TableCell>
+                
+                <TableCell>
                     <div className="flex items-center gap-2">
-                      <Building className="h-4 w-4" />
-                      {getSafeValue(lead.company, 'No company')}
+                        <QuickActions 
+                            phone={lead.phone || ""} 
+                            email={lead.email || ""} 
+                            leadId={lead.id} 
+                            onCallInitiated={() => handleCallInitiated(lead)} 
+                        />
+                        <TooltipProvider>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <a href={getWhatsAppLink(lead.phone, lead.name)} target="_blank" className="p-1.5 rounded-full bg-green-50 text-green-600 hover:bg-green-100">
+                                        <MessageSquare className="h-4 w-4" />
+                                    </a>
+                                </TooltipTrigger>
+                                <TooltipContent>WhatsApp</TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
                     </div>
-                  </TableCell>
-                )}
-                {visibleColumns.status && (
-                  <TableCell>
-                    <Badge className={getStatusColor(lead.status)}>
-                      {getSafeValue(lead.status, 'unknown').replace("_", " ").toUpperCase()}
-                    </Badge>
-                  </TableCell>
-                )}
-                {visibleColumns.priority && (
-                  <TableCell>
-                    <Badge variant={getPriorityVariant(getSafeValue(lead.priority, 'medium'))}>
-                      {getSafeValue(lead.priority, 'medium').toUpperCase()}
-                    </Badge>
-                  </TableCell>
-                )}
-                {visibleColumns.loanAmount && (
-                  <TableCell>
+                </TableCell>
+
+                <TableCell>
+                   <Badge variant="outline" className={cn(
+                       "capitalize font-medium border-0", 
+                       lead.status === 'new' ? 'bg-blue-100 text-blue-700' :
+                       lead.status === 'Interested' ? 'bg-green-100 text-green-700' :
+                       lead.status === 'Disbursed' ? 'bg-emerald-100 text-emerald-700' :
+                       'bg-slate-100 text-slate-700'
+                   )}>
+                     {lead.status?.replace(/_/g, " ")}
+                   </Badge>
+                </TableCell>
+
+                <TableCell className="font-mono text-sm">
                     {formatCurrency(lead.loan_amount)}
-                  </TableCell>
-                )}
-                {visibleColumns.loanType && (
-                  <TableCell>
-                    {getSafeValue(lead.loan_type, 'N/A')}
-                  </TableCell>
-                )}
-                {visibleColumns.source && (
-                  <TableCell>
-                    {getSafeValue(lead.source, 'N/A')}
-                  </TableCell>
-                )}
-                {visibleColumns.lastContacted && (
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4" />
-                      {lead.last_contacted
-                        ? new Date(lead.last_contacted).toLocaleDateString()
-                        : "Never"}
+                </TableCell>
+
+                <TableCell>
+                    {lead.priority === 'high' && <Badge variant="destructive" className="text-[10px]">HIGH</Badge>}
+                    {lead.priority === 'medium' && <Badge variant="secondary" className="text-[10px]">MED</Badge>}
+                    {lead.priority === 'low' && <Badge variant="outline" className="text-[10px]">LOW</Badge>}
+                </TableCell>
+
+                <TableCell>
+                    <div className="flex items-center gap-2 text-xs">
+                        <Clock className={cn("h-3.5 w-3.5", stale ? "text-red-500" : "text-slate-400")} />
+                        <span className={cn(stale ? "text-red-600 font-medium" : "text-slate-500")}>
+                            {lead.last_contacted ? new Date(lead.last_contacted).toLocaleDateString() : 'Never'}
+                        </span>
+                        {stale && <AlertCircle className="h-3 w-3 text-red-500 animate-pulse" />}
                     </div>
-                  </TableCell>
-                )}
-                {visibleColumns.actions && (
-                  <TableCell>
-                    <div className="flex gap-2">
-                      <Link href={`/telecaller/leads/${lead.id}`}>
-                        <Button variant="outline" size="sm">
-                          <Eye className="h-4 w-4 mr-1" />
-                          View
-                        </Button>
-                      </Link>
-                      <Button variant="outline" size="sm" onClick={() => {
-                        setSelectedLead(lead)
-                        setIsStatusDialogOpen(true)
-                      }}>
-                        Update Status
-                      </Button>
-                    </div>
-                  </TableCell>
-                )}
+                </TableCell>
+
+                <TableCell className="text-right">
+                    <Button variant="ghost" size="sm" onClick={() => { setSelectedLead(lead); setIsStatusDialogOpen(true); }}>
+                        Update
+                    </Button>
+                </TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+            )
+          })}
+        </TableBody>
+      </Table>
 
       {/* Pagination */}
-      {totalPages > 1 && (
-        <Pagination>
-          <PaginationContent>
-            <PaginationItem>
-              <PaginationPrevious 
-                href={currentPage > 1 ? `?page=${currentPage - 1}` : '#'}
-                className={currentPage <= 1 ? 'pointer-events-none opacity-50' : ''}
-              />
-            </PaginationItem>
-            
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              let pageNum
-              if (totalPages <= 5) {
-                pageNum = i + 1
-              } else if (currentPage <= 3) {
-                pageNum = i + 1
-              } else if (currentPage >= totalPages - 2) {
-                pageNum = totalPages - 4 + i
-              } else {
-                pageNum = currentPage - 2 + i
-              }
-              
-              return (
-                <PaginationItem key={pageNum}>
-                  <PaginationLink 
-                    href={`?page=${pageNum}`}
-                    isActive={currentPage === pageNum}
-                  >
-                    {pageNum}
-                  </PaginationLink>
+      <div className="py-4 border-t flex justify-end">
+        {totalPages > 1 && (
+            <Pagination>
+            <PaginationContent>
+                <PaginationItem>
+                <PaginationPrevious 
+                    href={`?page=${Math.max(1, currentPage - 1)}`} 
+                    className={currentPage === 1 ? 'pointer-events-none opacity-50' : ''}
+                />
                 </PaginationItem>
-              )
-            })}
-            
-            <PaginationItem>
-              <PaginationNext 
-                href={currentPage < totalPages ? `?page=${currentPage + 1}` : '#'}
-                className={currentPage >= totalPages ? 'pointer-events-none opacity-50' : ''}
-              />
-            </PaginationItem>
-          </PaginationContent>
-        </Pagination>
-      )}
+                <PaginationItem>
+                    <div className="px-4 text-sm text-slate-500">
+                        Page {currentPage} of {totalPages}
+                    </div>
+                </PaginationItem>
+                <PaginationItem>
+                <PaginationNext 
+                    href={`?page=${Math.min(totalPages, currentPage + 1)}`} 
+                    className={currentPage >= totalPages ? 'pointer-events-none opacity-50' : ''}
+                />
+                </PaginationItem>
+            </PaginationContent>
+            </Pagination>
+        )}
+      </div>
 
+      {/* Shared Dialog for Status Update */}
       {selectedLead && (
         <LeadStatusDialog
           leadId={selectedLead.id}
@@ -503,7 +284,7 @@ Please share below documents.
           open={isStatusDialogOpen}
           onOpenChange={(open) => {
             setIsStatusDialogOpen(open)
-            if (!open) setIsCallInitiated(false)
+            if (!open) { setIsCallInitiated(false); setSelectedLead(null); }
           }}
           onStatusUpdate={handleStatusUpdate}
           isCallInitiated={isCallInitiated}
