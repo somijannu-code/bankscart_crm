@@ -35,12 +35,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar } from "@/components/ui/calendar";
 import { Badge } from "@/components/ui/badge"; 
 import { 
   Plus, Loader2, Calendar as CalendarIcon, Check, ChevronsUpDown, 
   Phone, Users, Mail, MessageSquare, ExternalLink, CalendarCheck, Download,
-  AlertTriangle, AlertCircle
+  Clock, AlertTriangle, AlertCircle
 } from "lucide-react";
 import { format, addDays, nextMonday, setHours, setMinutes, isPast, isToday, isTomorrow, addMinutes, nextFriday, startOfToday } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
@@ -306,16 +307,32 @@ export function ScheduleFollowUpModal({
         return;
       }
 
-      const { error } = await supabase.from("follow_ups").insert({
+      // 1. Create Follow-up Record
+      const { error: followUpError } = await supabase.from("follow_ups").insert({
         lead_id: leadId,
         user_id: user.id,
         title: title,
         scheduled_at: scheduledDateTime.toISOString(),
         notes: notes,
         status: "pending",
+        // priority: priority // Uncomment if column exists
       });
 
-      if (error) throw error;
+      if (followUpError) throw followUpError;
+
+      // 2. AUTOMATICALLY UPDATE LEAD STATUS TO 'CALL BACK'
+      const { error: leadError } = await supabase
+        .from("leads")
+        .update({ 
+            status: "follow_up",
+            last_contacted: new Date().toISOString() 
+        })
+        .eq("id", leadId);
+
+      if (leadError) {
+          console.error("Lead status update failed:", leadError);
+          // We don't throw here to avoid failing the whole flow if just the status update fails
+      }
 
       const durationMins = parseInt(duration);
       const gLink = generateGCalLink(title, scheduledDateTime, durationMins);
@@ -323,7 +340,7 @@ export function ScheduleFollowUpModal({
       setSuccessData({ google: gLink, ics: iLink });
       
       toast.success("Scheduled Successfully", {
-        description: `${format(scheduledDateTime, "MMM d, h:mm a")}`,
+        description: `Lead moved to 'Call Back'. Reminder set for ${format(scheduledDateTime, "MMM d, h:mm a")}`,
       });
 
       if (onScheduleSuccess) onScheduleSuccess();
@@ -359,7 +376,7 @@ export function ScheduleFollowUpModal({
             </div>
             <div className="text-center space-y-1">
               <h3 className="font-bold text-xl text-slate-800">Reminder Set!</h3>
-              <p className="text-sm text-muted-foreground px-8">Added to your dashboard.</p>
+              <p className="text-sm text-muted-foreground px-8">Added to your dashboard and lead status updated.</p>
             </div>
             
             <div className="flex flex-col gap-2 w-full pt-4">
@@ -379,7 +396,7 @@ export function ScheduleFollowUpModal({
           /* FORM VIEW */
           <div className="grid gap-5 py-4">
             
-            {/* FIXED: Simple Button Grid instead of Tabs */}
+            {/* FIXED: Activity Type Buttons */}
             <div className="grid grid-cols-4 gap-2 bg-slate-100 p-1 rounded-lg">
                 {ACTIVITY_TYPES.map((type) => (
                   <button 
