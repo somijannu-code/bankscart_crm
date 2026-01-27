@@ -36,7 +36,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge"; 
-import { Input } from "@/components/ui/input"; // Using Native Input for Date
+import { Input } from "@/components/ui/input"; 
 import { 
   Plus, Loader2, Check, ChevronsUpDown, 
   Phone, Users, Mail, MessageSquare, AlertTriangle, AlertCircle 
@@ -69,10 +69,10 @@ const TIME_SLOTS = [
 ];
 
 const ACTIVITY_TYPES = [
-  { id: "call", label: "Call", icon: Phone },
-  { id: "meeting", label: "Meeting", icon: Users },
-  { id: "whatsapp", label: "WhatsApp", icon: MessageSquare },
-  { id: "email", label: "Email", icon: Mail },
+  { id: "call", label: "Call", icon: Phone, placeholder: "Call agenda or talking points...", actionLabel: "Schedule Call" },
+  { id: "meeting", label: "Meeting", icon: Users, placeholder: "Meeting location and agenda...", actionLabel: "Schedule Meeting" },
+  { id: "whatsapp", label: "WhatsApp", icon: MessageSquare, placeholder: "Draft your WhatsApp message here...", actionLabel: "Schedule WhatsApp" },
+  { id: "email", label: "Email", icon: Mail, placeholder: "Email subject or key points...", actionLabel: "Schedule Email" },
 ];
 
 const QUICK_NOTES = ["Discuss Rates", "Collect Docs", "Negotiation", "Final Closing", "Intro Call"];
@@ -350,6 +350,9 @@ ${notes || "No additional notes."}
     }
   };
 
+  // Get current active activity details for UI feedback
+  const currentActivity = ACTIVITY_TYPES.find(a => a.id === activityType) || ACTIVITY_TYPES[0];
+
   return (
     <Dialog open={isOpen} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -368,12 +371,12 @@ ${notes || "No additional notes."}
         {/* FORM VIEW */}
         <div className="grid gap-5 py-4">
           
-          {/* FIX: Activity Buttons now have type="button" to prevent submit */}
+          {/* Activity Buttons - ALL have type="button" */}
           <div className="grid grid-cols-4 gap-2 bg-slate-100 p-1 rounded-lg">
               {ACTIVITY_TYPES.map((type) => (
                 <button 
                   key={type.id} 
-                  type="button" // <--- CRITICAL FIX
+                  type="button" 
                   onClick={() => setActivityType(type.id)}
                   className={cn(
                       "flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-md transition-all shadow-sm",
@@ -388,7 +391,7 @@ ${notes || "No additional notes."}
               ))}
           </div>
 
-          {/* FIX: Quick Action Buttons also need type="button" */}
+          {/* Quick Actions - ALL have type="button" */}
           <div className="flex gap-2">
             <Button type="button" variant="outline" size="xs" onClick={() => setQuickSchedule("tomorrow")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Tomorrow</Button>
             <Button type="button" variant="outline" size="xs" onClick={() => setQuickSchedule("3days")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">In 3 Days</Button>
@@ -441,7 +444,7 @@ ${notes || "No additional notes."}
             )}
           </div>
 
-          {/* Date & Time Row - Native Input */}
+          {/* Date & Time Row */}
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2 relative">
               <Label className="text-xs font-semibold text-slate-500 uppercase">Date</Label>
@@ -491,7 +494,7 @@ ${notes || "No additional notes."}
               </div>
           )}
 
-          {/* Notes & Priority */}
+          {/* Notes & Priority - DYNAMIC PLACEHOLDER */}
           <div className="grid gap-2">
             <div className="flex justify-between items-center">
               <Label className="text-xs font-semibold text-slate-500 uppercase">Notes</Label>
@@ -509,13 +512,13 @@ ${notes || "No additional notes."}
               </div>
             </div>
             <Textarea 
-              placeholder="Add agenda or details..." 
+              placeholder={currentActivity.placeholder} // <-- Dynamic Placeholder
               value={notes} 
               onChange={(e) => setNotes(e.target.value)} 
               className="resize-none focus-visible:ring-blue-500" 
               rows={3} 
             />
-            {/* FIX: Quick Notes also need type="button" */}
+            {/* Quick Notes - ALL have type="button" */}
             <div className="flex gap-1 flex-wrap mt-1">
                 {QUICK_NOTES.slice(0, 4).map(note => (
                   <button key={note} type="button" onClick={() => handleQuickNote(note)} className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors text-slate-600 border border-slate-200">
@@ -528,9 +531,11 @@ ${notes || "No additional notes."}
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={loading}>Cancel</Button>
+          
+          {/* Dynamic Submit Button Label */}
           <Button onClick={handleSchedule} disabled={!date || !leadId || loading} className={cn("transition-colors", priority === "high" ? "bg-red-600 hover:bg-red-700" : "")}>
             {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {priority === "high" ? "Confirm Urgent Follow-up" : "Confirm Schedule"}
+            {priority === "high" ? "Confirm Urgent Follow-up" : currentActivity.actionLabel}
           </Button>
         </DialogFooter>
       </DialogContent>
