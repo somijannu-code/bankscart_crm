@@ -30,18 +30,14 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+// Removed Popover imports as we are switching to Inline to fix the bug
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar } from "@/components/ui/calendar";
 import { Badge } from "@/components/ui/badge"; 
 import { 
   Plus, Loader2, Calendar as CalendarIcon, Check, ChevronsUpDown, 
   Phone, Users, Mail, MessageSquare, ExternalLink, CalendarCheck, Download,
-  Clock, AlertTriangle, AlertCircle
+  Clock, AlertTriangle, AlertCircle, ChevronDown, ChevronUp // Added Chevrons
 } from "lucide-react";
 import { format, addDays, nextMonday, setHours, setMinutes, isPast, isToday, isTomorrow, addMinutes, nextFriday, startOfToday } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
@@ -115,6 +111,9 @@ export function ScheduleFollowUpModal({
   const [leadOpen, setLeadOpen] = useState(false);
   const [conflictCount, setConflictCount] = useState(0);
   const [existingFollowUp, setExistingFollowUp] = useState<string | null>(null);
+  
+  // NEW: State for Inline Calendar visibility
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
   const supabase = createClient();
   const router = useRouter();
@@ -127,6 +126,7 @@ export function ScheduleFollowUpModal({
       setPriority("normal");
       setConflictCount(0);
       setExistingFollowUp(null);
+      setIsCalendarOpen(false); // Reset calendar visibility
       if (!date) {
         const tomorrow = addDays(new Date(), 1);
         setDate(tomorrow);
@@ -223,13 +223,13 @@ export function ScheduleFollowUpModal({
       case "friday": newDate = nextFriday(now); setTime("15:00"); break;
     }
     setDate(newDate);
+    setIsCalendarOpen(false); // Close calendar when quick select is used
   };
 
   const handleQuickNote = (text: string) => {
     setNotes(prev => prev ? `${prev}, ${text}` : text);
   };
 
-  // --- GOOGLE CALENDAR LINK GENERATOR ---
   const generateGCalLink = (title: string, dateObj: Date, durationMins: number, description: string) => {
     const start = dateObj.toISOString().replace(/-|:|\.\d\d\d/g, "");
     const end = addMinutes(dateObj, durationMins).toISOString().replace(/-|:|\.\d\d\d/g, "");
@@ -252,7 +252,6 @@ export function ScheduleFollowUpModal({
     return <span>{format(dateObj, "PPP")}</span>;
   }
 
-  // --- GROUPED LEADS LOGIC ---
   const groupedLeads = useMemo(() => {
     const groups: Record<string, Lead[]> = {};
     leads.forEach(lead => {
@@ -288,7 +287,6 @@ export function ScheduleFollowUpModal({
       const titlePrefix = priority === "high" ? "🔥 " : "";
       const title = `${titlePrefix}${activityLabel}: ${selectedLead?.name}`;
 
-      // Build Calendar Description with Phone & Details
       const calendarDescription = `
 LEAD DETAILS
 ------------
@@ -310,7 +308,6 @@ ${notes || "No additional notes."}
         return;
       }
 
-      // 1. Create Follow-up Record
       const { error: followUpError } = await supabase.from("follow_ups").insert({
         lead_id: leadId,
         user_id: user.id,
@@ -322,7 +319,6 @@ ${notes || "No additional notes."}
 
       if (followUpError) throw followUpError;
 
-      // 2. AUTOMATICALLY UPDATE LEAD STATUS TO 'CALL BACK'
       const { error: leadError } = await supabase
         .from("leads")
         .update({ 
@@ -333,11 +329,9 @@ ${notes || "No additional notes."}
 
       if (leadError) console.error("Lead status update failed:", leadError);
 
-      // 3. GENERATE & OPEN GOOGLE CALENDAR LINK AUTOMATICALLY
       const durationMins = parseInt(duration);
       const gLink = generateGCalLink(title, scheduledDateTime, durationMins, calendarDescription);
       
-      // Open in new tab immediately
       window.open(gLink, '_blank');
       
       toast.success("Scheduled Successfully", {
@@ -400,9 +394,10 @@ ${notes || "No additional notes."}
             <Button variant="outline" size="xs" onClick={() => setQuickSchedule("next_week")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Next Week</Button>
           </div>
 
-          {/* Lead Selection */}
+          {/* Lead Selection (Searchable) */}
           <div className="grid gap-2">
             <Label className="text-xs font-semibold text-slate-500 uppercase">Select Lead</Label>
+            {/* Note: Popovers work okay here because Combobox handles focus differently, but if this also fails, switch to standard Select */}
             <Popover open={leadOpen} onOpenChange={setLeadOpen}>
               <PopoverTrigger asChild>
                 <Button variant="outline" role="combobox" aria-expanded={leadOpen} className="w-full justify-between h-10 border-slate-200" disabled={!!defaultLeadId || fetching}>
@@ -445,28 +440,45 @@ ${notes || "No additional notes."}
             )}
           </div>
 
-          {/* Date & Time Row */}
+          {/* Date & Time Row - REPLACED POPOVER WITH INLINE TOGGLE */}
           <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
+            <div className="grid gap-2 relative">
               <Label className="text-xs font-semibold text-slate-500 uppercase">Date</Label>
-              {/* FIXED SECTION: Removed modal prop, removed initialFocus from Calendar */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal h-10", !date && "text-muted-foreground")}>
+              
+              {/* Toggle Button */}
+              <Button 
+                variant={"outline"} 
+                onClick={() => setIsCalendarOpen(!isCalendarOpen)}
+                className={cn(
+                  "w-full justify-between text-left font-normal h-10 transition-all", 
+                  !date && "text-muted-foreground",
+                  isCalendarOpen && "ring-2 ring-blue-500 border-blue-500"
+                )}
+              >
+                <div className="flex items-center">
                     <CalendarIcon className="mr-2 h-4 w-4" />
                     {getSmartDateLabel(date)}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0 z-[9999]" align="start">
-                  <Calendar 
-                    mode="single" 
-                    selected={date} 
-                    onSelect={setDate} 
-                    /* removed initialFocus */
-                    disabled={(date) => date < startOfToday()} 
-                  />
-                </PopoverContent>
-              </Popover>
+                </div>
+                {isCalendarOpen ? <ChevronUp className="h-4 w-4 opacity-50"/> : <ChevronDown className="h-4 w-4 opacity-50"/>}
+              </Button>
+
+              {/* Inline Calendar (No Portal, No Focus Trap Issues) */}
+              {isCalendarOpen && (
+                <div className="absolute top-12 left-0 z-50 p-2 bg-white border rounded-md shadow-lg animate-in fade-in zoom-in-95 duration-200">
+                    <Calendar 
+                        mode="single" 
+                        selected={date} 
+                        onSelect={(newDate) => { 
+                            if (newDate) {
+                                setDate(newDate); 
+                                setIsCalendarOpen(false); 
+                            }
+                        }} 
+                        disabled={(date) => date < startOfToday()} 
+                        initialFocus
+                    />
+                </div>
+              )}
             </div>
 
             <div className="grid gap-2">
