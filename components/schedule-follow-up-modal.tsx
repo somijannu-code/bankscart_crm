@@ -107,7 +107,7 @@ export function ScheduleFollowUpModal({
   const [notes, setNotes] = useState("");
   const [activityType, setActivityType] = useState("call");
   const [priority, setPriority] = useState("normal");
-  
+   
   // UI State
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(false);
@@ -178,7 +178,7 @@ export function ScheduleFollowUpModal({
 
       const [hours, minutes] = time.split(":").map(Number);
       const scheduledTime = setMinutes(setHours(date, hours), minutes);
-      
+       
       const startTime = addMinutes(scheduledTime, -29).toISOString();
       const endTime = addMinutes(scheduledTime, 29).toISOString();
 
@@ -449,7 +449,8 @@ ${notes || "No additional notes."}
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2">
               <Label className="text-xs font-semibold text-slate-500 uppercase">Date</Label>
-              <Popover modal={true}>
+              {/* FIX APPLIED BELOW: Removed modal={true} */}
+              <Popover>
                 <PopoverTrigger asChild>
                   <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal h-10", !date && "text-muted-foreground")}>
                     <CalendarIcon className="mr-2 h-4 w-4" />
