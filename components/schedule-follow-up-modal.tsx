@@ -30,14 +30,18 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-// Removed Popover imports as we are switching to Inline to fix the bug
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+// NOTE: Popover imports are REMOVED intentionally.
+import { 
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"; // <--- ADD THIS BACK IF YOU USE IT FOR LEADS
+
 import { Calendar } from "@/components/ui/calendar";
 import { Badge } from "@/components/ui/badge"; 
 import { 
   Plus, Loader2, Calendar as CalendarIcon, Check, ChevronsUpDown, 
-  Phone, Users, Mail, MessageSquare, ExternalLink, CalendarCheck, Download,
-  Clock, AlertTriangle, AlertCircle, ChevronDown, ChevronUp // Added Chevrons
+  Phone, Users, Mail, MessageSquare, AlertTriangle, AlertCircle, ChevronDown, ChevronUp 
 } from "lucide-react";
 import { format, addDays, nextMonday, setHours, setMinutes, isPast, isToday, isTomorrow, addMinutes, nextFriday, startOfToday } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
@@ -397,7 +401,10 @@ ${notes || "No additional notes."}
           {/* Lead Selection (Searchable) */}
           <div className="grid gap-2">
             <Label className="text-xs font-semibold text-slate-500 uppercase">Select Lead</Label>
-            {/* Note: Popovers work okay here because Combobox handles focus differently, but if this also fails, switch to standard Select */}
+            
+            {/* NOTE: Using Popover here for the Combobox. 
+                If this also causes issues, we can replace it with a native <Select>
+            */}
             <Popover open={leadOpen} onOpenChange={setLeadOpen}>
               <PopoverTrigger asChild>
                 <Button variant="outline" role="combobox" aria-expanded={leadOpen} className="w-full justify-between h-10 border-slate-200" disabled={!!defaultLeadId || fetching}>
