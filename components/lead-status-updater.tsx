@@ -12,7 +12,7 @@ import {
   Phone, Clock, MessageSquare, IndianRupee, AlertCircle, Sparkles, 
   Send, Command, Copy, RotateCcw, ThumbsUp, ThumbsDown, 
   FileText, LogIn, CheckCircle2, XCircle, PhoneForwarded, 
-  PhoneMissed, Briefcase, Plus, X
+  PhoneMissed, Briefcase, Plus, X, Activity 
 } from "lucide-react" 
 import { useCallTracking } from "@/context/call-tracking-context"
 import { toast } from "sonner"
