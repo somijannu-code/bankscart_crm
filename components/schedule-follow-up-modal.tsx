@@ -30,20 +30,19 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-// NOTE: Popover imports are REMOVED intentionally.
 import { 
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from "@/components/ui/popover"; // <--- ADD THIS BACK IF YOU USE IT FOR LEADS
-
-import { Calendar } from "@/components/ui/calendar";
+} from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge"; 
+// REMOVED: Calendar component import
+import { Input } from "@/components/ui/input"; // Ensure Input is imported
 import { 
-  Plus, Loader2, Calendar as CalendarIcon, Check, ChevronsUpDown, 
-  Phone, Users, Mail, MessageSquare, AlertTriangle, AlertCircle, ChevronDown, ChevronUp 
+  Plus, Loader2, Check, ChevronsUpDown, 
+  Phone, Users, Mail, MessageSquare, AlertTriangle, AlertCircle 
 } from "lucide-react";
-import { format, addDays, nextMonday, setHours, setMinutes, isPast, isToday, isTomorrow, addMinutes, nextFriday, startOfToday } from "date-fns";
+import { format, addDays, nextMonday, setHours, setMinutes, isPast, isToday, isTomorrow, addMinutes, nextFriday, startOfToday, parseISO } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -116,9 +115,6 @@ export function ScheduleFollowUpModal({
   const [conflictCount, setConflictCount] = useState(0);
   const [existingFollowUp, setExistingFollowUp] = useState<string | null>(null);
   
-  // NEW: State for Inline Calendar visibility
-  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
-
   const supabase = createClient();
   const router = useRouter();
 
@@ -130,7 +126,6 @@ export function ScheduleFollowUpModal({
       setPriority("normal");
       setConflictCount(0);
       setExistingFollowUp(null);
-      setIsCalendarOpen(false); // Reset calendar visibility
       if (!date) {
         const tomorrow = addDays(new Date(), 1);
         setDate(tomorrow);
@@ -227,7 +222,6 @@ export function ScheduleFollowUpModal({
       case "friday": newDate = nextFriday(now); setTime("15:00"); break;
     }
     setDate(newDate);
-    setIsCalendarOpen(false); // Close calendar when quick select is used
   };
 
   const handleQuickNote = (text: string) => {
@@ -248,13 +242,6 @@ export function ScheduleFollowUpModal({
     slotDate.setHours(h, m, 0, 0);
     return isPast(slotDate);
   };
-
-  const getSmartDateLabel = (dateObj: Date | undefined) => {
-    if (!dateObj) return <span>Pick a date</span>;
-    if (isToday(dateObj)) return <span className="font-medium text-blue-600">Today</span>;
-    if (isTomorrow(dateObj)) return <span className="font-medium text-blue-600">Tomorrow</span>;
-    return <span>{format(dateObj, "PPP")}</span>;
-  }
 
   const groupedLeads = useMemo(() => {
     const groups: Record<string, Lead[]> = {};
@@ -353,6 +340,19 @@ ${notes || "No additional notes."}
     }
   };
 
+  // Handler for Native Input Change
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value; // yyyy-mm-dd
+    if (val) {
+        // Parse the string as local date to avoid timezone issues
+        const [year, month, day] = val.split('-').map(Number);
+        const newDate = new Date(year, month - 1, day);
+        setDate(newDate);
+    } else {
+        setDate(undefined);
+    }
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -402,9 +402,6 @@ ${notes || "No additional notes."}
           <div className="grid gap-2">
             <Label className="text-xs font-semibold text-slate-500 uppercase">Select Lead</Label>
             
-            {/* NOTE: Using Popover here for the Combobox. 
-                If this also causes issues, we can replace it with a native <Select>
-            */}
             <Popover open={leadOpen} onOpenChange={setLeadOpen}>
               <PopoverTrigger asChild>
                 <Button variant="outline" role="combobox" aria-expanded={leadOpen} className="w-full justify-between h-10 border-slate-200" disabled={!!defaultLeadId || fetching}>
@@ -447,45 +444,18 @@ ${notes || "No additional notes."}
             )}
           </div>
 
-          {/* Date & Time Row - REPLACED POPOVER WITH INLINE TOGGLE */}
+          {/* Date & Time Row - REPLACED with Native Input to Match Other Calendars */}
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2 relative">
               <Label className="text-xs font-semibold text-slate-500 uppercase">Date</Label>
-              
-              {/* Toggle Button */}
-              <Button 
-                variant={"outline"} 
-                onClick={() => setIsCalendarOpen(!isCalendarOpen)}
-                className={cn(
-                  "w-full justify-between text-left font-normal h-10 transition-all", 
-                  !date && "text-muted-foreground",
-                  isCalendarOpen && "ring-2 ring-blue-500 border-blue-500"
-                )}
-              >
-                <div className="flex items-center">
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {getSmartDateLabel(date)}
-                </div>
-                {isCalendarOpen ? <ChevronUp className="h-4 w-4 opacity-50"/> : <ChevronDown className="h-4 w-4 opacity-50"/>}
-              </Button>
-
-              {/* Inline Calendar (No Portal, No Focus Trap Issues) */}
-              {isCalendarOpen && (
-                <div className="absolute top-12 left-0 z-50 p-2 bg-white border rounded-md shadow-lg animate-in fade-in zoom-in-95 duration-200">
-                    <Calendar 
-                        mode="single" 
-                        selected={date} 
-                        onSelect={(newDate) => { 
-                            if (newDate) {
-                                setDate(newDate); 
-                                setIsCalendarOpen(false); 
-                            }
-                        }} 
-                        disabled={(date) => date < startOfToday()} 
-                        initialFocus
-                    />
-                </div>
-              )}
+              {/* Native Date Input: Reliable, Standard, No Popover Issues */}
+              <Input 
+                type="date"
+                className="h-10 block w-full"
+                value={date ? format(date, "yyyy-MM-dd") : ""}
+                min={format(new Date(), "yyyy-MM-dd")} // Disable past dates
+                onChange={handleDateChange}
+              />
             </div>
 
             <div className="grid gap-2">
