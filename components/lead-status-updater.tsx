@@ -72,17 +72,17 @@ export function LeadStatusUpdater({
   const [remarks, setRemarks] = useState("") // General Notes
   const [loanAmount, setLoanAmount] = useState<number | null>(initialLoanAmount)
   const [isModalOpen, setIsModalOpen] = useState(false) 
-  
+   
   // Call Timer State
   const [elapsedTime, setElapsedTime] = useState(0)
   const [callDurationOverride, setCallDurationOverride] = useState<number | null>(null) // Manual override
-  
+   
   const [notEligibleReason, setNotEligibleReason] = useState<string>("")
 
   // --- DERIVED STATE ---
   const currentStatusOption = useMemo(() => STATUS_OPTIONS.find((o) => o.value === currentStatus), [currentStatus])
   const selectedStatusOption = useMemo(() => STATUS_OPTIONS.find((o) => o.value === status), [status])
-  
+   
   const whatsappLink = useMemo(() => {
       const cleaned = String(leadPhoneNumber || "").replace(/[^0-9]/g, '');
       if (!cleaned) return "#"; 
@@ -99,7 +99,7 @@ export function LeadStatusUpdater({
 
   // --- EFFECTS ---
   useEffect(() => { setLoanAmount(initialLoanAmount) }, [initialLoanAmount]);
-  
+   
   // Live Timer for Active Call
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -292,11 +292,11 @@ export function LeadStatusUpdater({
   const formattedLoanAmount = formatCurrency(loanAmount);
 
   return (
-    <Card className="border-l-4 border-l-blue-500 shadow-sm relative overflow-hidden transition-all hover:shadow-md">
+    <Card className="border-l-4 border-l-blue-500 shadow-sm relative overflow-hidden transition-all hover:shadow-md flex flex-col max-h-full">
       {/* Celebration Effect */}
       {status === 'Disbursed' && <div className="absolute inset-0 pointer-events-none bg-emerald-500/10 animate-pulse z-0" />}
 
-      <CardHeader className="flex flex-row items-center justify-between py-3 bg-slate-50/50">
+      <CardHeader className="flex-none flex flex-row items-center justify-between py-3 bg-slate-50/50">
         <CardTitle className="text-base font-semibold flex items-center gap-2">
           {isCallInitiated ? <Phone className="h-4 w-4 text-blue-600 animate-pulse"/> : <Activity className="h-4 w-4 text-slate-500"/>}
           {isCallInitiated ? "Active Call Session" : "Update Status"}
@@ -332,7 +332,10 @@ export function LeadStatusUpdater({
         </div>
       </CardHeader>
       
-      <CardContent className="space-y-5 pt-4 relative z-10">
+      {/* UPDATED: Added max-h-[60vh], overflow-y-auto and pr-2
+        This makes the content scrollable when it expands.
+      */}
+      <CardContent className="space-y-5 pt-4 relative z-10 max-h-[60vh] overflow-y-auto pr-2">
         {/* Current Status & Reset */}
         <div className="flex justify-between items-center bg-slate-50 p-2 rounded border border-slate-100">
           <div className="flex items-center gap-2">
