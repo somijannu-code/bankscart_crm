@@ -36,13 +36,12 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge"; 
-// REMOVED: Calendar component import
-import { Input } from "@/components/ui/input"; // Ensure Input is imported
+import { Input } from "@/components/ui/input"; // Using Native Input for Date
 import { 
   Plus, Loader2, Check, ChevronsUpDown, 
   Phone, Users, Mail, MessageSquare, AlertTriangle, AlertCircle 
 } from "lucide-react";
-import { format, addDays, nextMonday, setHours, setMinutes, isPast, isToday, isTomorrow, addMinutes, nextFriday, startOfToday, parseISO } from "date-fns";
+import { format, addDays, nextMonday, setHours, setMinutes, isPast, isToday, isTomorrow, addMinutes, nextFriday, startOfToday } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -340,11 +339,9 @@ ${notes || "No additional notes."}
     }
   };
 
-  // Handler for Native Input Change
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value; // yyyy-mm-dd
+    const val = e.target.value; 
     if (val) {
-        // Parse the string as local date to avoid timezone issues
         const [year, month, day] = val.split('-').map(Number);
         const newDate = new Date(year, month - 1, day);
         setDate(newDate);
@@ -371,11 +368,12 @@ ${notes || "No additional notes."}
         {/* FORM VIEW */}
         <div className="grid gap-5 py-4">
           
-          {/* Activity Type Buttons */}
+          {/* FIX: Activity Buttons now have type="button" to prevent submit */}
           <div className="grid grid-cols-4 gap-2 bg-slate-100 p-1 rounded-lg">
               {ACTIVITY_TYPES.map((type) => (
                 <button 
                   key={type.id} 
+                  type="button" // <--- CRITICAL FIX
                   onClick={() => setActivityType(type.id)}
                   className={cn(
                       "flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium rounded-md transition-all shadow-sm",
@@ -390,21 +388,20 @@ ${notes || "No additional notes."}
               ))}
           </div>
 
-          {/* Quick Actions */}
+          {/* FIX: Quick Action Buttons also need type="button" */}
           <div className="flex gap-2">
-            <Button variant="outline" size="xs" onClick={() => setQuickSchedule("tomorrow")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Tomorrow</Button>
-            <Button variant="outline" size="xs" onClick={() => setQuickSchedule("3days")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">In 3 Days</Button>
-            <Button variant="outline" size="xs" onClick={() => setQuickSchedule("friday")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Friday</Button>
-            <Button variant="outline" size="xs" onClick={() => setQuickSchedule("next_week")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Next Week</Button>
+            <Button type="button" variant="outline" size="xs" onClick={() => setQuickSchedule("tomorrow")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Tomorrow</Button>
+            <Button type="button" variant="outline" size="xs" onClick={() => setQuickSchedule("3days")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">In 3 Days</Button>
+            <Button type="button" variant="outline" size="xs" onClick={() => setQuickSchedule("friday")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Friday</Button>
+            <Button type="button" variant="outline" size="xs" onClick={() => setQuickSchedule("next_week")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Next Week</Button>
           </div>
 
-          {/* Lead Selection (Searchable) */}
+          {/* Lead Selection */}
           <div className="grid gap-2">
             <Label className="text-xs font-semibold text-slate-500 uppercase">Select Lead</Label>
-            
             <Popover open={leadOpen} onOpenChange={setLeadOpen}>
               <PopoverTrigger asChild>
-                <Button variant="outline" role="combobox" aria-expanded={leadOpen} className="w-full justify-between h-10 border-slate-200" disabled={!!defaultLeadId || fetching}>
+                <Button type="button" variant="outline" role="combobox" aria-expanded={leadOpen} className="w-full justify-between h-10 border-slate-200" disabled={!!defaultLeadId || fetching}>
                   {leadId ? leads.find((lead) => lead.id === leadId)?.name : fetching ? "Loading..." : "Search lead..."}
                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
@@ -444,16 +441,15 @@ ${notes || "No additional notes."}
             )}
           </div>
 
-          {/* Date & Time Row - REPLACED with Native Input to Match Other Calendars */}
+          {/* Date & Time Row - Native Input */}
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2 relative">
               <Label className="text-xs font-semibold text-slate-500 uppercase">Date</Label>
-              {/* Native Date Input: Reliable, Standard, No Popover Issues */}
               <Input 
                 type="date"
                 className="h-10 block w-full"
                 value={date ? format(date, "yyyy-MM-dd") : ""}
-                min={format(new Date(), "yyyy-MM-dd")} // Disable past dates
+                min={format(new Date(), "yyyy-MM-dd")} 
                 onChange={handleDateChange}
               />
             </div>
@@ -519,9 +515,10 @@ ${notes || "No additional notes."}
               className="resize-none focus-visible:ring-blue-500" 
               rows={3} 
             />
+            {/* FIX: Quick Notes also need type="button" */}
             <div className="flex gap-1 flex-wrap mt-1">
                 {QUICK_NOTES.slice(0, 4).map(note => (
-                  <button key={note} onClick={() => handleQuickNote(note)} className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors text-slate-600 border border-slate-200">
+                  <button key={note} type="button" onClick={() => handleQuickNote(note)} className="text-[10px] px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors text-slate-600 border border-slate-200">
                       {note}
                   </button>
                 ))}
@@ -530,7 +527,7 @@ ${notes || "No additional notes."}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={loading}>Cancel</Button>
+          <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={loading}>Cancel</Button>
           <Button onClick={handleSchedule} disabled={!date || !leadId || loading} className={cn("transition-colors", priority === "high" ? "bg-red-600 hover:bg-red-700" : "")}>
             {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             {priority === "high" ? "Confirm Urgent Follow-up" : "Confirm Schedule"}
