@@ -410,7 +410,7 @@ ${notes || "No additional notes."}
                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-[460px] p-0" align="start">
+              <PopoverContent className="w-[460px] p-0 z-[9999]" align="start">
                 <Command>
                   <CommandInput placeholder="Search lead name..." />
                   <CommandList>
@@ -449,7 +449,7 @@ ${notes || "No additional notes."}
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2">
               <Label className="text-xs font-semibold text-slate-500 uppercase">Date</Label>
-              {/* FIX: Removed modal={true} to allow Calendar interaction */}
+              {/* FIXED SECTION: Removed modal prop, removed initialFocus from Calendar */}
               <Popover>
                 <PopoverTrigger asChild>
                   <Button variant={"outline"} className={cn("w-full justify-start text-left font-normal h-10", !date && "text-muted-foreground")}>
@@ -458,7 +458,13 @@ ${notes || "No additional notes."}
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0 z-[9999]" align="start">
-                  <Calendar mode="single" selected={date} onSelect={setDate} initialFocus disabled={(date) => date < startOfToday()} />
+                  <Calendar 
+                    mode="single" 
+                    selected={date} 
+                    onSelect={setDate} 
+                    /* removed initialFocus */
+                    disabled={(date) => date < startOfToday()} 
+                  />
                 </PopoverContent>
               </Popover>
             </div>
