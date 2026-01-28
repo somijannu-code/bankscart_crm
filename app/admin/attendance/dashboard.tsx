@@ -71,7 +71,7 @@ type Office = {
 
 const COLORS = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6'];
 const ITEMS_PER_PAGE = 10;
-const MAX_SHIFT_HOURS = 9; // <--- FIX ADDED HERE
+const MAX_SHIFT_HOURS = 9;
 
 // --- HELPER: HAVERSINE DISTANCE (KM) ---
 function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -115,9 +115,9 @@ export function AdminAttendanceDashboard() {
   const [lateThresholdMinute, setLateThresholdMinute] = useState(30);
   const [currentPage, setCurrentPage] = useState(1);
   
-  const [offices, setOffices] = useState<Office[]>([
-    { id: '1', name: 'HQ', lat: 12.9716, lng: 77.5946, radius: 0.5 } 
-  ]);
+  // -- UPDATE: Load offices from DB --
+  const [offices, setOffices] = useState<Office[]>([]);
+  
   const [newOfficeName, setNewOfficeName] = useState("");
   const [newOfficeLat, setNewOfficeLat] = useState("");
   const [newOfficeLng, setNewOfficeLng] = useState("");
@@ -138,6 +138,20 @@ export function AdminAttendanceDashboard() {
   const [missingCheckoutCount, setMissingCheckoutCount] = useState(0);
   const [missingRecords, setMissingRecords] = useState<AttendanceRecord[]>([]);
   const [showReviewModal, setShowReviewModal] = useState(false);
+
+  // --- 1. FETCH OFFICES ON MOUNT ---
+  useEffect(() => {
+    const fetchOffices = async () => {
+      const { data, error } = await supabase.from('office_locations').select('*');
+      if (!error && data && data.length > 0) {
+        setOffices(data);
+      } else {
+        // Fallback default if DB is empty
+        setOffices([{ id: 'default-1', name: 'HQ (Default)', lat: 12.9716, lng: 77.5946, radius: 0.5 }]);
+      }
+    };
+    fetchOffices();
+  }, []);
 
   // --- REAL-TIME SUBSCRIPTION ---
   useEffect(() => {
@@ -313,22 +327,57 @@ export function AdminAttendanceDashboard() {
   };
 
   // --- ACTIONS ---
-  const addOffice = () => {
-    if (!newOfficeName || !newOfficeLat || !newOfficeLng) return;
-    const newOffice: Office = {
-      id: Date.now().toString(),
+  
+  // -- UPDATE: Add Office to Database --
+  const addOffice = async () => {
+    if (!newOfficeName || !newOfficeLat || !newOfficeLng) {
+      toast.error("Please fill in all fields");
+      return;
+    }
+
+    const newOffice = {
       name: newOfficeName,
       lat: parseFloat(newOfficeLat),
       lng: parseFloat(newOfficeLng),
       radius: 0.5
     };
-    setOffices([...offices, newOffice]);
-    setNewOfficeName(""); setNewOfficeLat(""); setNewOfficeLng("");
+
+    const { data, error } = await supabase
+      .from('office_locations')
+      .insert([newOffice])
+      .select()
+      .single();
+
+    if (error) {
+      console.error(error);
+      toast.error("Failed to save office");
+      return;
+    }
+
+    setOffices([...offices, data]);
+    setNewOfficeName(""); 
+    setNewOfficeLat(""); 
+    setNewOfficeLng("");
     toast.success("Office location added");
   };
 
-  const removeOffice = (id: string) => {
+  // -- UPDATE: Remove Office from Database --
+  const removeOffice = async (id: string) => {
+    // Optimistic Update
+    const prevOffices = [...offices];
     setOffices(offices.filter(o => o.id !== id));
+
+    const { error } = await supabase
+      .from('office_locations')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      setOffices(prevOffices); // Revert
+      toast.error("Failed to delete office");
+    } else {
+      toast.success("Office removed");
+    }
   };
 
   const handleEdit = (record: AttendanceRecord) => {
@@ -499,8 +548,6 @@ export function AdminAttendanceDashboard() {
     const end = endOfMonth(dateRange.start);
     const days = eachDayOfInterval({ start, end });
     
-    // Display up to 15 days for compactness or all if screen allows. 
-    // We'll show all but as tiny dots.
     return (
       <div className="flex gap-1">
         {days.map((day, i) => {
