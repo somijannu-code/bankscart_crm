@@ -1,376 +1,310 @@
 "use client"
 
+import { useEffect, useState, useCallback, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Phone, Users, Clock, Calendar, CheckCircle, TrendingUp, Rocket, BarChart3, RefreshCw, Plus, Trophy, FileText } from "lucide-react"
-import { TodaysTasks } from "@/components/todays-tasks"
 import { useRouter } from "next/navigation"
-import { AttendanceWidget } from "@/components/attendance-widget"
-import { NotificationProvider } from "@/components/notification-provider"
-import { NotificationBell } from "@/components/notifications/notification-bell" 
-import { QuickActions } from "@/components/quick-actions"
-import { PerformanceMetrics } from "@/components/performance-metrics"
-import { DailyTargetProgress } from "@/components/daily-target-progress"
-import { ErrorBoundary } from "@/components/error-boundary"
-import { LoadingSpinner } from "@/components/loading-spinner"
-import { EmptyState } from "@/components/empty-state"
-import { useEffect, useState } from "react"
 
+// UI Components
+import { Card, CardContent } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+
+// Icons
+import { 
+  Phone, Users, Clock, Calendar, CheckCircle, TrendingUp, 
+  Rocket, RefreshCw, Plus, Trophy, FileText, 
+  AlertTriangle, Wallet, IndianRupee, TimerReset
+} from "lucide-react"
+
+// Custom Pro Components
+import { TodaysTasks } from "@/components/todays-tasks"
+import { AttendanceWidget } from "@/components/attendance-widget"
+import { NotificationProvider } from "@/components/providers/notification-provider"
+import { NotificationBell } from "@/components/notifications/notification-bell" 
+import { PerformanceMetrics } from "@/components/dashboard/performance-metrics"
+import { DailyTargetProgress } from "@/components/dashboard/daily-target-progress"
+import { ErrorBoundary } from "@/components/error-boundary"
+import { EmptyState } from "@/components/ui/empty-state"
+
+// --- TYPES ---
 interface DashboardStats {
   title: string
   value: number | string
   icon: React.ComponentType<any>
   color: string
   bgColor: string
-  format?: "number" | "percentage" | "duration" | "callShortage" 
+  borderColor?: string
+  description?: string
+  trend?: "up" | "down" | "neutral"
 }
 
 interface DashboardData {
-  stats: DashboardStats[]
   user: any
   isLoading: boolean
   error: string | null
-  monthlyTarget: number
-  achievedAmount: number
+  lastUpdated: Date | null
+  stats: {
+    myLeads: number
+    todaysCalls: number
+    pendingFollowUps: number
+    completedToday: number
+    conversionRate: number
+    successRate: number
+  }
+  targets: {
+    monthly: number
+    achieved: number
+    dailyCalls: number
+  }
 }
+
+// Config: Incentive Percentage (e.g., 0.5% of disbursed amount)
+const INCENTIVE_RATE = 0.005 
 
 export default function TelecallerDashboard() {
   const router = useRouter()
+  const supabase = createClient()
+  
   const [data, setData] = useState<DashboardData>({
-    stats: [],
     user: null,
     isLoading: true,
     error: null,
-    monthlyTarget: 0,
-    achievedAmount: 0
+    lastUpdated: null,
+    stats: { myLeads: 0, todaysCalls: 0, pendingFollowUps: 0, completedToday: 0, conversionRate: 0, successRate: 0 },
+    targets: { monthly: 2000000, achieved: 0, dailyCalls: 350 } // Default targets
   })
 
-  // Fixed daily call target
-  const DAILY_CALL_TARGET = 350; 
-
-  useEffect(() => {
-    async function loadDashboardData() {
-      try {
-        const supabase = createClient()
-
-        const { data: { user }, error: authError } = await supabase.auth.getUser()
-
-        if (authError || !user) {
-          router.push("/auth/login")
-          return
-        }
-
-        // 1. Calculate Date Ranges (Current Month)
-        const now = new Date();
-        const startOfDay = now.toISOString().split("T")[0];
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-
-        // 2. Parallel Data Fetching
-        const [
-          myLeadsResponse,
-          todaysCallsResponse,
-          pendingFollowUpsResponse,
-          completedTodayResponse,
-          userProfileResponse,
-          disbursedLeadsResponse
-        ] = await Promise.allSettled([
-          // My Leads
-          supabase.from("leads").select("*", { count: "exact", head: true }).eq("assigned_to", user.id),
-          
-          // Today's Calls
-          supabase
-            .from("call_logs")
-            .select("*", { count: "exact", head: true })
-            .eq("user_id", user.id)
-            .gte("created_at", startOfDay),
-          
-          // Pending Follow-ups
-          supabase
-            .from("follow_ups")
-            .select("*", { count: "exact", head: true })
-            .eq("user_id", user.id)
-            .eq("status", "pending"),
-          
-          // Completed Today
-          supabase
-            .from("follow_ups")
-            .select("*", { count: "exact", head: true })
-            .eq("user_id", user.id)
-            .eq("status", "completed")
-            .gte("completed_at", startOfDay),
-
-          // User Profile (For Target) - FIX: Changed .single() to .maybeSingle()
-          supabase.from("users").select("monthly_target").eq("id", user.id).maybeSingle(),
-
-          // Disbursed Leads
-          supabase
-            .from("leads")
-            .select("disbursed_amount")
-            .eq("assigned_to", user.id)
-            .ilike("status", "disbursed") 
-            .gte("disbursed_at", startOfMonth)
-        ])
-
-        const getCount = (response: PromiseSettledResult<any>) => {
-          if (response.status === "rejected") return 0
-          return response.value.count || 0
-        }
-
-        const myLeads = getCount(myLeadsResponse)
-        const todaysCalls = getCount(todaysCallsResponse)
-        const pendingFollowUps = getCount(pendingFollowUpsResponse)
-        const completedToday = getCount(completedTodayResponse)
-
-        // Process Target & Achievement
-        let monthlyTarget = 2000000; // Default 20L
-        if (userProfileResponse.status === 'fulfilled' && userProfileResponse.value.data) {
-             monthlyTarget = userProfileResponse.value.data.monthly_target || 2000000;
-        }
-
-        let achievedAmount = 0;
-        if (disbursedLeadsResponse.status === 'fulfilled' && disbursedLeadsResponse.value.data) {
-            achievedAmount = disbursedLeadsResponse.value.data.reduce((sum: number, lead: any) => {
-              return sum + Number(lead.disbursed_amount || 0);
-            }, 0);
-        }
-
-        // Calculate metrics
-        const callShortage = DAILY_CALL_TARGET - todaysCalls;
-        const isTargetMet = callShortage <= 0;
-        const conversionRate = todaysCalls > 0 ? Math.round((completedToday / todaysCalls) * 100) : 0
-        const successRate = (completedToday + todaysCalls) > 0 
-          ? Math.round((completedToday / (completedToday + pendingFollowUps)) * 100)
-          : 0
-
-        const stats: DashboardStats[] = [
-          {
-            title: "My Leads",
-            value: myLeads,
-            icon: Users,
-            color: "text-blue-600",
-            bgColor: "bg-blue-50",
-          },
-          {
-            title: "Today Calls Shortage",
-            value: callShortage,
-            icon: Phone,
-            color: isTargetMet ? "text-green-600" : "text-red-600",
-            bgColor: isTargetMet ? "bg-green-50" : "bg-red-50",
-            format: "callShortage",
-          },
-          {
-            title: "Pending Follow-ups",
-            value: pendingFollowUps,
-            icon: Clock,
-            color: "text-orange-600",
-            bgColor: "bg-orange-50",
-          },
-          {
-            title: "Completed Today",
-            value: completedToday,
-            icon: CheckCircle,
-            color: "text-purple-600",
-            bgColor: "bg-purple-50",
-          },
-          {
-            title: "Success Rate",
-            value: successRate,
-            icon: TrendingUp,
-            color: "text-emerald-600",
-            bgColor: "bg-emerald-50",
-            format: "percentage"
-          },
-          {
-            title: "Conversion Rate",
-            value: conversionRate,
-            icon: BarChart3,
-            color: "text-amber-600",
-            bgColor: "bg-amber-50",
-            format: "percentage"
-          },
-        ]
-
-        setData({
-          stats,
-          user,
-          isLoading: false,
-          error: null,
-          monthlyTarget,
-          achievedAmount
-        })
-
-      } catch (err) {
-        console.error("Dashboard error:", err)
-        setData(prev => ({ ...prev, isLoading: false, error: "Failed to load dashboard data" }))
+  // --- DATA FETCHING ---
+  const loadDashboardData = useCallback(async () => {
+    try {
+      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      if (authError || !user) {
+        router.push("/auth/login")
+        return
       }
-    }
 
+      // Time Ranges
+      const now = new Date()
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+
+      // Parallel Queries (Optimized)
+      const [
+        myLeadsRes,
+        todaysCallsRes,
+        pendingFollowUpsRes,
+        completedTodayRes,
+        userProfileRes,
+        disbursedRes
+      ] = await Promise.all([
+        supabase.from("leads").select("*", { count: "exact", head: true }).eq("assigned_to", user.id),
+        supabase.from("call_logs").select("*", { count: "exact", head: true }).eq("user_id", user.id).gte("created_at", startOfDay),
+        supabase.from("follow_ups").select("*", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "pending"),
+        supabase.from("follow_ups").select("*", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "completed").gte("completed_at", startOfDay),
+        supabase.from("users").select("monthly_target").eq("id", user.id).maybeSingle(),
+        supabase.from("leads").select("disbursed_amount").eq("assigned_to", user.id).ilike("status", "disbursed").gte("disbursed_at", startOfMonth)
+      ])
+
+      // Data Processing
+      const monthlyTarget = userProfileRes.data?.monthly_target || 2000000
+      const achievedAmount = disbursedRes.data?.reduce((sum, lead) => sum + Number(lead.disbursed_amount || 0), 0) || 0
+      const todaysCalls = todaysCallsRes.count || 0
+      const completedToday = completedTodayRes.count || 0
+      const pendingFollowUps = pendingFollowUpsRes.count || 0
+
+      // KPIs
+      const conversionRate = todaysCalls > 0 ? Math.round((completedToday / todaysCalls) * 100) : 0
+      const successRate = (completedToday + pendingFollowUps) > 0 
+        ? Math.round((completedToday / (completedToday + pendingFollowUps)) * 100) 
+        : 0
+
+      setData({
+        user,
+        isLoading: false,
+        error: null,
+        lastUpdated: new Date(),
+        stats: { 
+            myLeads: myLeadsRes.count || 0, 
+            todaysCalls, 
+            pendingFollowUps, 
+            completedToday, 
+            conversionRate, 
+            successRate 
+        },
+        targets: { monthly: monthlyTarget, achieved: achievedAmount, dailyCalls: 350 }
+      })
+
+    } catch (err) {
+      console.error("Dashboard Load Error:", err)
+      setData(prev => ({ ...prev, isLoading: false, error: "Failed to load dashboard." }))
+    }
+  }, [router, supabase])
+
+  // Initial Load + Auto Refresh (Every 5 mins)
+  useEffect(() => {
     loadDashboardData()
-  }, [router])
+    const interval = setInterval(loadDashboardData, 5 * 60 * 1000) 
+    return () => clearInterval(interval)
+  }, [loadDashboardData])
 
-  const handleRefresh = () => {
-    setData(prev => ({ ...prev, isLoading: true, error: null }))
-    setTimeout(() => window.location.reload(), 500)
+  // --- MEMOIZED CALCULATIONS ---
+  
+  // 1. Pacing Calculation (Are they on track for the month?)
+  const pacing = useMemo(() => {
+      const now = new Date()
+      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+      const currentDay = now.getDate()
+      
+      const expectedProgressPct = (currentDay / daysInMonth) * 100
+      const actualProgressPct = (data.targets.achieved / data.targets.monthly) * 100
+      const variance = actualProgressPct - expectedProgressPct
+
+      return {
+          expected: expectedProgressPct,
+          actual: actualProgressPct,
+          isAhead: variance >= 0,
+          label: variance >= 0 ? `+${variance.toFixed(1)}% Ahead` : `${variance.toFixed(1)}% Behind`,
+          color: variance >= 0 ? "text-green-600 bg-green-100" : "text-red-600 bg-red-100"
+      }
+  }, [data.targets])
+
+  // 2. Incentive Estimation
+  const estimatedIncentive = useMemo(() => {
+      return Math.floor(data.targets.achieved * INCENTIVE_RATE)
+  }, [data.targets.achieved])
+
+  // --- HELPERS ---
+  const getGreeting = () => {
+    const hour = new Date().getHours()
+    if (hour < 12) return "Good morning"
+    if (hour < 18) return "Good afternoon"
+    return "Good evening"
   }
 
-  const handleAddLead = () => {
-    router.push("/leads/new")
-  }
+  const formatCurrency = (val: number) => 
+    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(val)
 
-  const handleLogins = () => {
-    router.push("/telecaller/logins")
-  }
+  const callShortage = Math.max(0, data.targets.dailyCalls - data.stats.todaysCalls)
+  const isTargetMet = callShortage === 0
 
-  const formatValue = (stat: DashboardStats) => {
-    if (stat.format === "percentage") return `${stat.value}%`
-    if (stat.format === "duration") return `${stat.value}m`
-    if (stat.format === "callShortage") {
-      const shortage = Number(stat.value);
-      if (shortage <= 0) return "0 (Congratulations!)";
-      return stat.value.toString();
+  // --- STATS CONFIGURATION ---
+  const statsConfig: DashboardStats[] = [
+    {
+      title: "Est. Incentive",
+      value: formatCurrency(estimatedIncentive),
+      icon: Wallet,
+      color: "text-emerald-600",
+      bgColor: "bg-emerald-50",
+      borderColor: "border-emerald-100",
+      description: "Based on 0.5% comm.",
+      trend: "up"
+    },
+    {
+      title: "Calls Today",
+      value: data.stats.todaysCalls,
+      icon: Phone,
+      color: isTargetMet ? "text-green-600" : "text-blue-600",
+      bgColor: isTargetMet ? "bg-green-50" : "bg-blue-50",
+      borderColor: isTargetMet ? "border-green-100" : "border-blue-100",
+      description: isTargetMet ? "Target Met! 🎉" : `${callShortage} calls to goal`
+    },
+    {
+      title: "Pending Tasks",
+      value: data.stats.pendingFollowUps,
+      icon: Clock,
+      color: "text-orange-600",
+      bgColor: "bg-orange-50",
+      borderColor: "border-orange-100",
+      description: "Requires attention"
+    },
+    {
+      title: "Total Leads",
+      value: data.stats.myLeads,
+      icon: Users,
+      color: "text-slate-600",
+      bgColor: "bg-slate-50",
+      borderColor: "border-slate-200",
+      description: "Assigned pool"
     }
-    return stat.value.toString()
-  }
+  ]
 
-  const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat('en-IN', {
-        style: 'currency',
-        currency: 'INR',
-        maximumFractionDigits: 0
-    }).format(val);
-  }
-
-  // --- MOTIVATIONAL LOGIC ---
-  const getMotivationalQuote = (achieved: number, target: number) => {
-    const percentage = (achieved / target) * 100;
-    if (percentage >= 100) return "🚀 LEGENDARY! You've smashed your monthly target! Everything now is a bonus.";
-    if (percentage >= 90) return "🔥 SO CLOSE! Just one big push to cross the finish line!";
-    if (percentage >= 75) return "💪 Amazing momentum! You're in the home stretch.";
-    if (percentage >= 50) return "⭐ Halfway there! Keep the energy high.";
-    if (percentage >= 25) return "📈 Good start! Focus on converting those warm leads.";
-    return "🌱 Every giant leap starts with a small step. Let's get those numbers up!";
-  }
-
-  const progressPercentage = Math.min(100, Math.max(0, (data.achievedAmount / data.monthlyTarget) * 100));
-
+  // --- LOADING SKELETON ---
   if (data.isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <LoadingSpinner />
-          <p className="mt-4 text-gray-600">Loading your dashboard...</p>
-        </div>
-      </div>
-    )
+    return <DashboardSkeleton />
   }
 
-  if (data.error || !data.user) {
+  if (data.error) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6">
-        <div className="text-center max-w-md">
-          <div className="mx-auto w-24 h-24 bg-red-50 rounded-full flex items-center justify-center mb-4">
-            <Phone className="h-12 w-12 text-red-600" />
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Unable to load dashboard</h2>
-          <p className="text-gray-600 mb-6">
-            {data.error || "There was a problem loading your dashboard data."}
-          </p>
-          <Button onClick={handleRefresh} size="lg">Try Again</Button>
-        </div>
+      <div className="h-screen flex flex-col items-center justify-center p-6 bg-slate-50">
+        <EmptyState 
+          icon={AlertTriangle} 
+          title="Connection Error" 
+          description={data.error}
+          action={{ label: "Retry Connection", onClick: loadDashboardData }}
+        />
       </div>
     )
   }
 
   return (
     <NotificationProvider userId={data.user.id}>
-      <div className="min-h-screen bg-gray-50 p-4 md:p-6 space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="min-h-screen bg-slate-50/50 p-4 md:p-8 space-y-8 max-w-[1600px] mx-auto relative pb-24">
+        
+        {/* 1. HEADER SECTION */}
+        <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Telecaller Dashboard</h1>
-            <p className="text-gray-600 mt-1">Welcome back, {data.user.email?.split('@')[0] || 'Telecaller'}!</p>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+              {getGreeting()}, {data.user.user_metadata?.full_name?.split(' ')[0]} 
+              <span className="text-xl">👋</span>
+            </h1>
+            <div className="flex items-center gap-2 text-sm text-slate-500 mt-1">
+                <span>Last updated: {data.lastUpdated?.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                {data.stats.todaysCalls === 0 && <span className="text-orange-500 font-medium">• Start dialing to see stats!</span>}
+            </div>
           </div>
+          
           <div className="flex items-center gap-3">
             <NotificationBell />
             
-            <Button size="sm" className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white" onClick={handleLogins}>
-              <FileText className="h-4 w-4" />
-              <span className="hidden sm:inline">Logins</span>
-            </Button>
-
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="flex items-center gap-2" 
-              onClick={handleRefresh}
-              disabled={data.isLoading}
-            >
-              <RefreshCw className={`h-4 w-4 ${data.isLoading ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Refresh</span>
-            </Button>
-            <Button size="sm" className="flex items-center gap-2" onClick={handleAddLead}>
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Add Lead</span>
-            </Button>
-          </div>
-        </div>
-
-        {/* Quick Actions */}
-        <ErrorBoundary fallback={<div className="text-center py-4 text-gray-500">Quick actions unavailable</div>}>
-          <QuickActions userId={data.user.id} />
-        </ErrorBoundary>
-
-        {/* --- TARGET CARD --- */}
-        <Card className="border-2 border-indigo-100 bg-gradient-to-r from-indigo-50 to-white overflow-hidden relative">
-          <div className="absolute top-0 right-0 p-4 opacity-10">
-            <Trophy className="h-32 w-32 text-indigo-600" />
-          </div>
-          <CardHeader className="pb-2">
-             <div className="flex justify-between items-center z-10 relative">
-               <CardTitle className="text-lg font-bold text-indigo-900 flex items-center gap-2">
-                 <Rocket className="h-5 w-5 text-indigo-600" />
-                 Monthly Disbursement Target
-               </CardTitle>
-               <span className="text-sm font-semibold text-indigo-600 bg-indigo-100 px-3 py-1 rounded-full">
-                 {progressPercentage.toFixed(1)}% Achieved
-               </span>
-             </div>
-          </CardHeader>
-          <CardContent className="z-10 relative">
-            <div className="flex justify-between text-sm mb-2 font-medium text-gray-600">
-               <span>Achieved: <span className="text-gray-900 font-bold text-lg">{formatCurrency(data.achievedAmount)}</span></span>
-               <span>Target: <span className="text-gray-900 font-bold text-lg">{formatCurrency(data.monthlyTarget)}</span></span>
-            </div>
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button variant="outline" size="icon" className="bg-white" onClick={loadDashboardData}>
+                            <RefreshCw className="h-4 w-4 text-slate-600" />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Refresh Data</TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
             
-            <div className="h-4 w-full bg-indigo-100 rounded-full overflow-hidden mb-3">
-               <div 
-                 className="h-full bg-gradient-to-r from-indigo-500 to-purple-600 transition-all duration-1000 ease-out"
-                 style={{ width: `${progressPercentage}%` }}
-               />
-            </div>
+            <Button onClick={() => router.push("/leads/new")} className="bg-indigo-600 hover:bg-indigo-700 shadow-sm hidden md:flex">
+              <Plus className="h-4 w-4 mr-2" /> Add Lead
+            </Button>
+          </div>
+        </header>
 
-            <p className="text-sm text-indigo-700 italic font-medium flex items-center gap-2">
-               💡 {getMotivationalQuote(data.achievedAmount, data.monthlyTarget)}
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-          {data.stats.map((stat, index) => (
-            <Card key={index} className="hover:shadow-md transition-shadow duration-200 border">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <p className="text-xs font-medium text-gray-600 uppercase tracking-wide">
-                      {stat.title}
-                    </p>
-                    <p className={`text-2xl font-bold mt-1 ${stat.color}`}> 
-                      {formatValue(stat)}
-                    </p>
+        {/* 2. STATS OVERVIEW */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {statsConfig.map((stat, i) => (
+            <Card key={i} className={`shadow-sm border transition-all hover:shadow-md ${stat.borderColor}`}>
+              <CardContent className="p-5">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">{stat.title}</p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <span className="text-2xl font-bold text-slate-900">{stat.value}</span>
+                    </div>
+                    {stat.description && (
+                        <div className="mt-1 flex items-center gap-1">
+                            {stat.trend === "up" && <TrendingUp className="h-3 w-3 text-green-500" />}
+                            <span className="text-[11px] font-medium text-slate-400">{stat.description}</span>
+                        </div>
+                    )}
                   </div>
-                  <div className={`p-2 rounded-lg ${stat.bgColor}`}>
+                  <div className={`p-3 rounded-xl ${stat.bgColor}`}>
                     <stat.icon className={`h-5 w-5 ${stat.color}`} />
                   </div>
                 </div>
@@ -379,54 +313,92 @@ export default function TelecallerDashboard() {
           ))}
         </div>
 
-        {/* Performance Metrics */}
-        <ErrorBoundary fallback={<div className="text-center py-4 text-gray-500">Performance metrics unavailable</div>}>
-          <PerformanceMetrics 
-            userId={data.user.id}
-            conversionRate={typeof data.stats[5]?.value === 'number' ? data.stats[5].value : 0}
-            successRate={typeof data.stats[4]?.value === 'number' ? data.stats[4].value : 0}
-            avgCallDuration={5} 
-          />
-        </ErrorBoundary>
+        {/* 3. MAIN DASHBOARD GRID */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          
+          {/* LEFT COLUMN (MAIN WORK) - 8 COLS */}
+          <div className="lg:col-span-8 space-y-8">
+            
+            {/* A. Monthly Target Hero with Pacing */}
+            <Card className="border-none shadow-lg bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white overflow-hidden relative group">
+              {/* Background decorators */}
+              <div className="absolute right-0 top-0 h-full w-1/3 bg-white/5 skew-x-12 -mr-10 transition-transform group-hover:-translate-x-2 duration-700" />
+              
+              <CardContent className="p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-8 relative z-10">
+                <div className="space-y-5 flex-1 w-full">
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-1">
+                        <h3 className="text-indigo-200 font-bold flex items-center gap-2 text-xs uppercase tracking-widest">
+                        <Rocket className="h-4 w-4" /> Monthly Goal
+                        </h3>
+                        <div className="flex items-baseline gap-2">
+                            <span className="text-4xl font-bold tracking-tight">{formatCurrency(data.targets.achieved)}</span>
+                            <span className="text-lg text-slate-400 font-light">/ {formatCurrency(data.targets.monthly)}</span>
+                        </div>
+                    </div>
+                    {/* Pacing Badge */}
+                    <Badge className={`${pacing.color} border-0 px-3 py-1`}>
+                        {pacing.label}
+                    </Badge>
+                  </div>
+                  
+                  {/* Progress Bar */}
+                  <div className="space-y-2">
+                    <div className="relative h-3 w-full bg-white/10 rounded-full overflow-hidden">
+                      {/* Expected Pacing Marker */}
+                      <div className="absolute top-0 bottom-0 w-0.5 bg-white/30 z-20" style={{ left: `${pacing.expected}%` }} />
+                      
+                      {/* Actual Progress */}
+                      <div 
+                        className={`h-full transition-all duration-1000 ${pacing.isAhead ? "bg-gradient-to-r from-emerald-400 to-green-500" : "bg-gradient-to-r from-indigo-400 to-purple-400"}`}
+                        style={{ width: `${Math.min(100, pacing.actual)}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-xs text-slate-400 font-medium">
+                      <span>0%</span>
+                      <span className="text-indigo-200">Current Pacing: {Math.round(pacing.actual)}%</span>
+                      <span>100%</span>
+                    </div>
+                  </div>
+                </div>
 
-        {/* Attendance Widget */}
-        <ErrorBoundary fallback={null}>
-          <AttendanceWidget userId={data.user.id} />
-        </ErrorBoundary>
+                <div className="flex flex-col gap-2 w-full md:w-auto">
+                    <Button onClick={() => router.push("/telecaller/logins")} className="bg-white text-slate-900 hover:bg-indigo-50 font-semibold shadow-xl w-full">
+                        <FileText className="h-4 w-4 mr-2" /> View Logins
+                    </Button>
+                    <p className="text-[10px] text-center text-slate-400">
+                        {formatCurrency(Math.max(0, data.targets.monthly - data.targets.achieved))} to go
+                    </p>
+                </div>
+              </CardContent>
+            </Card>
 
-        {/* Main Content Grid */}
-        <div className="grid grid-cols-1 gap-6"> 
-          <Card className="border">
-            <CardHeader className="flex flex-row items-center justify-between pb-3">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Calendar className="h-5 w-5" />
-                Today's Tasks
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ErrorBoundary 
-                fallback={<EmptyState icon={Calendar} title="Unable to load tasks" description="Please try refreshing the page" />}
-              >
+            {/* B. Daily Progress */}
+            <DailyTargetProgress 
+              userId={data.user.id} 
+              targets={{ 
+                daily_calls: data.targets.dailyCalls, 
+                daily_completed: 20, 
+                monthly_target: data.targets.monthly 
+              }} 
+              currentCalls={data.stats.todaysCalls}
+              currentCompleted={data.stats.completedToday}
+            />
+
+            {/* C. Today's Tasks */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <Calendar className="h-5 w-5 text-indigo-600" /> Today's Schedule
+                </h3>
+              </div>
+              
+              <ErrorBoundary fallback={<EmptyState icon={AlertTriangle} title="Error loading tasks" description="We couldn't load your tasks." />}>
                 <TodaysTasks userId={data.user.id} />
               </ErrorBoundary>
-            </CardContent>
-          </Card>
-        </div>
+            </div>
 
-        {/* Daily Call Target Progress */}
-        <ErrorBoundary fallback={null}>
-          <DailyTargetProgress 
-            userId={data.user.id} 
-            targets={{
-              daily_calls: 350,
-              daily_completed: 20,
-              monthly_target: 10000
-            }}
-            currentCalls={typeof data.stats[1]?.value === 'number' ? DAILY_CALL_TARGET - data.stats[1].value : 0} 
-            currentCompleted={typeof data.stats[3]?.value === 'number' ? data.stats[3].value : 0}
-          />
-        </ErrorBoundary>
-      </div>
-    </NotificationProvider>
-  )
-}
+          </div>
+
+          {/* RIGHT COLUMN (SIDEBAR) - 4 COLS */}
+          <div className="lg:col-span-4 space-y-8">
