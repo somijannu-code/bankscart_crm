@@ -14,16 +14,16 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 
 // Icons
 import { 
-  Phone, Users, Clock, Calendar, CheckCircle, TrendingUp, 
-  Rocket, RefreshCw, Plus, Trophy, FileText, 
-  AlertTriangle, Wallet, IndianRupee, TimerReset
+  Phone, Users, Clock, CheckCircle, TrendingUp, 
+  Rocket, RefreshCw, Plus, FileText, 
+  AlertTriangle, Wallet
 } from "lucide-react"
 
-// Custom Pro Components
+// Custom Components (Ensure these paths match your project structure)
 import { TodaysTasks } from "@/components/todays-tasks"
 import { AttendanceWidget } from "@/components/attendance-widget"
 import { NotificationProvider } from "@/components/providers/notification-provider"
-import { NotificationBell } from "@/components/notifications/notification-bell" 
+import { NotificationBell } from "@/components/notification-bell" 
 import { PerformanceMetrics } from "@/components/dashboard/performance-metrics"
 import { DailyTargetProgress } from "@/components/dashboard/daily-target-progress"
 import { ErrorBoundary } from "@/components/error-boundary"
@@ -61,7 +61,6 @@ interface DashboardData {
   }
 }
 
-// Config: Incentive Percentage (e.g., 0.5% of disbursed amount)
 const INCENTIVE_RATE = 0.005 
 
 export default function TelecallerDashboard() {
@@ -74,7 +73,7 @@ export default function TelecallerDashboard() {
     error: null,
     lastUpdated: null,
     stats: { myLeads: 0, todaysCalls: 0, pendingFollowUps: 0, completedToday: 0, conversionRate: 0, successRate: 0 },
-    targets: { monthly: 2000000, achieved: 0, dailyCalls: 350 } // Default targets
+    targets: { monthly: 2000000, achieved: 0, dailyCalls: 350 }
   })
 
   // --- DATA FETCHING ---
@@ -86,12 +85,10 @@ export default function TelecallerDashboard() {
         return
       }
 
-      // Time Ranges
       const now = new Date()
       const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
 
-      // Parallel Queries (Optimized)
       const [
         myLeadsRes,
         todaysCallsRes,
@@ -108,14 +105,12 @@ export default function TelecallerDashboard() {
         supabase.from("leads").select("disbursed_amount").eq("assigned_to", user.id).ilike("status", "disbursed").gte("disbursed_at", startOfMonth)
       ])
 
-      // Data Processing
       const monthlyTarget = userProfileRes.data?.monthly_target || 2000000
       const achievedAmount = disbursedRes.data?.reduce((sum, lead) => sum + Number(lead.disbursed_amount || 0), 0) || 0
       const todaysCalls = todaysCallsRes.count || 0
       const completedToday = completedTodayRes.count || 0
       const pendingFollowUps = pendingFollowUpsRes.count || 0
 
-      // KPIs
       const conversionRate = todaysCalls > 0 ? Math.round((completedToday / todaysCalls) * 100) : 0
       const successRate = (completedToday + pendingFollowUps) > 0 
         ? Math.round((completedToday / (completedToday + pendingFollowUps)) * 100) 
@@ -137,22 +132,19 @@ export default function TelecallerDashboard() {
         targets: { monthly: monthlyTarget, achieved: achievedAmount, dailyCalls: 350 }
       })
 
-    } catch (err) {
+    } catch (err: any) {
       console.error("Dashboard Load Error:", err)
-      setData(prev => ({ ...prev, isLoading: false, error: "Failed to load dashboard." }))
+      setData(prev => ({ ...prev, isLoading: false, error: err.message || "Failed to load dashboard." }))
     }
   }, [router, supabase])
 
-  // Initial Load + Auto Refresh (Every 5 mins)
   useEffect(() => {
     loadDashboardData()
     const interval = setInterval(loadDashboardData, 5 * 60 * 1000) 
     return () => clearInterval(interval)
   }, [loadDashboardData])
 
-  // --- MEMOIZED CALCULATIONS ---
-  
-  // 1. Pacing Calculation (Are they on track for the month?)
+  // --- CALCULATIONS ---
   const pacing = useMemo(() => {
       const now = new Date()
       const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
@@ -171,7 +163,6 @@ export default function TelecallerDashboard() {
       }
   }, [data.targets])
 
-  // 2. Incentive Estimation
   const estimatedIncentive = useMemo(() => {
       return Math.floor(data.targets.achieved * INCENTIVE_RATE)
   }, [data.targets.achieved])
@@ -190,7 +181,6 @@ export default function TelecallerDashboard() {
   const callShortage = Math.max(0, data.targets.dailyCalls - data.stats.todaysCalls)
   const isTargetMet = callShortage === 0
 
-  // --- STATS CONFIGURATION ---
   const statsConfig: DashboardStats[] = [
     {
       title: "Est. Incentive",
@@ -231,7 +221,7 @@ export default function TelecallerDashboard() {
     }
   ]
 
-  // --- LOADING SKELETON ---
+  // --- CONDITIONAL RENDERS ---
   if (data.isLoading) {
     return <DashboardSkeleton />
   }
@@ -249,15 +239,16 @@ export default function TelecallerDashboard() {
     )
   }
 
+  // --- MAIN RENDER ---
   return (
-    <NotificationProvider userId={data.user.id}>
+    <NotificationProvider userId={data.user?.id}>
       <div className="min-h-screen bg-slate-50/50 p-4 md:p-8 space-y-8 max-w-[1600px] mx-auto relative pb-24">
         
-        {/* 1. HEADER SECTION */}
+        {/* Header */}
         <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-              {getGreeting()}, {data.user.user_metadata?.full_name?.split(' ')[0]} 
+              {getGreeting()}, {data.user?.user_metadata?.full_name?.split(' ')[0]} 
               <span className="text-xl">👋</span>
             </h1>
             <div className="flex items-center gap-2 text-sm text-slate-500 mt-1">
@@ -286,7 +277,7 @@ export default function TelecallerDashboard() {
           </div>
         </header>
 
-        {/* 2. STATS OVERVIEW */}
+        {/* Stats */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {statsConfig.map((stat, i) => (
             <Card key={i} className={`shadow-sm border transition-all hover:shadow-md ${stat.borderColor}`}>
@@ -313,17 +304,13 @@ export default function TelecallerDashboard() {
           ))}
         </div>
 
-        {/* 3. MAIN DASHBOARD GRID */}
+        {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           
-          {/* LEFT COLUMN (MAIN WORK) - 8 COLS */}
+          {/* Main Column */}
           <div className="lg:col-span-8 space-y-8">
-            
-            {/* A. Monthly Target Hero with Pacing */}
             <Card className="border-none shadow-lg bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white overflow-hidden relative group">
-              {/* Background decorators */}
               <div className="absolute right-0 top-0 h-full w-1/3 bg-white/5 skew-x-12 -mr-10 transition-transform group-hover:-translate-x-2 duration-700" />
-              
               <CardContent className="p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-8 relative z-10">
                 <div className="space-y-5 flex-1 w-full">
                   <div className="flex justify-between items-start">
@@ -336,19 +323,14 @@ export default function TelecallerDashboard() {
                             <span className="text-lg text-slate-400 font-light">/ {formatCurrency(data.targets.monthly)}</span>
                         </div>
                     </div>
-                    {/* Pacing Badge */}
                     <Badge className={`${pacing.color} border-0 px-3 py-1`}>
                         {pacing.label}
                     </Badge>
                   </div>
                   
-                  {/* Progress Bar */}
                   <div className="space-y-2">
                     <div className="relative h-3 w-full bg-white/10 rounded-full overflow-hidden">
-                      {/* Expected Pacing Marker */}
                       <div className="absolute top-0 bottom-0 w-0.5 bg-white/30 z-20" style={{ left: `${pacing.expected}%` }} />
-                      
-                      {/* Actual Progress */}
                       <div 
                         className={`h-full transition-all duration-1000 ${pacing.isAhead ? "bg-gradient-to-r from-emerald-400 to-green-500" : "bg-gradient-to-r from-indigo-400 to-purple-400"}`}
                         style={{ width: `${Math.min(100, pacing.actual)}%` }}
@@ -373,9 +355,8 @@ export default function TelecallerDashboard() {
               </CardContent>
             </Card>
 
-            {/* B. Daily Progress */}
             <DailyTargetProgress 
-              userId={data.user.id} 
+              userId={data.user?.id || ""} 
               targets={{ 
                 daily_calls: data.targets.dailyCalls, 
                 daily_completed: 20, 
@@ -385,20 +366,93 @@ export default function TelecallerDashboard() {
               currentCompleted={data.stats.completedToday}
             />
 
-            {/* C. Today's Tasks */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                  <Calendar className="h-5 w-5 text-indigo-600" /> Today's Schedule
+                  <Clock className="h-5 w-5 text-indigo-600" /> Today's Schedule
                 </h3>
               </div>
               
-              <ErrorBoundary fallback={<EmptyState icon={AlertTriangle} title="Error loading tasks" description="We couldn't load your tasks." />}>
-                <TodaysTasks userId={data.user.id} />
+              <ErrorBoundary fallback={<EmptyState icon={AlertTriangle} title="Error" description="Failed to load tasks." />}>
+                <TodaysTasks userId={data.user?.id || ""} />
               </ErrorBoundary>
             </div>
-
           </div>
 
-          {/* RIGHT COLUMN (SIDEBAR) - 4 COLS */}
+          {/* Sidebar */}
           <div className="lg:col-span-4 space-y-8">
+            <ErrorBoundary fallback={null}>
+              <AttendanceWidget />
+            </ErrorBoundary>
+
+            <ErrorBoundary fallback={null}>
+              <PerformanceMetrics 
+                userId={data.user?.id || ""}
+                conversionRate={data.stats.conversionRate}
+                successRate={data.stats.successRate}
+                avgCallDuration={5} 
+              />
+            </ErrorBoundary>
+
+            {!isTargetMet && (
+              <Alert variant="destructive" className="bg-red-50 border-red-100 shadow-sm">
+                <div className="flex gap-3">
+                    <div className="p-2 bg-red-100 rounded-full h-fit">
+                        <AlertTriangle className="h-4 w-4 text-red-600" />
+                    </div>
+                    <div>
+                        <AlertTitle className="text-red-800 font-bold mb-1">Catch Up Needed</AlertTitle>
+                        <AlertDescription className="text-red-600 text-xs">
+                        You are behind by <strong>{callShortage} calls</strong> today.
+                        </AlertDescription>
+                    </div>
+                </div>
+              </Alert>
+            )}
+          </div>
+        </div>
+
+        {/* Mobile FAB */}
+        <div className="md:hidden fixed bottom-6 right-6 z-50">
+            <Button 
+                className="rounded-full h-14 w-14 shadow-2xl bg-indigo-600 hover:bg-indigo-700"
+                onClick={() => router.push("/leads/new")}
+            >
+                <Plus className="h-6 w-6" />
+            </Button>
+        </div>
+      </div>
+    </NotificationProvider>
+  )
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="min-h-screen bg-slate-50/50 p-4 md:p-8 space-y-8 max-w-[1600px] mx-auto">
+      <div className="flex justify-between items-center">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-48" />
+        </div>
+        <div className="flex gap-2">
+          <Skeleton className="h-10 w-10 rounded-full" />
+          <Skeleton className="h-10 w-24" />
+        </div>
+      </div>
+      <div className="grid grid-cols-4 gap-4">
+        {[1,2,3,4].map(i => <Skeleton key={i} className="h-32 w-full rounded-xl" />)}
+      </div>
+      <div className="grid grid-cols-12 gap-8">
+        <div className="col-span-8 space-y-8">
+          <Skeleton className="h-48 w-full rounded-xl" />
+          <Skeleton className="h-32 w-full rounded-xl" />
+          <Skeleton className="h-96 w-full rounded-xl" />
+        </div>
+        <div className="col-span-4 space-y-8">
+          <Skeleton className="h-64 w-full rounded-xl" />
+          <Skeleton className="h-64 w-full rounded-xl" />
+        </div>
+      </div>
+    </div>
+  )
+}
