@@ -14,16 +14,16 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 
 // Icons
 import { 
-  Phone, Users, Clock, CheckCircle, TrendingUp, 
+  Phone, Users, Clock, TrendingUp, 
   Rocket, RefreshCw, Plus, FileText, 
   AlertTriangle, Wallet
 } from "lucide-react"
 
-// Custom Components (Ensure these paths match your project structure)
+// Custom Components
 import { TodaysTasks } from "@/components/todays-tasks"
 import { AttendanceWidget } from "@/components/attendance-widget"
 import { NotificationProvider } from "@/components/notification-provider"
-import { NotificationBell } from "@/components/notification-bell" 
+import { NotificationBell } from "@/components/notifications/notification-bell" 
 import { PerformanceMetrics } from "@/components/performance-metrics"
 import { DailyTargetProgress } from "@/components/daily-target-progress"
 import { ErrorBoundary } from "@/components/error-boundary"
@@ -429,28 +429,73 @@ export default function TelecallerDashboard() {
 function DashboardSkeleton() {
   return (
     <div className="min-h-screen bg-slate-50/50 p-4 md:p-8 space-y-8 max-w-[1600px] mx-auto">
-      <div className="flex justify-between items-center">
-        <div className="space-y-2">
-          <Skeleton className="h-8 w-64" />
-          <Skeleton className="h-4 w-48" />
+      {/* Header Skeleton */}
+      <div className="flex flex-col md:flex-row justify-between gap-4">
+        <div className="space-y-3">
+          <Skeleton className="h-8 w-64 rounded-md" /> {/* Greeting */}
+          <Skeleton className="h-4 w-40 rounded-md" /> {/* Date */}
         </div>
-        <div className="flex gap-2">
-          <Skeleton className="h-10 w-10 rounded-full" />
-          <Skeleton className="h-10 w-24" />
+        <div className="flex gap-3">
+          <Skeleton className="h-10 w-10 rounded-full" /> {/* Bell */}
+          <Skeleton className="h-10 w-10 rounded-md" /> {/* Refresh */}
+          <Skeleton className="h-10 w-32 rounded-md hidden md:block" /> {/* Add Lead */}
         </div>
       </div>
-      <div className="grid grid-cols-4 gap-4">
-        {[1,2,3,4].map(i => <Skeleton key={i} className="h-32 w-full rounded-xl" />)}
+
+      {/* Stats Grid Skeleton */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="bg-white p-5 rounded-xl border border-slate-200 h-[120px] flex justify-between">
+            <div className="space-y-3 w-2/3">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="h-8 w-16" />
+              <Skeleton className="h-3 w-24" />
+            </div>
+            <Skeleton className="h-10 w-10 rounded-xl" />
+          </div>
+        ))}
       </div>
-      <div className="grid grid-cols-12 gap-8">
-        <div className="col-span-8 space-y-8">
-          <Skeleton className="h-48 w-full rounded-xl" />
-          <Skeleton className="h-32 w-full rounded-xl" />
-          <Skeleton className="h-96 w-full rounded-xl" />
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {/* Main Col Skeleton */}
+        <div className="lg:col-span-8 space-y-8">
+          {/* Hero Card */}
+          <div className="h-[220px] w-full rounded-xl bg-slate-200 animate-pulse relative overflow-hidden">
+             <div className="absolute inset-0 bg-gradient-to-r from-slate-200 to-slate-300" />
+          </div>
+
+          {/* Daily Progress */}
+          <div className="h-[300px] bg-white rounded-xl border border-slate-200 p-6 space-y-6">
+             <div className="flex justify-between">
+                 <Skeleton className="h-6 w-32" />
+                 <Skeleton className="h-6 w-24 rounded-full" />
+             </div>
+             <div className="space-y-4">
+                 <Skeleton className="h-20 w-full rounded-lg" />
+                 <Skeleton className="h-20 w-full rounded-lg" />
+             </div>
+          </div>
+
+          {/* Task List */}
+          <div className="space-y-4">
+            <Skeleton className="h-7 w-40" />
+            <div className="space-y-3">
+              {[1, 2, 3].map(i => <Skeleton key={i} className="h-24 w-full rounded-lg border border-slate-200" />)}
+            </div>
+          </div>
         </div>
-        <div className="col-span-4 space-y-8">
-          <Skeleton className="h-64 w-full rounded-xl" />
-          <Skeleton className="h-64 w-full rounded-xl" />
+
+        {/* Sidebar Skeleton */}
+        <div className="lg:col-span-4 space-y-8">
+          <Skeleton className="h-[250px] w-full rounded-xl" /> {/* Attendance */}
+          <div className="h-[350px] bg-white rounded-xl border border-slate-200 p-6 flex flex-col justify-between">
+             <Skeleton className="h-6 w-40 mb-4" />
+             <div className="grid grid-cols-2 gap-4">
+                <Skeleton className="h-24 w-full rounded-full" />
+                <Skeleton className="h-24 w-full rounded-full" />
+             </div>
+             <Skeleton className="h-12 w-full rounded-md mt-4" />
+          </div>
         </div>
       </div>
     </div>
