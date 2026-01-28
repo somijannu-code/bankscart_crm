@@ -71,6 +71,7 @@ type Office = {
 
 const COLORS = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6'];
 const ITEMS_PER_PAGE = 10;
+const MAX_SHIFT_HOURS = 9; // <--- FIX ADDED HERE
 
 // --- HELPER: HAVERSINE DISTANCE (KM) ---
 function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -894,7 +895,6 @@ export function AdminAttendanceDashboard() {
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           {selectedUser && (() => {
              const userRecords = userMonthData;
-             const presentCount = userRecords.filter(r => r.status !== 'absent').length;
              const lateCount = userRecords.filter(r => r.status === 'late').length;
              const totalHrs = userRecords.reduce((acc, r) => acc + (Number(r.total_hours) || 0), 0);
              
