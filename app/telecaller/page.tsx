@@ -22,12 +22,12 @@ import {
 // Custom Components (Ensure these paths match your project structure)
 import { TodaysTasks } from "@/components/todays-tasks"
 import { AttendanceWidget } from "@/components/attendance-widget"
-import { NotificationProvider } from "@/components/providers/notification-provider"
+import { NotificationProvider } from "@/components/notification-provider"
 import { NotificationBell } from "@/components/notification-bell" 
-import { PerformanceMetrics } from "@/components/dashboard/performance-metrics"
-import { DailyTargetProgress } from "@/components/dashboard/daily-target-progress"
+import { PerformanceMetrics } from "@/components/performance-metrics"
+import { DailyTargetProgress } from "@/components/daily-target-progress"
 import { ErrorBoundary } from "@/components/error-boundary"
-import { EmptyState } from "@/components/ui/empty-state"
+import { EmptyState } from "@/components/empty-state"
 
 // --- TYPES ---
 interface DashboardStats {
