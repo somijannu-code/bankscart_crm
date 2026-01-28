@@ -1,14 +1,19 @@
 "use client"
 
 import { createClient } from "@/lib/supabase/client"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { Phone, Mail, MapPin, Calendar, MessageSquare, ArrowLeft, Clock, Save, History, Building, User } from "lucide-react"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Separator } from "@/components/ui/separator"
+import { 
+  Phone, Mail, MapPin, Calendar, MessageSquare, ArrowLeft, Clock, Save, History, 
+  Building, User, AlertTriangle, MoreHorizontal, CheckCircle2 
+} from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState, useEffect } from "react"
@@ -18,7 +23,8 @@ import { LeadNotes } from "@/components/lead-notes"
 import { LeadCallHistory } from "@/components/lead-call-history"
 import { FollowUpsList } from "@/components/follow-ups-list"
 import { LeadStatusUpdater } from "@/components/lead-status-updater"
-import { LeadAuditHistory } from "@/components/lead-audit-history" // Ensure you created this component
+import { LeadAuditHistory } from "@/components/lead-audit-history"
+import { formatDistanceToNow } from "date-fns"
 
 // --- TYPES ---
 interface EditLeadPageProps {
@@ -95,7 +101,6 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
           return
         }
 
-        // Structure Lead Data safely
         const leadWithUserData = {
             ...leadData,
             assigned_user: leadData.assigned_user || null,
@@ -103,7 +108,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
         }
         setLead(leadWithUserData as Lead)
 
-        // 3. Fetch Telecallers (for dropdown)
+        // 3. Fetch Telecallers
         const { data: telecallersData } = await supabase
           .from("users")
           .select("id, full_name")
@@ -112,7 +117,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
         
         if (telecallersData) setTelecallers(telecallersData as Telecaller[])
 
-        // 4. Fetch Telecaller Attendance Status (Optional enhancement)
+        // 4. Fetch Attendance
         const today = new Date().toISOString().split('T')[0]
         const { data: attendance } = await supabase.from("attendance").select("user_id").eq("date", today).not("check_in", "is", null)
         if(attendance) {
@@ -121,7 +126,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
             setTelecallerStatus(statusMap)
         }
 
-        // 5. Fetch Full Timeline
+        // 5. Fetch Timeline
         await fetchTimelineData(params.id)
 
         setLoading(false)
@@ -176,7 +181,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
     } catch(e) { console.error("Timeline Error", e) }
   }
 
-  // --- FORM SUBMIT HANDLER ---
+  // --- FORM SUBMIT ---
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setUpdating(true)
@@ -203,11 +208,9 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
         notes: (formData.get("notes") as string) || null,
       }
       
-      // Update Lead
       const { error } = await supabase.from("leads").update(updates).eq("id", params.id)
       if (error) throw error
 
-      // Log Change if Status changed
       if (lead?.status !== updates.status && user) {
           await supabase.from("notes").insert({
               lead_id: params.id,
@@ -215,11 +218,9 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
               content: `Status manually updated from ${lead?.status} to ${updates.status}`,
               note_type: 'status_change'
           })
-          // Re-fetch timeline to show the change
           await fetchTimelineData(params.id)
       }
       
-      // Update Local State without page reload
       setLead(prev => prev ? { ...prev, ...updates } as Lead : null)
       alert("Lead updated successfully!")
 
@@ -231,7 +232,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
     }
   }
 
-  // --- ACTIONS ---
+  // --- UTILS ---
   const makeCall = (phone: string) => {
     if (phone) window.open(`tel:${phone}`, "_self")
   }
@@ -240,7 +241,6 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
     if (email) window.open(`mailto:${email}`, "_blank")
   }
 
-  // --- RENDER HELPERS ---
   const getStatusColor = (status: string) => {
     const map: any = { 
         new: "bg-blue-100 text-blue-800", 
@@ -254,163 +254,224 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
 
   const getPriorityColor = (priority: string) => {
     const map: any = { 
-        high: "bg-red-100 text-red-800", 
-        medium: "bg-blue-100 text-blue-800", 
-        low: "bg-gray-100 text-gray-800" 
+        high: "bg-red-100 text-red-800 border-red-200", 
+        medium: "bg-blue-100 text-blue-800 border-blue-200", 
+        low: "bg-slate-100 text-slate-800 border-slate-200" 
     }
     return map[priority] || "bg-gray-100 text-gray-800"
   }
 
   const getSafeValue = (val: any, def: string) => val || def
 
-  if (loading) return <div className="p-10 text-center animate-pulse">Loading Lead Details...</div>
+  const isStale = (lastContacted: string | null) => {
+      if(!lastContacted) return true
+      const diff = new Date().getTime() - new Date(lastContacted).getTime()
+      return diff > (7 * 24 * 60 * 60 * 1000) // 7 days
+  }
+
+  if (loading) return (
+    <div className="p-10 flex flex-col items-center justify-center space-y-4">
+        <div className="h-10 w-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+        <p className="text-slate-500">Loading Lead Details...</p>
+    </div>
+  )
+  
   if (error || !lead) return <div className="p-10 text-center text-red-500 font-medium">{error}</div>
 
   return (
-    <div className="p-6 space-y-6 bg-slate-50 min-h-screen">
+    <div className="p-6 space-y-6 bg-slate-50/50 min-h-screen">
       
-      {/* 1. Header & Navigation */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      {/* 1. Enhanced Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-start gap-4">
             <Link href="/admin/leads">
-                <Button variant="outline" size="sm" className="gap-2 bg-white"><ArrowLeft className="h-4 w-4"/> Back</Button>
+                <Button variant="outline" size="sm" className="gap-2 bg-white shadow-sm hover:bg-slate-50 border-slate-200">
+                    <ArrowLeft className="h-4 w-4"/>
+                </Button>
             </Link>
             <div>
-                <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
-                    {getSafeValue(lead.name, "Unknown Lead")}
-                    <Badge variant="outline" className="text-sm font-normal text-slate-500">ID: {lead.id.slice(0,8)}</Badge>
-                </h1>
-                <div className="flex items-center gap-2 mt-1">
-                    <span className="text-slate-500 text-sm flex items-center gap-1"><Building className="h-3 w-3"/> {getSafeValue(lead.company, "No Company")}</span>
-                    <span className="text-slate-300">|</span>
-                    <span className="text-slate-500 text-sm flex items-center gap-1"><User className="h-3 w-3"/> {getSafeValue(lead.assigned_user?.full_name, "Unassigned")}</span>
+                <div className="flex items-center gap-3">
+                    <Avatar className="h-12 w-12 border-2 border-white shadow-sm">
+                        <AvatarFallback className="bg-blue-100 text-blue-700 font-bold text-lg">
+                            {lead.name.charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                    </Avatar>
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                            {getSafeValue(lead.name, "Unknown Lead")}
+                        </h1>
+                        <div className="flex items-center gap-3 mt-1 text-sm text-slate-500">
+                            <span className="flex items-center gap-1"><Building className="h-3.5 w-3.5"/> {getSafeValue(lead.company, "No Company")}</span>
+                            <span className="text-slate-300">|</span>
+                            <span className="flex items-center gap-1"><User className="h-3.5 w-3.5"/> {getSafeValue(lead.assigned_user?.full_name, "Unassigned")}</span>
+                        </div>
+                    </div>
                 </div>
             </div>
+        </div>
+        
+        {/* Header Actions */}
+        <div className="flex items-center gap-2">
+            {isStale(lead.last_contacted) && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-700 rounded-full border border-amber-200 text-xs font-medium mr-2">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    <span>Stale Lead (>7 days)</span>
+                </div>
+            )}
+            <Badge variant="outline" className="px-3 py-1.5 text-xs font-mono bg-white text-slate-500">ID: {lead.id.slice(0,8)}</Badge>
         </div>
       </div>
 
       {/* 2. Main Tabs Layout */}
       <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="bg-white border w-full justify-start p-0 h-auto">
-          <TabsTrigger value="overview" className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none">Overview</TabsTrigger>
-          <TabsTrigger value="timeline" className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none">Timeline</TabsTrigger>
-          <TabsTrigger value="notes" className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none">Notes</TabsTrigger>
-          <TabsTrigger value="calls" className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none">Calls</TabsTrigger>
-          <TabsTrigger value="followups" className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none">Follow-ups</TabsTrigger>
-          
-          {/* NEW: History Tab */}
-          <TabsTrigger value="history" className="px-6 py-3 gap-2 data-[state=active]:border-b-2 data-[state=active]:border-blue-600 rounded-none">
-            <History className="h-4 w-4" /> Audit Logs
-          </TabsTrigger>
-        </TabsList>
+        <div className="bg-white border rounded-lg p-1 shadow-sm inline-flex mb-6">
+          <TabsList className="h-auto bg-transparent p-0 gap-1">
+            {['overview', 'timeline', 'notes', 'calls', 'followups', 'history'].map((tab) => (
+                <TabsTrigger 
+                    key={tab} 
+                    value={tab} 
+                    className="px-4 py-2 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 rounded-md capitalize"
+                >
+                    {tab === 'history' ? <><History className="h-4 w-4 mr-2" /> Audit Logs</> : tab}
+                </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
 
-        {/* 3. Tab Contents */}
-        
-        {/* OVERVIEW TAB (Form + Sidebar) */}
-        <TabsContent value="overview" className="mt-6">
+        {/* OVERVIEW TAB */}
+        <TabsContent value="overview" className="mt-0">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
-            {/* Left Column: Edit Form */}
+            {/* Left Column: Details */}
             <div className="lg:col-span-2 space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex justify-between items-center">
-                    Lead Details
+              <Card className="shadow-sm border-slate-200">
+                <CardHeader className="pb-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                        <CardTitle>Lead Information</CardTitle>
+                        <CardDescription>Manage core details and assignment.</CardDescription>
+                    </div>
                     <div className="flex gap-2">
-                        <Badge className={getStatusColor(lead.status)}>{lead.status}</Badge>
-                        <Badge className={getPriorityColor(lead.priority)}>{lead.priority}</Badge>
+                        <Badge className={getStatusColor(lead.status)}>{lead.status.replace(/_/g, ' ')}</Badge>
+                        <Badge variant="outline" className={getPriorityColor(lead.priority)}>{lead.priority}</Badge>
                     </div>
-                  </CardTitle>
+                  </div>
                 </CardHeader>
-                <CardContent>
-                  <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Basic Info */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div><Label>Full Name *</Label><Input name="name" defaultValue={lead.name} required /></div>
-                      <div><Label>Company</Label><Input name="company" defaultValue={lead.company || ""} /></div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div><Label>Email</Label><Input name="email" type="email" defaultValue={lead.email || ""} /></div>
-                      <div><Label>Phone *</Label><Input name="phone" defaultValue={lead.phone} required /></div>
-                    </div>
+                
+                <Separator />
+                
+                <CardContent className="pt-6">
+                  <form onSubmit={handleSubmit} className="space-y-6">
                     
-                    {/* Address & Meta */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div><Label>Designation</Label><Input name="designation" defaultValue={lead.designation || ""} /></div>
-                        <div><Label>Source</Label><Input name="source" defaultValue={lead.source || ""} /></div>
-                    </div>
-                    <div><Label>Address</Label><Textarea name="address" defaultValue={lead.address || ""} rows={2} /></div>
-                    
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div><Label>City</Label><Input name="city" defaultValue={lead.city || ""} /></div>
-                        <div><Label>State</Label><Input name="state" defaultValue={lead.state || ""} /></div>
-                        <div><Label>Zip</Label><Input name="zip_code" defaultValue={lead.zip_code || ""} /></div>
-                        <div><Label>Country</Label><Input name="country" defaultValue={lead.country || ""} /></div>
-                    </div>
-
-                    {/* Status & Assignment */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-t pt-4 mt-4">
-                        <div>
-                            <Label>Status</Label>
-                            <Select name="status" defaultValue={lead.status || "new"}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="new">New</SelectItem>
-                                    <SelectItem value="contacted">Contacted</SelectItem>
-                                    <SelectItem value="Interested">Interested</SelectItem>
-                                    <SelectItem value="Disbursed">Disbursed</SelectItem>
-                                    <SelectItem value="Not_Interested">Not Interested</SelectItem>
-                                    {/* Add other statuses as needed */}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
-                            <Label>Priority</Label>
-                            <Select name="priority" defaultValue={lead.priority || "medium"}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="low">Low</SelectItem>
-                                    <SelectItem value="medium">Medium</SelectItem>
-                                    <SelectItem value="high">High</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
-                            <Label>Assign To</Label>
-                            <Select name="assigned_to" defaultValue={lead.assigned_to || "unassigned"}>
-                                <SelectTrigger><SelectValue placeholder="Select Telecaller" /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="unassigned">Unassigned</SelectItem>
-                                    {telecallers?.map(t => (
-                                        <SelectItem key={t.id} value={t.id}>
-                                            <span className={telecallerStatus[t.id] ? "text-green-600 font-medium" : ""}>
-                                                {t.full_name} {telecallerStatus[t.id] && "●"}
-                                            </span>
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                    {/* Section 1: Contact Info */}
+                    <div>
+                        <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+                            <User className="h-4 w-4 text-slate-400" /> Contact Details
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div><Label className="text-xs text-slate-500">Full Name</Label><Input name="name" defaultValue={lead.name} required className="mt-1" /></div>
+                            <div><Label className="text-xs text-slate-500">Company</Label><Input name="company" defaultValue={lead.company || ""} className="mt-1" /></div>
+                            <div><Label className="text-xs text-slate-500">Email</Label><Input name="email" type="email" defaultValue={lead.email || ""} className="mt-1" /></div>
+                            <div><Label className="text-xs text-slate-500">Phone</Label><Input name="phone" defaultValue={lead.phone} required className="mt-1" /></div>
                         </div>
                     </div>
 
-                    <div><Label>Internal Notes</Label><Textarea name="notes" defaultValue={lead.notes || ""} rows={3} placeholder="Admin internal notes..." /></div>
+                    <Separator className="bg-slate-100" />
 
-                    <Button type="submit" className="w-full bg-slate-900" disabled={updating}>
-                        {updating ? "Saving..." : <><Save className="w-4 h-4 mr-2"/> Save Changes</>}
-                    </Button>
+                    {/* Section 2: Location & Meta */}
+                    <div>
+                        <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+                            <MapPin className="h-4 w-4 text-slate-400" /> Location & Context
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div><Label className="text-xs text-slate-500">Designation</Label><Input name="designation" defaultValue={lead.designation || ""} className="mt-1" /></div>
+                            <div><Label className="text-xs text-slate-500">Source</Label><Input name="source" defaultValue={lead.source || ""} className="mt-1" /></div>
+                        </div>
+                        <div className="mb-4"><Label className="text-xs text-slate-500">Address</Label><Textarea name="address" defaultValue={lead.address || ""} rows={2} className="mt-1 resize-none" /></div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div><Label className="text-xs text-slate-500">City</Label><Input name="city" defaultValue={lead.city || ""} className="mt-1" /></div>
+                            <div><Label className="text-xs text-slate-500">State</Label><Input name="state" defaultValue={lead.state || ""} className="mt-1" /></div>
+                            <div><Label className="text-xs text-slate-500">Zip</Label><Input name="zip_code" defaultValue={lead.zip_code || ""} className="mt-1" /></div>
+                            <div><Label className="text-xs text-slate-500">Country</Label><Input name="country" defaultValue={lead.country || ""} className="mt-1" /></div>
+                        </div>
+                    </div>
+
+                    <Separator className="bg-slate-100" />
+
+                    {/* Section 3: Status & Assignment */}
+                    <div>
+                        <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+                            <Building className="h-4 w-4 text-slate-400" /> Management
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <Label className="text-xs text-slate-500">Status</Label>
+                                <Select name="status" defaultValue={lead.status || "new"}>
+                                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="new">New</SelectItem>
+                                        <SelectItem value="contacted">Contacted</SelectItem>
+                                        <SelectItem value="Interested">Interested</SelectItem>
+                                        <SelectItem value="Disbursed">Disbursed</SelectItem>
+                                        <SelectItem value="Not_Interested">Not Interested</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div>
+                                <Label className="text-xs text-slate-500">Priority</Label>
+                                <Select name="priority" defaultValue={lead.priority || "medium"}>
+                                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="low">Low</SelectItem>
+                                        <SelectItem value="medium">Medium</SelectItem>
+                                        <SelectItem value="high">High</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div>
+                                <Label className="text-xs text-slate-500">Assign To</Label>
+                                <Select name="assigned_to" defaultValue={lead.assigned_to || "unassigned"}>
+                                    <SelectTrigger className="mt-1"><SelectValue placeholder="Select Telecaller" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="unassigned">Unassigned</SelectItem>
+                                        {telecallers?.map(t => (
+                                            <SelectItem key={t.id} value={t.id}>
+                                                <div className="flex items-center gap-2">
+                                                    <div className={`w-2 h-2 rounded-full ${telecallerStatus[t.id] ? 'bg-green-500' : 'bg-slate-300'}`} />
+                                                    <span className={telecallerStatus[t.id] ? "font-medium text-slate-900" : "text-slate-500"}>{t.full_name}</span>
+                                                </div>
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="pt-4">
+                        <Button type="submit" className="w-full bg-slate-900 hover:bg-slate-800" disabled={updating}>
+                            {updating ? "Saving Changes..." : <><Save className="w-4 h-4 mr-2"/> Save Changes</>}
+                        </Button>
+                    </div>
                   </form>
                 </CardContent>
               </Card>
 
-              {/* Recent Activity Timeline Preview */}
-              <Card>
-                <CardHeader><CardTitle className="flex items-center gap-2"><Clock className="h-5 w-5"/> Recent Activity</CardTitle></CardHeader>
+              {/* Recent Activity */}
+              <Card className="shadow-sm border-slate-200">
+                <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                        <Clock className="h-4 w-4 text-slate-500"/> Recent Activity
+                    </CardTitle>
+                </CardHeader>
                 <CardContent>
                     <TimelineView data={timelineData.slice(0, 5)} />
                     {timelineData.length > 5 && (
-                        <Button variant="link" className="mt-2 w-full" onClick={() => (document.querySelector('[value="timeline"]') as HTMLElement)?.click()}>
-                            View all history
-                        </Button>
+                        <div className="pt-4 text-center border-t mt-4">
+                            <Button variant="link" size="sm" onClick={() => (document.querySelector('[value="timeline"]') as HTMLElement)?.click()}>
+                                View Full History
+                            </Button>
+                        </div>
                     )}
                 </CardContent>
               </Card>
@@ -418,51 +479,62 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
 
             {/* Right Column: Actions & Stats */}
             <div className="space-y-6">
-                {/* Quick Actions */}
-                <Card>
-                    <CardHeader><CardTitle>Quick Actions</CardTitle></CardHeader>
-                    <CardContent className="space-y-3">
-                        <Button onClick={() => makeCall(lead.phone)} className="w-full gap-2" disabled={!lead.phone}>
-                            <Phone className="h-4 w-4"/> Call Now
-                        </Button>
-                        <Button onClick={() => sendEmail(lead.email || "")} variant="outline" className="w-full gap-2" disabled={!lead.email}>
-                            <Mail className="h-4 w-4"/> Send Email
-                        </Button>
-                        <Link href={`/admin/leads/${lead.id}/follow-up`} className="block">
-                            <Button variant="outline" className="w-full gap-2"><Calendar className="h-4 w-4"/> Schedule Follow-up</Button>
-                        </Link>
-                    </CardContent>
-                </Card>
-
-                {/* Status Updater Component */}
-                <Card>
-                    <CardHeader><CardTitle>Update Status</CardTitle></CardHeader>
+                
+                {/* Status Updater */}
+                <Card className="shadow-sm border-slate-200 bg-blue-50/30">
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-medium text-blue-900">Quick Status Update</CardTitle>
+                    </CardHeader>
                     <CardContent>
                         <LeadStatusUpdater 
                             leadId={lead.id} 
                             currentStatus={lead.status} 
                             leadPhoneNumber={lead.phone} 
                             telecallerName={user?.full_name || "Admin"}
-                            onStatusUpdate={() => fetchTimelineData(lead.id)} // Refresh timeline on update
+                            onStatusUpdate={() => fetchTimelineData(lead.id)} 
                         />
                     </CardContent>
                 </Card>
 
+                {/* Quick Actions */}
+                <Card className="shadow-sm border-slate-200">
+                    <CardHeader className="pb-3"><CardTitle className="text-sm font-medium">Communication</CardTitle></CardHeader>
+                    <CardContent className="space-y-3">
+                        <Button onClick={() => makeCall(lead.phone)} className="w-full gap-2 justify-start" variant="outline">
+                            <Phone className="h-4 w-4 text-green-600"/> Call {lead.phone}
+                        </Button>
+                        <Button onClick={() => sendEmail(lead.email || "")} variant="outline" className="w-full gap-2 justify-start" disabled={!lead.email}>
+                            <Mail className="h-4 w-4 text-blue-600"/> Email Lead
+                        </Button>
+                        <Link href={`/admin/leads/${lead.id}/follow-up`} className="block">
+                            <Button variant="outline" className="w-full gap-2 justify-start"><Calendar className="h-4 w-4 text-purple-600"/> Schedule Follow-up</Button>
+                        </Link>
+                    </CardContent>
+                </Card>
+
                 {/* Lead Stats */}
-                <Card>
-                    <CardHeader><CardTitle>Lead Stats</CardTitle></CardHeader>
-                    <CardContent className="space-y-3 text-sm">
-                        <div className="flex justify-between">
-                            <span className="text-gray-500">Created:</span>
-                            <span>{new Date(lead.created_at).toLocaleDateString()}</span>
+                <Card className="shadow-sm border-slate-200">
+                    <CardHeader className="pb-3"><CardTitle className="text-sm font-medium">Insights</CardTitle></CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="flex justify-between items-center text-sm">
+                            <span className="text-slate-500">Created</span>
+                            <span className="font-medium">{new Date(lead.created_at).toLocaleDateString()}</span>
                         </div>
-                        <div className="flex justify-between">
-                            <span className="text-gray-500">Last Contact:</span>
-                            <span>{lead.last_contacted ? new Date(lead.last_contacted).toLocaleDateString() : "Never"}</span>
+                        <Separator />
+                        <div className="flex justify-between items-center text-sm">
+                            <span className="text-slate-500">Last Contact</span>
+                            <span className="font-medium">
+                                {lead.last_contacted 
+                                    ? formatDistanceToNow(new Date(lead.last_contacted), { addSuffix: true }) 
+                                    : "Never"}
+                            </span>
                         </div>
-                        <div className="flex justify-between">
-                            <span className="text-gray-500">Activity Count:</span>
-                            <span>{timelineData.length} events</span>
+                        <Separator />
+                        <div className="flex justify-between items-center text-sm">
+                            <span className="text-slate-500">Engagement</span>
+                            <span className="font-medium bg-slate-100 px-2 py-0.5 rounded-full text-xs">
+                                {timelineData.length} Interactions
+                            </span>
                         </div>
                     </CardContent>
                 </Card>
@@ -470,37 +542,38 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
           </div>
         </TabsContent>
 
-        {/* TIMELINE TAB */}
+        {/* OTHER TABS */}
         <TabsContent value="timeline">
             <Card><CardContent className="pt-6"><TimelineView data={timelineData} /></CardContent></Card>
         </TabsContent>
 
-        {/* NOTES TAB */}
         <TabsContent value="notes">
             <Card><CardContent className="pt-6"><LeadNotes leadId={lead.id} userId={user?.id} /></CardContent></Card>
         </TabsContent>
 
-        {/* CALLS TAB */}
         <TabsContent value="calls">
             <Card><CardContent className="pt-6"><LeadCallHistory leadId={lead.id} userId={user?.id} /></CardContent></Card>
         </TabsContent>
 
-        {/* FOLLOW-UPS TAB */}
         <TabsContent value="followups">
             <Card><CardContent className="pt-6"><FollowUpsList leadId={lead.id} /></CardContent></Card>
         </TabsContent>
 
-        {/* NEW: AUDIT HISTORY TAB */}
         <TabsContent value="history">
           <Card className="border-t-4 border-t-blue-500 shadow-sm">
             <CardHeader className="bg-slate-50/50 border-b">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <History className="h-5 w-5 text-blue-600" />
-                Detailed Audit Log
-              </CardTitle>
-              <p className="text-sm text-slate-500">
-                Complete system record of every change made to this lead.
-              </p>
+              <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                      <CardTitle className="flex items-center gap-2 text-lg">
+                        <History className="h-5 w-5 text-blue-600" />
+                        Audit Log
+                      </CardTitle>
+                      <CardDescription>
+                        Complete system record of every change made to this lead.
+                      </CardDescription>
+                  </div>
+                  <Badge variant="outline" className="bg-white">Secure Record</Badge>
+              </div>
             </CardHeader>
             <CardContent className="pt-6">
                 <LeadAuditHistory leadId={lead.id} />
