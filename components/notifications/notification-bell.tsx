@@ -1,10 +1,10 @@
 "use client"
 
 import { useEffect, useState, useRef } from "react"
-import { Bell } from "lucide-react"
+import { Bell, CheckCheck, Trash2 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { Badge } from "@/components/ui/badge"
-// Button import removed as we are styling the trigger directly
+import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,20 +15,36 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { toast } from "sonner"
 import { RealtimeChannel } from "@supabase/supabase-js"
+import { formatDistanceToNow } from "date-fns"
+import { useRouter } from "next/navigation"
+import { cn } from "@/lib/utils"
 
-// Define the styles that mimic Button variant="ghost" size="icon"
-const triggerIconBtnClass = "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-10 w-10 relative"
+// --- TYPES ---
+interface NotificationItem {
+  id: string
+  user_id: string
+  title: string
+  message: string
+  read: boolean
+  link?: string // URL to redirect to (e.g., /admin/leads/123)
+  created_at: string
+}
 
 export function NotificationBell() {
-  const [notifications, setNotifications] = useState<any[]>([])
+  const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const supabase = createClient()
-  
-  // Use a Ref to track the channel to prevent duplicate subscriptions
+  const router = useRouter()
   const channelRef = useRef<RealtimeChannel | null>(null)
+  
+  // Audio ref for notification sound
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  // 1. Request System Notification Permission on Mount
   useEffect(() => {
+    // Initialize audio (ensure you have a sound file in public/sounds/)
+    // You can use a free sound like: https://freesound.org/people/ProjectsU012/sounds/341695/
+    audioRef.current = new Audio('/sounds/notification.mp3')
+    
     if (typeof window !== "undefined" && "Notification" in window) {
       if (Notification.permission === "default") {
         Notification.requestPermission()
@@ -38,142 +54,156 @@ export function NotificationBell() {
 
   useEffect(() => {
     const setupNotifications = async () => {
-      // 2. Get Current User
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      // 3. Fetch Initial (Missed) Notifications from Database
+      // Fetch Unread Notifications
       const { data } = await supabase
         .from("notifications")
         .select("*")
         .eq("user_id", user.id)
         .eq("read", false)
         .order("created_at", { ascending: false })
-        .limit(10)
+        .limit(20)
 
       if (data) {
         setNotifications(data)
         setUnreadCount(data.length)
       }
 
-      // 4. Prevent Duplicate Subscriptions
       if (channelRef.current) return
 
-      // 5. Setup Real-time Listener with UNIQUE Channel Name
       const channel = supabase
-        .channel(`realtime:notifications:${user.id}`) // Unique channel per user
+        .channel(`realtime:notifications:${user.id}`)
         .on(
           'postgres_changes',
           {
             event: 'INSERT',
             schema: 'public',
             table: 'notifications',
-            filter: `user_id=eq.${user.id}`, // Filter ensures we only get OUR alerts
+            filter: `user_id=eq.${user.id}`,
           },
           (payload) => {
-            console.log("🔔 New Notification Received:", payload)
+            const newNotif = payload.new as NotificationItem
             
-            const newNotif = payload.new as any
-            
-            // A. Update UI State instantly
+            // 1. Play Sound
+            audioRef.current?.play().catch(() => {}) // Catch error if user hasn't interacted yet
+
+            // 2. Update UI
             setNotifications((prev) => [newNotif, ...prev])
             setUnreadCount((prev) => prev + 1)
 
-            // B. Show In-App Toast (Sonner)
+            // 3. Show Toast
             toast.info(newNotif.title, {
               description: newNotif.message,
-              duration: 5000,
+              action: newNotif.link ? {
+                label: "View",
+                onClick: () => router.push(newNotif.link!)
+              } : undefined,
             })
             
-            // C. Trigger System Notification (Device History)
-            // This puts the message in the Windows/Android Notification Center
-            if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
-               try {
-                 const sysNotif = new Notification(newNotif.title, {
-                   body: newNotif.message,
-                   icon: '/icons/icon-192x192.jpg', // Ensure this path exists in your public folder
-                   tag: 'crm-alert', // Prevents stacking if multiple fire at once
-                   timestamp: new Date(newNotif.created_at).getTime()
-                 });
-                 
-                 // Focus window when clicked
-                 sysNotif.onclick = () => {
-                   window.focus();
-                   sysNotif.close();
-                 };
-               } catch (err) {
-                 console.error("System notification failed:", err);
-               }
+            // 4. System Notification
+            if (Notification.permission === "granted") {
+               new Notification(newNotif.title, {
+                 body: newNotif.message,
+                 icon: '/icons/icon-192x192.jpg'
+               })
             }
           }
         )
-        .subscribe((status) => {
-           console.log(`🔌 Realtime Connection Status: ${status}`)
-        })
+        .subscribe()
 
       channelRef.current = channel
     }
 
     setupNotifications()
 
-    // Cleanup on unmount
     return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current)
-        channelRef.current = null
-      }
+      if (channelRef.current) supabase.removeChannel(channelRef.current)
     }
-  }, [])
+  }, [supabase, router])
 
-  const markAsRead = async (id: string) => {
+  const markAsRead = async (id: string, link?: string) => {
     // Optimistic Update
     setNotifications((prev) => prev.filter((n) => n.id !== id))
     setUnreadCount((prev) => Math.max(0, prev - 1))
 
     // DB Update
     await supabase.from("notifications").update({ read: true }).eq("id", id)
+
+    // Navigation logic
+    if (link) router.push(link)
+  }
+
+  const markAllRead = async () => {
+    // Optimistic
+    setNotifications([])
+    setUnreadCount(0)
+    
+    const { data: { user } } = await supabase.auth.getUser()
+    if(user) {
+        await supabase.from("notifications").update({ read: true }).eq("user_id", user.id)
+    }
+    toast.success("All notifications cleared")
   }
 
   return (
     <DropdownMenu>
-      {/* FIX: Removed asChild and Button component. 
-         Used native DropdownMenuTrigger with custom classes to mimic the Ghost Icon Button.
-      */}
-      <DropdownMenuTrigger className={triggerIconBtnClass}>
-        <Bell className="h-5 w-5" />
-        {unreadCount > 0 && (
-          <Badge className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center rounded-full p-0 bg-red-500 text-white text-[10px]">
-            {unreadCount}
-          </Badge>
-        )}
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="relative">
+          <Bell className="h-5 w-5 text-slate-600" />
+          {unreadCount > 0 && (
+            <span className="absolute top-2 right-2 h-2.5 w-2.5 rounded-full bg-red-600 ring-2 ring-white animate-pulse" />
+          )}
+        </Button>
       </DropdownMenuTrigger>
       
-      <DropdownMenuContent align="end" className="w-80">
-        <DropdownMenuLabel>Notifications</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {notifications.length === 0 ? (
-          <div className="p-4 text-center text-sm text-muted-foreground">
-            No new notifications
-          </div>
-        ) : (
-          <div className="max-h-[300px] overflow-y-auto">
-            {notifications.map((notif) => (
-              <DropdownMenuItem 
-                key={notif.id} 
-                className="flex flex-col items-start gap-1 p-3 cursor-pointer border-b last:border-0 hover:bg-gray-50"
-                onClick={() => markAsRead(notif.id)}
-              >
-                <div className="flex justify-between w-full">
-                   <span className="font-semibold text-sm text-blue-600">{notif.title}</span>
-                   <span className="text-[10px] text-gray-400">
-                     {new Date(notif.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                   </span>
+      <DropdownMenuContent align="end" className="w-80 p-0 shadow-xl border-slate-200">
+        <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b">
+            <DropdownMenuLabel className="p-0 text-sm font-semibold text-slate-900">
+                Notifications 
+                {unreadCount > 0 && <span className="ml-2 text-xs font-normal text-slate-500">({unreadCount} new)</span>}
+            </DropdownMenuLabel>
+            {notifications.length > 0 && (
+                <button 
+                    onClick={markAllRead}
+                    className="text-[10px] uppercase font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                >
+                    <CheckCheck className="h-3 w-3" /> Mark all read
+                </button>
+            )}
+        </div>
+
+        <div className="max-h-[350px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200">
+            {notifications.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-center text-slate-500">
+                    <Bell className="h-8 w-8 mb-2 opacity-20" />
+                    <p className="text-sm">No new notifications</p>
                 </div>
-                <span className="text-xs text-gray-600 line-clamp-2">{notif.message}</span>
-              </DropdownMenuItem>
-            ))}
-          </div>
-        )}
+            ) : (
+                notifications.map((notif) => (
+                    <DropdownMenuItem 
+                        key={notif.id} 
+                        className="p-3 border-b last:border-0 cursor-pointer focus:bg-blue-50/50"
+                        onClick={() => markAsRead(notif.id, notif.link)}
+                    >
+                        <div className="flex flex-col gap-1 w-full">
+                            <div className="flex justify-between items-start w-full">
+                                <span className={cn("text-sm font-medium", !notif.read ? "text-blue-700" : "text-slate-700")}>
+                                    {notif.title}
+                                </span>
+                                <span className="text-[10px] text-slate-400 whitespace-nowrap ml-2">
+                                    {formatDistanceToNow(new Date(notif.created_at), { addSuffix: true })}
+                                </span>
+                            </div>
+                            <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+                                {notif.message}
+                            </p>
+                        </div>
+                    </DropdownMenuItem>
+                ))
+            )}
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   )
