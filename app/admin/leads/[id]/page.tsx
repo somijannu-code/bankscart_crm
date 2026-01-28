@@ -13,7 +13,7 @@ import { Separator } from "@/components/ui/separator"
 import { Progress } from "@/components/ui/progress"
 import { 
   Phone, Mail, MapPin, Calendar, MessageSquare, ArrowLeft, Clock, Save, History, 
-  Building, User, AlertTriangle, Printer, Trash2, CheckCircle2, Circle
+  Building, User, AlertTriangle, Printer, Trash2, CheckCircle2, Circle, Copy, ExternalLink, ArrowRightCircle
 } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -25,7 +25,8 @@ import { LeadCallHistory } from "@/components/lead-call-history"
 import { FollowUpsList } from "@/components/follow-ups-list"
 import { LeadStatusUpdater } from "@/components/lead-status-updater"
 import { LeadAuditHistory } from "@/components/lead-audit-history"
-import { formatDistanceToNow } from "date-fns"
+import { formatDistanceToNow, differenceInDays } from "date-fns"
+import { toast } from "sonner" // Ensure you have installed sonner
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,6 +38,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 // --- TYPES ---
 interface EditLeadPageProps {
@@ -56,6 +58,7 @@ interface Lead {
   status: string
   priority: string
   created_at: string
+  updated_at: string // Used for stagnation calculation
   last_contacted: string | null
   next_follow_up: string | null
   assigned_to: string | null
@@ -74,7 +77,6 @@ interface Telecaller {
   full_name: string
 }
 
-// --- PIPELINE STEPS CONFIG ---
 const PIPELINE_STEPS = [
     { id: 'new', label: 'New Lead' },
     { id: 'contacted', label: 'Contacted' },
@@ -136,7 +138,6 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
         
         if (telecallersData) setTelecallers(telecallersData as Telecaller[])
 
-        // Fetch Attendance
         const today = new Date().toISOString().split('T')[0]
         const { data: attendance } = await supabase.from("attendance").select("user_id").eq("date", today).not("check_in", "is", null)
         if(attendance) {
@@ -198,6 +199,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
         assigned_to: assignedToValue === "unassigned" ? null : assignedToValue,
         source: (formData.get("source") as string) || null,
         notes: (formData.get("notes") as string) || null,
+        updated_at: new Date().toISOString() // Force update timestamp
       }
       
       const { error } = await supabase.from("leads").update(updates).eq("id", params.id)
@@ -213,12 +215,13 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
           await fetchTimelineData(params.id)
       }
       
+      // Merge new data with existing complex objects (users)
       setLead(prev => prev ? { ...prev, ...updates } as Lead : null)
-      alert("Lead updated successfully!")
+      toast.success("Lead updated successfully")
 
     } catch (err) {
       console.error("Error updating lead:", err)
-      alert("Failed to update lead.")
+      toast.error("Failed to update lead")
     } finally {
       setUpdating(false)
     }
@@ -229,15 +232,22 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
       try {
           const { error } = await supabase.from('leads').delete().eq('id', params.id)
           if(error) throw error
+          toast.success("Lead deleted successfully")
           router.push('/admin/leads')
       } catch(e) {
           console.error(e)
-          alert("Failed to delete lead.")
+          toast.error("Failed to delete lead")
           setDeleting(false)
       }
   }
 
   // --- UTILS ---
+  const copyToClipboard = (text: string, label: string) => {
+      if(!text) return
+      navigator.clipboard.writeText(text)
+      toast.success(`${label} copied to clipboard`)
+  }
+
   const makeCall = (phone: string) => { if (phone) window.open(`tel:${phone}`, "_self") }
   const sendEmail = (email: string) => { if (email) window.open(`mailto:${email}`, "_blank") }
   const handlePrint = () => { window.print() }
@@ -256,35 +266,30 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
 
   const isStale = (lastContacted: string | null) => {
       if(!lastContacted) return true
-      const diff = new Date().getTime() - new Date(lastContacted).getTime()
-      return diff > (7 * 24 * 60 * 60 * 1000)
+      const diff = differenceInDays(new Date(), new Date(lastContacted))
+      return diff > 7
   }
 
-  // --- ENGAGEMENT SCORE LOGIC ---
+  const daysInStatus = useMemo(() => {
+      if (!lead?.updated_at) return 0
+      return differenceInDays(new Date(), new Date(lead.updated_at))
+  }, [lead])
+
   const engagementScore = useMemo(() => {
       if (!timelineData) return 0
-      // Simple algorithm: 10 pts per call, 5 pts per note, 20 pts per status change
       let score = 0
       timelineData.forEach(item => {
           if (item.type === 'call') score += 10
           if (item.type === 'note') score += 5
           if (item.title === 'Status Change') score += 20
       })
-      return Math.min(score, 100) // Cap at 100
+      return Math.min(score, 100)
   }, [timelineData])
 
-  const getScoreColor = (score: number) => {
-      if (score < 30) return "bg-red-500"
-      if (score < 70) return "bg-yellow-500"
-      return "bg-green-500"
-  }
-
-  // --- PIPELINE STEP LOGIC ---
   const getCurrentStepIndex = () => {
       if (!lead) return 0
       const idx = PIPELINE_STEPS.findIndex(s => s.id.toLowerCase() === lead.status.toLowerCase())
-      // If status isn't in main flow (e.g. Not Interested), return -1 or specific handling
-      return idx
+      return idx === -1 ? 0 : idx
   }
 
   if (loading) return (
@@ -299,7 +304,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
   return (
     <div className="p-6 space-y-6 bg-slate-50/50 min-h-screen">
       
-      {/* 1. Header & Navigation */}
+      {/* 1. Enhanced Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-start gap-4">
             <Link href="/admin/leads">
@@ -321,7 +326,20 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
                         <div className="flex items-center gap-3 mt-1 text-sm text-slate-500">
                             <span className="flex items-center gap-1"><Building className="h-3.5 w-3.5"/> {getSafeValue(lead.company, "No Company")}</span>
                             <span className="text-slate-300">|</span>
-                            <span className="flex items-center gap-1"><User className="h-3.5 w-3.5"/> {getSafeValue(lead.assigned_user?.full_name, "Unassigned")}</span>
+                            {/* Assigner Visibility */}
+                            <TooltipProvider>
+                                <Tooltip>
+                                    <TooltipTrigger className="cursor-default">
+                                        <span className="flex items-center gap-1 hover:text-blue-600 transition-colors">
+                                            <User className="h-3.5 w-3.5"/> 
+                                            {lead.assigned_user?.full_name || "Unassigned"}
+                                        </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        <p>Assigned by: {lead.assigner?.full_name || "System"}</p>
+                                    </TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
                         </div>
                     </div>
                 </div>
@@ -333,7 +351,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
             {isStale(lead.last_contacted) && (
                 <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-700 rounded-full border border-amber-200 text-xs font-medium mr-2">
                     <AlertTriangle className="h-3.5 w-3.5" />
-                    <span>Stale Lead (>7 days)</span>
+                    <span>No contact 7+ days</span>
                 </div>
             )}
             <Button variant="outline" size="sm" onClick={handlePrint} className="gap-2 bg-white">
@@ -343,23 +361,20 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
         </div>
       </div>
 
-      {/* 2. Pipeline Visualizer (New) */}
+      {/* 2. Pipeline Visualizer */}
       <Card className="border-none shadow-sm bg-white">
           <CardContent className="pt-6 pb-6">
-              <div className="relative flex items-center justify-between w-full px-4">
-                  {/* Line Background */}
-                  <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-full h-1 bg-slate-100 -z-0" />
-                  
+              <div className="relative flex items-center justify-between w-full px-4 overflow-x-auto">
+                  <div className="absolute left-0 top-1/2 transform -translate-y-1/2 w-full h-1 bg-slate-100 -z-0 min-w-[500px]" />
                   {PIPELINE_STEPS.map((step, index) => {
                       const currentIdx = getCurrentStepIndex();
                       const isActive = index === currentIdx;
                       const isCompleted = index < currentIdx;
-                      
                       return (
-                          <div key={step.id} className="relative z-10 flex flex-col items-center gap-2 bg-white px-2">
+                          <div key={step.id} className="relative z-10 flex flex-col items-center gap-2 bg-white px-2 min-w-[80px]">
                               <div className={`
                                   w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all duration-300
-                                  ${isActive ? 'border-blue-600 bg-blue-50 text-blue-600' : ''}
+                                  ${isActive ? 'border-blue-600 bg-blue-50 text-blue-600 scale-110 shadow-sm' : ''}
                                   ${isCompleted ? 'border-green-500 bg-green-500 text-white' : ''}
                                   ${!isActive && !isCompleted ? 'border-slate-200 bg-white text-slate-300' : ''}
                               `}>
@@ -367,7 +382,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
                                    isActive ? <Circle className="h-4 w-4 fill-current" /> :
                                    <Circle className="h-4 w-4" />}
                               </div>
-                              <span className={`text-xs font-medium ${isActive ? 'text-blue-700' : isCompleted ? 'text-green-600' : 'text-slate-400'}`}>
+                              <span className={`text-xs font-medium whitespace-nowrap ${isActive ? 'text-blue-700' : isCompleted ? 'text-green-600' : 'text-slate-400'}`}>
                                   {step.label}
                               </span>
                           </div>
@@ -385,7 +400,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
                 <TabsTrigger 
                     key={tab} 
                     value={tab} 
-                    className="px-4 py-2 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 rounded-md capitalize"
+                    className="px-4 py-2 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 rounded-md capitalize transition-all"
                 >
                     {tab === 'history' ? <><History className="h-4 w-4 mr-2" /> Audit Logs</> : tab}
                 </TabsTrigger>
@@ -425,8 +440,20 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div><Label className="text-xs text-slate-500">Full Name</Label><Input name="name" defaultValue={lead.name} required className="mt-1" /></div>
                             <div><Label className="text-xs text-slate-500">Company</Label><Input name="company" defaultValue={lead.company || ""} className="mt-1" /></div>
-                            <div><Label className="text-xs text-slate-500">Email</Label><Input name="email" type="email" defaultValue={lead.email || ""} className="mt-1" /></div>
-                            <div><Label className="text-xs text-slate-500">Phone</Label><Input name="phone" defaultValue={lead.phone} required className="mt-1" /></div>
+                            <div>
+                                <Label className="text-xs text-slate-500">Email</Label>
+                                <div className="relative mt-1">
+                                    <Input name="email" type="email" defaultValue={lead.email || ""} className="pr-8" />
+                                    <button type="button" onClick={() => copyToClipboard(lead.email || "", "Email")} className="absolute right-2 top-2.5 text-slate-400 hover:text-slate-600"><Copy className="h-4 w-4"/></button>
+                                </div>
+                            </div>
+                            <div>
+                                <Label className="text-xs text-slate-500">Phone</Label>
+                                <div className="relative mt-1">
+                                    <Input name="phone" defaultValue={lead.phone} required className="pr-8" />
+                                    <button type="button" onClick={() => copyToClipboard(lead.phone, "Phone")} className="absolute right-2 top-2.5 text-slate-400 hover:text-slate-600"><Copy className="h-4 w-4"/></button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -503,7 +530,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
                     </div>
 
                     <div className="pt-4">
-                        <Button type="submit" className="w-full bg-slate-900 hover:bg-slate-800" disabled={updating}>
+                        <Button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 shadow-md" disabled={updating}>
                             {updating ? "Saving Changes..." : <><Save className="w-4 h-4 mr-2"/> Save Changes</>}
                         </Button>
                     </div>
@@ -511,7 +538,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
                 </CardContent>
               </Card>
 
-              {/* DANGER ZONE (NEW) */}
+              {/* DANGER ZONE */}
               <Card className="border-red-100 bg-red-50/30">
                   <CardHeader>
                       <CardTitle className="text-red-700 text-sm font-bold flex items-center gap-2">
@@ -548,7 +575,7 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
             {/* Right Column: Actions & Stats */}
             <div className="space-y-6">
                 
-                {/* Engagement Score Card (NEW) */}
+                {/* Engagement Score */}
                 <Card className="shadow-sm border-slate-200">
                     <CardHeader className="pb-2">
                         <CardTitle className="text-sm font-medium">Engagement Score</CardTitle>
@@ -559,9 +586,14 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
                             <span className="text-xs text-slate-500 mb-1">/ 100</span>
                         </div>
                         <Progress value={engagementScore} className="h-2" />
-                        <p className="text-xs text-slate-500 mt-2">
-                            Based on {timelineData.length} total interactions.
-                        </p>
+                        
+                        {/* Stagnation Indicator */}
+                        {daysInStatus > 3 && (
+                            <div className="mt-3 flex items-center gap-2 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded border border-amber-100">
+                                <AlertTriangle className="h-3 w-3" />
+                                <span>In current status for {daysInStatus} days</span>
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
 
@@ -612,6 +644,13 @@ export default function EditLeadPage({ params }: EditLeadPageProps) {
                                 {lead.last_contacted 
                                     ? formatDistanceToNow(new Date(lead.last_contacted), { addSuffix: true }) 
                                     : "Never"}
+                            </span>
+                        </div>
+                        <Separator />
+                        <div className="flex justify-between items-center text-sm">
+                            <span className="text-slate-500">Engagement</span>
+                            <span className="font-medium bg-slate-100 px-2 py-0.5 rounded-full text-xs">
+                                {timelineData.length} Interactions
                             </span>
                         </div>
                     </CardContent>
