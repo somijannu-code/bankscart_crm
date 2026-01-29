@@ -57,26 +57,35 @@ async function TasksContent() {
     .order("scheduled_at", { ascending: true })
     .limit(200)
 
-  // --- 🛡️ DATA SANITIZATION (Fixes the .replace error) ---
-  // We clean the data here so <TaskCard> never receives null values
-  const followUps = (rawTasks || []).map(task => ({
-    ...task,
-    status: task.status || "pending", // Default to pending
-    priority: task.priority || "medium", // Default to medium
-    // Handle orphaned tasks (where lead was deleted)
-    leads: task.leads || { 
-      id: "unknown", 
-      name: "Unknown Lead", 
-      status: "unknown", 
-      company: "N/A" 
+  // --- 🛡️ DEEP DATA SANITIZATION (CRITICAL FIX) ---
+  // We ensure EVERY string property that might use .replace() is guaranteed to be a string.
+  const followUps = (rawTasks || []).map(task => {
+    // 1. Sanitize the Lead object
+    const rawLead = task.leads || {}
+    const safeLead = {
+      id: rawLead.id || "unknown",
+      name: rawLead.name || "Unknown Lead",
+      phone: rawLead.phone || "",
+      email: rawLead.email || "",
+      company: rawLead.company || "",
+      status: rawLead.status || "new" // <--- Prevents crash if lead status is null
     }
-  }))
+
+    // 2. Return safe task object
+    return {
+      ...task,
+      title: task.title || "Untitled Task",
+      status: task.status || "pending",
+      priority: task.priority || "medium",
+      description: task.description || "",
+      leads: safeLead // <--- Attach sanitized lead
+    }
+  })
 
   // --- DATE LOGIC ---
   const todayStart = startOfToday()
   const todayEnd = endOfToday()
   
-  // Safe date parsing helper
   const safeDate = (dateStr: string | null) => dateStr ? new Date(dateStr) : new Date()
 
   const overdueTasks = followUps.filter(task => isBefore(safeDate(task.scheduled_at), todayStart))
@@ -136,8 +145,6 @@ async function TasksContent() {
       </div>
 
       {/* 3. TAB CONTENT */}
-      
-      {/* FOCUS TAB */}
       <TabsContent value="focus" className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
         
         {/* A. Overdue Section */}
@@ -174,7 +181,6 @@ async function TasksContent() {
         </div>
       </TabsContent>
 
-      {/* UPCOMING TAB */}
       <TabsContent value="upcoming" className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
         {upcomingTasks.length > 0 ? (
           <GroupedTasks tasks={upcomingTasks} />
@@ -183,7 +189,6 @@ async function TasksContent() {
         )}
       </TabsContent>
 
-      {/* HISTORY TAB (Suspended for Performance) */}
       <TabsContent value="history">
         <Suspense fallback={<HistorySkeleton />}>
             <CompletedTasksList userId={user.id} />
@@ -230,7 +235,6 @@ function TabTrigger({ value, label, count }: any) {
 
 function GroupedTasks({ tasks }: { tasks: any[] }) {
   const grouped = tasks.reduce((acc, task) => {
-    // Check if scheduled_at exists before formatting
     const dateStr = task.scheduled_at || new Date().toISOString()
     const dateKey = format(new Date(dateStr), "yyyy-MM-dd")
     if (!acc[dateKey]) acc[dateKey] = []
@@ -259,7 +263,6 @@ function GroupedTasks({ tasks }: { tasks: any[] }) {
   })
 }
 
-// Async component for History Tab
 async function CompletedTasksList({ userId }: { userId: string }) {
   const supabase = await createClient()
   
@@ -298,8 +301,6 @@ async function CompletedTasksList({ userId }: { userId: string }) {
     </div>
   )
 }
-
-// --- SKELETONS ---
 
 function TasksSkeleton() {
   return (
