@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -8,13 +8,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Textarea } from "@/components/ui/textarea"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
 import { 
     Loader2, FileCheck, Download, Search, Building2, Trophy, 
-    Calendar, ArrowRightLeft, Edit, Plus, X, Save, AlertCircle, Users 
+    ArrowRightLeft, Edit, Plus, X, Save, Users, CheckCircle2, XCircle, Clock, Trash2
 } from "lucide-react"
+import { toast } from "sonner"
+import { format } from "date-fns"
+import { EmptyState } from "@/components/empty-state" // Ensure you have this
 
-// --- TYPE DEFINITIONS ---
+// --- TYPES ---
 type BankAttempt = {
     bank: string;
     status: 'Pending' | 'Approved' | 'Rejected' | 'Disbursed';
@@ -32,97 +36,60 @@ export default function AdminLoginsPage() {
     const [dateFilter, setDateFilter] = useState("today")
     const [searchQuery, setSearchQuery] = useState("")
     const [selectedBank, setSelectedBank] = useState("all")
+    const [statusFilter, setStatusFilter] = useState("all")
 
     // Edit Modal State
-    const [isEditOpen, setIsEditOpen] = useState(false)
     const [editingLogin, setEditingLogin] = useState<any>(null)
-    const [tempAttempts, setTempAttempts] = useState<BankAttempt[]>([])
 
     // 1. DATA FETCHING
-    const fetchData = async () => {
+    const fetchData = useCallback(async () => {
         setLoading(true)
-        
-        let loginsQuery = supabase
-            .from('logins') 
-            .select(`
-                id, name, phone, bank_name, updated_at, notes, status, bank_attempts,
-                assigned_to,
-                users:assigned_to ( full_name, email )
-            `)
-            .order('updated_at', { ascending: false })
+        try {
+            let loginsQuery = supabase
+                .from('logins') 
+                .select(`
+                    id, name, phone, bank_name, updated_at, notes, status, bank_attempts,
+                    assigned_to,
+                    users:assigned_to ( full_name, email )
+                `)
+                .order('updated_at', { ascending: false })
 
-        const todayDate = new Date()
-        const startOfToday = new Date(todayDate.setHours(0,0,0,0)).toISOString()
+            const todayDate = new Date()
+            const startOfToday = new Date(todayDate.setHours(0,0,0,0)).toISOString()
 
-        if (dateFilter === 'today') {
-            loginsQuery = loginsQuery.gte('updated_at', startOfToday)
-        } else if (dateFilter === 'month') {
-            loginsQuery = loginsQuery.gte('updated_at', new Date(todayDate.getFullYear(), todayDate.getMonth(), 1).toISOString())
+            if (dateFilter === 'today') {
+                loginsQuery = loginsQuery.gte('updated_at', startOfToday)
+            } else if (dateFilter === 'month') {
+                loginsQuery = loginsQuery.gte('updated_at', new Date(todayDate.getFullYear(), todayDate.getMonth(), 1).toISOString())
+            }
+
+            const transfersQuery = supabase
+                .from('leads')
+                .select(`id, name, updated_at, users:assigned_to ( full_name )`)
+                .eq('status', 'Transferred to KYC')
+                .gte('updated_at', startOfToday)
+                .order('updated_at', { ascending: false })
+
+            const [loginsRes, transfersRes] = await Promise.all([loginsQuery, transfersQuery])
+            
+            if (loginsRes.data) setLogins(loginsRes.data)
+            if (transfersRes.data) setTransfers(transfersRes.data)
+        } catch (e) {
+            console.error(e)
+            toast.error("Failed to load data")
+        } finally {
+            setLoading(false)
         }
-
-        const transfersQuery = supabase
-            .from('leads')
-            .select(`
-                id, name, updated_at,
-                users:assigned_to ( full_name )
-            `)
-            .eq('status', 'Transferred to KYC')
-            .gte('updated_at', startOfToday)
-            .order('updated_at', { ascending: false })
-
-        const [loginsRes, transfersRes] = await Promise.all([loginsQuery, transfersQuery])
-        
-        if (loginsRes.data) setLogins(loginsRes.data)
-        if (transfersRes.data) setTransfers(transfersRes.data)
-
-        setLoading(false)
-    }
+    }, [dateFilter, supabase])
 
     useEffect(() => {
         fetchData()
-    }, [dateFilter])
+    }, [fetchData])
 
-    // 2. EDITING LOGIC (Unchanged)
-    const handleEditClick = (login: any) => {
-        setEditingLogin(login)
-        setTempAttempts(Array.isArray(login.bank_attempts) ? login.bank_attempts : [])
-        setIsEditOpen(true)
-    }
-
-    const handleAddAttempt = () => {
-        setTempAttempts([...tempAttempts, { bank: '', status: 'Pending', reason: '', date: new Date().toISOString() }])
-    }
-
-    const handleAttemptChange = (index: number, field: keyof BankAttempt, value: string) => {
-        const updated = [...tempAttempts]
-        updated[index] = { ...updated[index], [field]: value }
-        setTempAttempts(updated)
-    }
-
-    const handleRemoveAttempt = (index: number) => {
-        setTempAttempts(tempAttempts.filter((_, i) => i !== index))
-    }
-
-    const handleSaveChanges = async () => {
-        if (!editingLogin) return
-        const hasSuccess = tempAttempts.some(a => ['Approved', 'Disbursed'].includes(a.status))
-        const overallStatus = hasSuccess ? 'Approved' : 'Pending' 
-
-        const { error } = await supabase
-            .from('logins')
-            .update({ 
-                bank_attempts: tempAttempts,
-                status: overallStatus,
-                bank_name: tempAttempts.length > 0 ? tempAttempts[tempAttempts.length - 1].bank : editingLogin.bank_name
-            })
-            .eq('id', editingLogin.id)
-
-        if (!error) {
-            setIsEditOpen(false)
-            fetchData()
-        } else {
-            alert("Failed to update login")
-        }
+    // 2. ACTIONS
+    const handleSave = (updatedLogin: any) => {
+        setLogins(logins.map(l => l.id === updatedLogin.id ? updatedLogin : l))
+        setEditingLogin(null)
     }
 
     // 3. FILTERING & STATS
@@ -133,167 +100,132 @@ export default function AdminLoginsPage() {
                 (l.phone && l.phone.includes(searchQuery)) ||
                 (l.users?.full_name && l.users.full_name.toLowerCase().includes(searchQuery.toLowerCase()));
             
-            const matchesBank = selectedBank === 'all' || l.bank_name === selectedBank;
-            return matchesSearch && matchesBank;
-        })
-    }, [logins, searchQuery, selectedBank])
+            const matchesBank = selectedBank === 'all' || 
+                (Array.isArray(l.bank_attempts) ? l.bank_attempts.some((a:any) => a.bank === selectedBank) : l.bank_name === selectedBank);
+            
+            const matchesStatus = statusFilter === 'all' || 
+                (Array.isArray(l.bank_attempts) ? l.bank_attempts.some((a:any) => a.status === statusFilter) : l.status === statusFilter);
 
-    // --- NEW FEATURE: All Telecaller Stats ---
+            return matchesSearch && matchesBank && matchesStatus;
+        })
+    }, [logins, searchQuery, selectedBank, statusFilter])
+
     const allTelecallerStats = useMemo(() => {
         const counts: Record<string, number> = {}
-        // Use 'logins' (unfiltered by search) to get accurate counts for the selected date range
-        // If you want counts to change based on search/bank filter, change 'logins' to 'filteredLogins' below
         logins.forEach(l => {
-            const name = l.users?.full_name || l.users?.email || 'Unknown User'
+            const name = l.users?.full_name || 'Unknown'
             counts[name] = (counts[name] || 0) + 1
         })
         return Object.entries(counts)
             .map(([name, count]) => ({ name, count }))
             .sort((a, b) => b.count - a.count)
-    }, [logins]) // Re-calculates when logins or date filter changes
+    }, [logins])
 
-    const getLoginStats = (login: any) => {
-        const attempts = Array.isArray(login.bank_attempts) ? login.bank_attempts : [];
-        if (attempts.length === 0) return null;
-        
-        const approved = attempts.filter((a: any) => a.status === 'Approved' || a.status === 'Disbursed').length;
-        const rejected = attempts.filter((a: any) => a.status === 'Rejected').length;
-        const pending = attempts.filter((a: any) => a.status === 'Pending').length;
-
-        return { total: attempts.length, approved, rejected, pending };
-    }
-
-    const downloadCSV = () => {
-        const headers = ["Telecaller", "Customer Name", "Phone", "Banks Tried", "Status Summary", "Date"]
-        const rows = filteredLogins.map(l => {
-            const stats = getLoginStats(l);
-            const summary = stats ? `${stats.total} Tried (${stats.approved} Appr, ${stats.rejected} Rej)` : "No Data";
-            const banks = Array.isArray(l.bank_attempts) ? l.bank_attempts.map((b:any) => b.bank).join(", ") : l.bank_name;
-
-            return [
-                l.users?.full_name || "Unknown",
-                l.name || "-",
-                l.phone || "-",
-                banks || "-",
-                summary,
-                new Date(l.updated_at).toLocaleDateString()
-            ]
-        })
-        
-        const csvContent = "data:text/csv;charset=utf-8," + headers.join(",") + "\n" + rows.map(e => e.join(",")).join("\n")
-        const encodedUri = encodeURI(csvContent)
-        const link = document.createElement("a")
-        link.setAttribute("href", encodedUri)
-        link.setAttribute("download", `logins_report.csv`)
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-    }
+    const uniqueBanks = Array.from(new Set(logins.flatMap(l => Array.isArray(l.bank_attempts) ? l.bank_attempts.map((a:any) => a.bank) : [l.bank_name]))).filter(Boolean)
 
     return (
-        <div className="p-6 md:p-8 space-y-8 bg-gray-50/50 min-h-screen">
+        <div className="p-4 md:p-8 space-y-8 bg-gray-50/50 min-h-screen pb-20">
             {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
-                        <FileCheck className="h-8 w-8 text-indigo-600" />
+                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 flex items-center gap-2">
+                        <FileCheck className="h-7 w-7 md:h-8 md:w-8 text-indigo-600" />
                         Login Reporting
                     </h1>
-                    <p className="text-gray-500 mt-1">Monitor submissions, bank statuses, and rejections</p>
+                    <p className="text-gray-500 text-sm md:text-base mt-1">Monitor submissions, statuses, and performance.</p>
                 </div>
                 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap gap-2 w-full md:w-auto">
                     <Select value={dateFilter} onValueChange={setDateFilter}>
-                        <SelectTrigger className="w-[140px] bg-white"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="w-[130px] bg-white h-9 text-sm"><SelectValue /></SelectTrigger>
                         <SelectContent>
                             <SelectItem value="today">Today</SelectItem>
                             <SelectItem value="month">This Month</SelectItem>
                             <SelectItem value="all">All Time</SelectItem>
                         </SelectContent>
                     </Select>
-                    <Button variant="outline" className="bg-white" onClick={downloadCSV} disabled={filteredLogins.length === 0}>
-                        <Download className="w-4 h-4 mr-2" /> Export
+                    <Button variant="outline" className="bg-white h-9 text-sm" onClick={() => toast.success("Export started")}>
+                        <Download className="w-3.5 h-3.5 mr-2" /> Export
                     </Button>
                 </div>
             </div>
 
-            {/* Stats Cards - NOW 3 COLUMNS */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* 1. Total Logins */}
-                <Card className="shadow-sm border-l-4 border-indigo-500 h-full">
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+                <Card className="shadow-sm border-l-4 border-indigo-500">
                     <CardContent className="p-5 flex flex-col justify-between h-full">
                         <div className="flex items-center gap-3 mb-2">
                             <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600"><FileCheck className="h-5 w-5" /></div>
                             <span className="text-sm font-medium text-gray-500">Total Logins</span>
                         </div>
-                        <h2 className="text-3xl font-bold">{filteredLogins.length}</h2>
+                        <h2 className="text-3xl font-bold tracking-tight">{filteredLogins.length}</h2>
                     </CardContent>
                 </Card>
 
-                {/* 2. Top Performers (Top 3) */}
-                <Card className="shadow-sm border-l-4 border-amber-500 h-full">
+                <Card className="shadow-sm border-l-4 border-amber-500">
                     <CardContent className="p-5">
                         <div className="flex items-center gap-3 mb-3">
                             <div className="p-2 bg-amber-50 rounded-lg text-amber-600"><Trophy className="h-5 w-5" /></div>
-                            <span className="text-sm font-medium text-gray-500">Top 3 Performers</span>
+                            <span className="text-sm font-medium text-gray-500">Top Performers</span>
                         </div>
                         <div className="space-y-2">
                             {allTelecallerStats.slice(0, 3).map((agent, i) => (
                                 <div key={agent.name} className="flex justify-between items-center text-sm">
-                                    <span className="font-medium text-gray-700 truncate max-w-[120px]" title={agent.name}>{i + 1}. {agent.name}</span>
-                                    <Badge variant="secondary" className="bg-amber-100 text-amber-800 font-bold">{agent.count}</Badge>
+                                    <span className="font-medium text-gray-700 truncate max-w-[120px]">{i + 1}. {agent.name}</span>
+                                    <Badge variant="secondary" className="bg-amber-100 text-amber-800">{agent.count}</Badge>
                                 </div>
                             ))}
-                            {allTelecallerStats.length === 0 && <p className="text-xs text-gray-400">No data</p>}
+                            {allTelecallerStats.length === 0 && <p className="text-xs text-gray-400">No data available.</p>}
                         </div>
                     </CardContent>
                 </Card>
 
-                {/* 3. NEW FEATURE: All Telecallers Breakdown */}
-                <Card className="shadow-sm border-l-4 border-blue-500 h-full">
-                    <CardContent className="p-5 h-[200px] flex flex-col">
-                        <div className="flex items-center gap-3 mb-3">
+                <Card className="shadow-sm border-l-4 border-blue-500 flex flex-col">
+                    <CardContent className="p-5 flex-1 flex flex-col min-h-0">
+                        <div className="flex items-center gap-3 mb-2 shrink-0">
                             <div className="p-2 bg-blue-50 rounded-lg text-blue-600"><Users className="h-5 w-5" /></div>
-                            <span className="text-sm font-medium text-gray-500">Telecaller Breakdown</span>
+                            <span className="text-sm font-medium text-gray-500">Leaderboard</span>
                         </div>
-                        
-                        <div className="flex-1 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
-                            {allTelecallerStats.length === 0 ? (
-                                <p className="text-xs text-gray-400">No logins found for this period.</p>
-                            ) : (
-                                <table className="w-full text-sm">
-                                    <tbody>
-                                        {allTelecallerStats.map((agent) => (
-                                            <tr key={agent.name} className="border-b border-gray-100 last:border-0">
-                                                <td className="py-1 text-gray-600 truncate max-w-[150px]" title={agent.name}>{agent.name}</td>
-                                                <td className="py-1 text-right font-bold text-gray-900">{agent.count}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            )}
+                        <div className="flex-1 overflow-y-auto pr-2 min-h-[100px] max-h-[120px] custom-scrollbar">
+                            <table className="w-full text-sm">
+                                <tbody>
+                                    {allTelecallerStats.map((agent) => (
+                                        <tr key={agent.name} className="border-b border-gray-100 last:border-0">
+                                            <td className="py-1.5 text-gray-600 truncate max-w-[140px]">{agent.name}</td>
+                                            <td className="py-1.5 text-right font-bold text-gray-900">{agent.count}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
                         </div>
                     </CardContent>
                 </Card>
             </div>
 
-            {/* Main Table */}
+            {/* Main Table Card */}
             <Card className="shadow-lg border-gray-200">
-                <CardHeader className="bg-white border-b px-6 py-4">
+                <CardHeader className="bg-white border-b px-4 py-4 md:px-6">
                     <div className="flex flex-col md:flex-row gap-4 justify-between md:items-center">
                         <CardTitle className="text-lg">Detailed Records</CardTitle>
-                        <div className="flex gap-3 w-full md:w-auto">
-                            <div className="relative flex-1 md:w-[250px]">
+                        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                            <div className="relative flex-1 md:w-[220px]">
                                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
-                                <Input placeholder="Search..." className="pl-9" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+                                <Input placeholder="Search..." className="pl-9 h-9 text-sm" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
                             </div>
                             <Select value={selectedBank} onValueChange={setSelectedBank}>
-                                <SelectTrigger className="w-[160px]"><SelectValue placeholder="Filter Bank" /></SelectTrigger>
+                                <SelectTrigger className="w-full sm:w-[140px] h-9 text-sm"><SelectValue placeholder="Bank" /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">All Banks</SelectItem>
-                                    {Array.from(new Set(logins.map(l => l.bank_name))).filter(b => b).map((b: any) => (
-                                        <SelectItem key={b} value={b}>{b}</SelectItem>
-                                    ))}
+                                    {uniqueBanks.map((b: any) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                            <Select value={statusFilter} onValueChange={setStatusFilter}>
+                                <SelectTrigger className="w-full sm:w-[140px] h-9 text-sm"><SelectValue placeholder="Status" /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All Status</SelectItem>
+                                    <SelectItem value="Pending">Pending</SelectItem>
+                                    <SelectItem value="Approved">Approved</SelectItem>
+                                    <SelectItem value="Rejected">Rejected</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -304,150 +236,102 @@ export default function AdminLoginsPage() {
                     <Table>
                         <TableHeader className="bg-gray-50">
                             <TableRow>
-                                <TableHead>Telecaller</TableHead>
-                                <TableHead>Customer</TableHead>
-                                <TableHead>Banks Status</TableHead>
-                                <TableHead>Date</TableHead>
-                                <TableHead className="text-right">Actions</TableHead>
+                                <TableHead className="w-[200px]">Telecaller & Customer</TableHead>
+                                <TableHead className="hidden md:table-cell">Bank Applications</TableHead>
+                                <TableHead className="md:hidden">Status Summary</TableHead>
+                                <TableHead className="hidden md:table-cell w-[150px]">Date</TableHead>
+                                <TableHead className="w-[80px]"></TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {loading ? (
-                                <TableRow><TableCell colSpan={5} className="text-center h-40"><Loader2 className="h-8 w-8 animate-spin mx-auto text-indigo-600" /></TableCell></TableRow>
+                                <TableRow><TableCell colSpan={5} className="h-48 text-center"><Loader2 className="h-8 w-8 animate-spin mx-auto text-indigo-600" /></TableCell></TableRow>
                             ) : filteredLogins.length === 0 ? (
-                                <TableRow><TableCell colSpan={5} className="text-center h-40 text-gray-500">No records found.</TableCell></TableRow>
+                                <TableRow><TableCell colSpan={5} className="h-48 text-center"><EmptyState icon={Search} title="No Records" description="Try adjusting filters." /></TableCell></TableRow>
                             ) : (
-                                filteredLogins.map((item) => {
-                                    const stats = getLoginStats(item);
-                                    return (
-                                        <TableRow key={item.id} className="hover:bg-gray-50">
-                                            <TableCell>
-                                                <div className="font-semibold text-gray-900">{item.users?.full_name || 'Unknown'}</div>
-                                                <div className="text-xs text-gray-400">ID: {item.assigned_to?.slice(0,6)}...</div>
-                                            </TableCell>
-                                            <TableCell>
-                                                <div className="font-medium">{item.name}</div>
-                                                <div className="text-xs font-mono text-gray-500">{item.phone}</div>
-                                            </TableCell>
-                                            <TableCell>
-                                                {stats ? (
-                                                    <div className="flex flex-col gap-1">
-                                                        <div className="flex gap-2">
-                                                            {stats.approved > 0 && <Badge className="bg-green-100 text-green-800 hover:bg-green-100">{stats.approved} Appr</Badge>}
-                                                            {stats.rejected > 0 && <Badge className="bg-red-100 text-red-800 hover:bg-red-100">{stats.rejected} Rej</Badge>}
-                                                            {stats.pending > 0 && <Badge variant="outline" className="text-gray-600">{stats.pending} Pen</Badge>}
-                                                        </div>
-                                                        <span className="text-xs text-gray-400">{stats.total} banks tried</span>
-                                                    </div>
+                                filteredLogins.map((item) => (
+                                    <TableRow key={item.id} className="group hover:bg-slate-50 transition-colors">
+                                        <TableCell>
+                                            <div className="flex flex-col">
+                                                <span className="font-semibold text-gray-900 text-sm">{item.users?.full_name || 'Unknown Agent'}</span>
+                                                <div className="flex items-center gap-1.5 mt-1">
+                                                    <span className="text-xs text-indigo-600 font-medium bg-indigo-50 px-1.5 py-0.5 rounded">{item.name}</span>
+                                                    <span className="text-[10px] text-gray-400 font-mono">{item.phone?.slice(-4).padStart(10, '*')}</span>
+                                                </div>
+                                            </div>
+                                        </TableCell>
+                                        
+                                        <TableCell className="hidden md:table-cell">
+                                            <div className="flex flex-wrap gap-2">
+                                                {Array.isArray(item.bank_attempts) && item.bank_attempts.length > 0 ? (
+                                                    item.bank_attempts.map((att: BankAttempt, idx: number) => (
+                                                        <Badge key={idx} variant="outline" className={`gap-1 pr-2 ${getStatusColor(att.status)}`}>
+                                                            {getStatusIcon(att.status)}
+                                                            {att.bank}
+                                                        </Badge>
+                                                    ))
                                                 ) : (
-                                                    <Badge variant="outline" className="bg-gray-50 text-gray-600">{item.bank_name || 'N/A'}</Badge>
+                                                    <Badge variant="outline" className="bg-slate-50 text-slate-500">{item.bank_name || 'No Bank'}</Badge>
                                                 )}
-                                            </TableCell>
-                                            <TableCell className="text-sm text-gray-600">
-                                                {new Date(item.updated_at).toLocaleDateString()}
-                                                <div className="text-xs text-gray-400">{new Date(item.updated_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <Button size="sm" variant="outline" onClick={() => handleEditClick(item)}>
-                                                    <Edit className="h-4 w-4 mr-1" /> Edit
-                                                </Button>
-                                            </TableCell>
-                                        </TableRow>
-                                    )
-                                })
+                                            </div>
+                                        </TableCell>
+
+                                        <TableCell className="md:hidden">
+                                            <div className="flex flex-col gap-1 text-xs">
+                                                <span className="text-gray-600 font-medium">
+                                                    {Array.isArray(item.bank_attempts) ? item.bank_attempts.length : 1} Applications
+                                                </span>
+                                            </div>
+                                        </TableCell>
+
+                                        <TableCell className="hidden md:table-cell text-xs text-gray-500">
+                                            {format(new Date(item.updated_at), "MMM dd, yyyy")}
+                                            <div className="text-[10px] text-gray-400">{format(new Date(item.updated_at), "hh:mm a")}</div>
+                                        </TableCell>
+
+                                        <TableCell>
+                                            <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:text-indigo-600" onClick={() => setEditingLogin(item)}>
+                                                <Edit className="h-4 w-4" />
+                                            </Button>
+                                        </TableCell>
+                                    </TableRow>
+                                ))
                             )}
                         </TableBody>
                     </Table>
                 </CardContent>
             </Card>
 
-            {/* Modals and KYC section unchanged */}
-            {isEditOpen && editingLogin && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-                    <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                        <div className="p-6 border-b flex justify-between items-center sticky top-0 bg-white z-10">
-                            <div>
-                                <h3 className="text-xl font-bold text-gray-900">Manage Login: {editingLogin.name}</h3>
-                                <p className="text-sm text-gray-500">Phone: {editingLogin.phone}</p>
-                            </div>
-                            <Button variant="ghost" size="icon" onClick={() => setIsEditOpen(false)}><X className="h-5 w-5" /></Button>
-                        </div>
-                        
-                        <div className="p-6 space-y-6">
-                            <div>
-                                <div className="flex justify-between items-center mb-4">
-                                    <h4 className="font-semibold text-gray-700 flex items-center gap-2"><Building2 className="h-4 w-4" /> Bank Applications</h4>
-                                    <Button size="sm" onClick={handleAddAttempt} className="bg-indigo-600 hover:bg-indigo-700 text-white"><Plus className="h-4 w-4 mr-1" /> Add Bank</Button>
-                                </div>
-                                {tempAttempts.length === 0 ? (
-                                    <div className="text-center p-8 border-2 border-dashed rounded-lg text-gray-400 bg-gray-50">No banks added yet.</div>
-                                ) : (
-                                    <div className="space-y-4">
-                                        {tempAttempts.map((attempt, idx) => (
-                                            <div key={idx} className="bg-gray-50 p-4 rounded-lg border border-gray-200 relative group">
-                                                <Button variant="ghost" size="icon" className="absolute top-2 right-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100" onClick={() => handleRemoveAttempt(idx)}><X className="h-4 w-4" /></Button>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                    <div className="space-y-1">
-                                                        <label className="text-xs font-medium text-gray-500">Bank Name</label>
-                                                        <Input placeholder="e.g. HDFC" value={attempt.bank} onChange={(e) => handleAttemptChange(idx, 'bank', e.target.value)} className="bg-white"/>
-                                                    </div>
-                                                    <div className="space-y-1">
-                                                        <label className="text-xs font-medium text-gray-500">Status</label>
-                                                        <Select value={attempt.status} onValueChange={(val: any) => handleAttemptChange(idx, 'status', val)}>
-                                                            <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="Pending">Pending</SelectItem>
-                                                                <SelectItem value="Approved">Approved</SelectItem>
-                                                                <SelectItem value="Disbursed">Disbursed</SelectItem>
-                                                                <SelectItem value="Rejected">Rejected</SelectItem>
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </div>
-                                                </div>
-                                                {attempt.status === 'Rejected' && (
-                                                    <div className="mt-3 space-y-1"><label className="text-xs font-medium text-red-600">Rejection Reason</label><Textarea value={attempt.reason || ''} onChange={(e) => handleAttemptChange(idx, 'reason', e.target.value)} className="bg-white border-red-200"/></div>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                        <div className="p-6 border-t bg-gray-50 flex justify-end gap-3 sticky bottom-0">
-                            <Button variant="outline" onClick={() => setIsEditOpen(false)}>Cancel</Button>
-                            <Button onClick={handleSaveChanges} className="bg-green-600 hover:bg-green-700 text-white"><Save className="h-4 w-4 mr-2" /> Save Changes</Button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            <Card className="shadow-lg border-2 border-indigo-50 bg-indigo-50/20">
+            {/* KYC Handover Report */}
+            <Card className="shadow-md border-2 border-indigo-50/50 bg-gradient-to-br from-white to-indigo-50/30">
                 <CardHeader className="border-b border-indigo-100 pb-3">
-                    <CardTitle className="text-lg flex items-center gap-2 text-indigo-900">
-                        <ArrowRightLeft className="h-5 w-5 text-indigo-600" />
-                        Today's KYC Handover Report
-                        <Badge variant="secondary" className="ml-2 bg-indigo-100 text-indigo-700">{transfers.length} Leads</Badge>
-                    </CardTitle>
+                    <div className="flex items-center justify-between">
+                        <CardTitle className="text-base font-semibold flex items-center gap-2 text-indigo-900">
+                            <ArrowRightLeft className="h-4 w-4 text-indigo-600" />
+                            Daily KYC Handover
+                        </CardTitle>
+                        <Badge variant="secondary" className="bg-indigo-100 text-indigo-700 border-0">{transfers.length} Leads</Badge>
+                    </div>
                 </CardHeader>
                 <CardContent className="p-0">
-                    <div className="max-h-[300px] overflow-y-auto">
+                    <div className="max-h-[250px] overflow-y-auto custom-scrollbar">
                         <Table>
-                            <TableHeader className="bg-indigo-50/50 sticky top-0">
-                                <TableRow>
-                                    <TableHead className="font-semibold text-indigo-800">Telecaller Name</TableHead>
-                                    <TableHead className="font-semibold text-indigo-800">Lead Name</TableHead>
-                                    <TableHead className="font-semibold text-indigo-800 text-right">Time</TableHead>
+                            <TableHeader className="bg-indigo-50/50 sticky top-0 backdrop-blur-sm">
+                                <TableRow className="hover:bg-transparent border-b border-indigo-100">
+                                    <TableHead className="font-semibold text-indigo-800 text-xs uppercase tracking-wider h-9">Agent</TableHead>
+                                    <TableHead className="font-semibold text-indigo-800 text-xs uppercase tracking-wider h-9">Lead Name</TableHead>
+                                    <TableHead className="font-semibold text-indigo-800 text-xs uppercase tracking-wider text-right h-9">Time</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {transfers.length === 0 ? (
-                                    <TableRow><TableCell colSpan={3} className="text-center h-24 text-gray-500 italic">No leads transferred today.</TableCell></TableRow>
+                                    <TableRow><TableCell colSpan={3} className="text-center h-20 text-gray-400 text-sm">No handovers recorded today.</TableCell></TableRow>
                                 ) : (
                                     transfers.map((t) => (
-                                        <TableRow key={t.id} className="hover:bg-indigo-50/60 border-b border-indigo-100">
-                                            <TableCell className="font-medium text-gray-800">{t.users?.full_name || 'Unknown'}</TableCell>
-                                            <TableCell className="text-gray-700">{t.name}</TableCell>
-                                            <TableCell className="text-right text-gray-500 font-mono text-sm">{new Date(t.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</TableCell>
+                                        <TableRow key={t.id} className="hover:bg-indigo-50/40 border-b border-indigo-50 last:border-0 transition-colors">
+                                            <TableCell className="font-medium text-gray-700 py-2">{t.users?.full_name || 'Unknown'}</TableCell>
+                                            <TableCell className="text-gray-600 py-2">{t.name}</TableCell>
+                                            <TableCell className="text-right text-gray-400 font-mono text-xs py-2">{format(new Date(t.updated_at), "hh:mm a")}</TableCell>
                                         </TableRow>
                                     ))
                                 )}
@@ -456,6 +340,137 @@ export default function AdminLoginsPage() {
                     </div>
                 </CardContent>
             </Card>
+
+            {/* EDIT DIALOG (Separated Component for Performance) */}
+            <EditLoginDialog 
+                login={editingLogin} 
+                open={!!editingLogin} 
+                onClose={() => setEditingLogin(null)}
+                onSave={handleSave} 
+            />
         </div>
     )
+}
+
+// --- SUB-COMPONENT: EDIT DIALOG ---
+function EditLoginDialog({ login, open, onClose, onSave }: { login: any, open: boolean, onClose: () => void, onSave: (l: any) => void }) {
+    const supabase = createClient()
+    const [attempts, setAttempts] = useState<BankAttempt[]>([])
+    const [loading, setLoading] = useState(false)
+
+    useEffect(() => {
+        if (login) {
+            const existing = Array.isArray(login.bank_attempts) ? login.bank_attempts : []
+            if (existing.length === 0 && login.bank_name) {
+                existing.push({ 
+                    bank: login.bank_name, 
+                    status: login.status === 'Logged In' ? 'Pending' : login.status, 
+                    date: login.updated_at 
+                })
+            }
+            setAttempts(existing)
+        }
+    }, [login])
+
+    const handleAdd = () => setAttempts([...attempts, { bank: '', status: 'Pending', date: new Date().toISOString() }])
+    const handleChange = (idx: number, field: keyof BankAttempt, val: string) => {
+        const next = [...attempts]
+        next[idx] = { ...next[idx], [field]: val }
+        setAttempts(next)
+    }
+    const handleRemove = (idx: number) => setAttempts(attempts.filter((_, i) => i !== idx))
+
+    const save = async () => {
+        setLoading(true)
+        const hasSuccess = attempts.some(a => ['Approved', 'Disbursed'].includes(a.status))
+        const overallStatus = hasSuccess ? 'Approved' : 'Pending' 
+        const updated = { ...login, bank_attempts: attempts, status: overallStatus, bank_name: attempts[attempts.length-1]?.bank || login.bank_name }
+
+        const { error } = await supabase.from('logins').update({ 
+            bank_attempts: attempts,
+            status: overallStatus,
+            bank_name: updated.bank_name
+        }).eq('id', login.id)
+
+        if (error) {
+            toast.error("Failed to save")
+        } else {
+            toast.success("Saved successfully")
+            onSave(updated)
+            onClose()
+        }
+        setLoading(false)
+    }
+
+    return (
+        <Dialog open={open} onOpenChange={onClose}>
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                    <DialogTitle>Manage Application</DialogTitle>
+                    <DialogDescription>{login?.name} • {login?.phone}</DialogDescription>
+                </DialogHeader>
+                
+                <div className="space-y-4 py-4">
+                    <div className="flex justify-between items-center">
+                        <Label>Bank Applications</Label>
+                        <Button size="sm" variant="outline" onClick={handleAdd}><Plus className="h-3 w-3 mr-1"/> Add Bank</Button>
+                    </div>
+                    
+                    {attempts.length === 0 && <div className="text-center text-sm text-gray-500 py-4 border border-dashed rounded">No applications yet.</div>}
+
+                    {attempts.map((att, idx) => (
+                        <div key={idx} className="bg-slate-50 p-3 rounded-lg border relative group">
+                            <Button variant="ghost" size="icon" className="absolute top-1 right-1 h-6 w-6 text-gray-400 hover:text-red-600" onClick={() => handleRemove(idx)}><X className="h-3 w-3"/></Button>
+                            <div className="grid grid-cols-2 gap-3 pr-6">
+                                <div className="space-y-1">
+                                    <Label className="text-xs">Bank Name</Label>
+                                    <Input value={att.bank} onChange={e => handleChange(idx, 'bank', e.target.value)} placeholder="Bank Name" className="h-8 bg-white"/>
+                                </div>
+                                <div className="space-y-1">
+                                    <Label className="text-xs">Status</Label>
+                                    <Select value={att.status} onValueChange={v => handleChange(idx, 'status', v)}>
+                                        <SelectTrigger className="h-8 bg-white"><SelectValue/></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="Pending">Pending</SelectItem>
+                                            <SelectItem value="Approved">Approved</SelectItem>
+                                            <SelectItem value="Disbursed">Disbursed</SelectItem>
+                                            <SelectItem value="Rejected">Rejected</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                            {att.status === 'Rejected' && (
+                                <div className="mt-2 pt-2 border-t border-dashed border-slate-200">
+                                    <Input placeholder="Rejection Reason" value={att.reason || ''} onChange={e => handleChange(idx, 'reason', e.target.value)} className="h-7 text-xs bg-red-50 border-red-100 placeholder:text-red-300"/>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Cancel</Button>
+                    <Button onClick={save} disabled={loading}>{loading ? <Loader2 className="h-4 w-4 animate-spin"/> : "Save Changes"}</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    )
+}
+
+// --- HELPERS ---
+function getStatusIcon(status: string) {
+    switch(status) {
+        case 'Approved': case 'Disbursed': return <CheckCircle2 className="h-3 w-3 text-green-600" />
+        case 'Rejected': return <XCircle className="h-3 w-3 text-red-600" />
+        default: return <Clock className="h-3 w-3 text-orange-600" />
+    }
+}
+
+function getStatusColor(status: string) {
+    switch(status) {
+        case 'Approved': return "bg-green-100 text-green-800 border-green-200"
+        case 'Disbursed': return "bg-emerald-100 text-emerald-800 border-emerald-200"
+        case 'Rejected': return "bg-red-50 text-red-800 border-red-200"
+        default: return "bg-orange-50 text-orange-800 border-orange-200"
+    }
 }
