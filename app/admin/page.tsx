@@ -1,75 +1,62 @@
+import { Suspense } from "react"
 import { createClient } from "@/lib/supabase/server"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 import { FileText, Users, Phone, Clock, Activity, PieChart } from "lucide-react"
 
 export const dynamic = "force-dynamic" 
 
-export default async function AdminDashboard() {
+// --- MAIN PAGE COMPONENT ---
+export default function AdminDashboard() {
+  return (
+    <div className="p-6 space-y-8">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Dashboard</h1>
+        <p className="text-gray-500 mt-2">Overview for your team</p>
+      </div>
+
+      <Suspense fallback={<DashboardSkeleton />}>
+        <DashboardContent />
+      </Suspense>
+    </div>
+  )
+}
+
+// --- DATA FETCHING COMPONENT ---
+async function DashboardContent() {
   const supabase = await createClient()
 
-  // 1. Get Stats (RLS automatically filters these for Team Leaders)
-  
-  // A. Total Leads
-  const { count: totalLeads } = await supabase
-    .from("leads")
-    .select("*", { count: "exact", head: true })
+  // Parallel Data Fetching
+  const [
+    { count: totalLeads },
+    { count: activeTelecallers },
+    { count: todaysCalls },
+    { count: pendingFollowUps },
+    { data: recentLeads },
+    { data: leadStatuses }
+  ] = await Promise.all([
+    supabase.from("leads").select("*", { count: "exact", head: true }),
+    supabase.from("users").select("*", { count: "exact", head: true }).eq("role", "telecaller").eq("is_active", true),
+    supabase.from("call_logs").select("*", { count: "exact", head: true }).gte("created_at", new Date().toISOString().split('T')[0]),
+    supabase.from("leads").select("*", { count: "exact", head: true }).eq("status", "follow_up"),
+    supabase.from("leads").select("id, name, created_at, status").order("created_at", { ascending: false }).limit(5),
+    supabase.from("leads").select("status")
+  ])
 
-  // B. Active Telecallers (Team Members)
-  const { count: activeTelecallers } = await supabase
-    .from("users")
-    .select("*", { count: "exact", head: true })
-    .eq("role", "telecaller")
-    .eq("is_active", true)
-
-  // C. Today's Calls
-  const today = new Date().toISOString().split('T')[0]
-  const { count: todaysCalls } = await supabase
-    .from("call_logs") 
-    .select("*", { count: "exact", head: true })
-    .gte("created_at", today)
-
-  // D. Pending Follow-ups
-  const { count: pendingFollowUps } = await supabase
-    .from("leads")
-    .select("*", { count: "exact", head: true })
-    .eq("status", "follow_up") 
-    
-  // E. Recent Activity (Latest 5 Leads)
-  // FIX: Changed 'full_name' to 'name' to match your DB Schema
-  const { data: recentLeads } = await supabase
-    .from("leads")
-    .select("id, name, created_at, status") 
-    .order("created_at", { ascending: false })
-    .limit(5)
-
-  // F. Chart Data: Status Distribution
-  // We fetch just the status column to calculate counts efficiently
-  const { data: leadStatuses } = await supabase
-    .from("leads")
-    .select("status")
-  
-  // Calculate counts in Javascript
+  // Calculate Chart Data
   const statusCounts: Record<string, number> = {}
   leadStatuses?.forEach((lead) => {
     const status = lead.status || "Unknown"
     statusCounts[status] = (statusCounts[status] || 0) + 1
   })
 
-  // Convert to array for rendering
   const chartData = Object.entries(statusCounts)
     .map(([status, count]) => ({ status, count }))
-    .sort((a, b) => b.count - a.count) // Sort by highest count
-    .slice(0, 6) // Top 6 statuses
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6)
 
   return (
-    <div className="p-6 space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Dashboard</h1>
-        <p className="text-gray-500 mt-2">
-          Overview for your team 
-        </p>
-      </div>
-
+    <>
       {/* STATS GRID */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatsCard 
@@ -99,13 +86,11 @@ export default async function AdminDashboard() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-        
         {/* RECENT ACTIVITY LIST */}
         <Card className="col-span-4">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Activity className="h-5 w-5" />
-              Recent Activity
+              <Activity className="h-5 w-5" /> Recent Activity
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -114,11 +99,8 @@ export default async function AdminDashboard() {
                 recentLeads.map((lead) => (
                   <div key={lead.id} className="flex items-center justify-between border-b pb-4 last:border-0 last:pb-0">
                     <div className="flex flex-col">
-                      {/* FIX: Using lead.name here */}
                       <span className="font-medium text-sm text-gray-900">{lead.name || "Unnamed Lead"}</span>
-                      <span className="text-xs text-gray-500">
-                        Added • {new Date(lead.created_at).toLocaleDateString()}
-                      </span>
+                      <span className="text-xs text-gray-500">Added • {new Date(lead.created_at).toLocaleDateString()}</span>
                     </div>
                     <div className="text-xs font-medium px-2 py-1 bg-blue-50 text-blue-700 rounded-full capitalize">
                       {lead.status?.replace('_', ' ') || "New"}
@@ -135,19 +117,17 @@ export default async function AdminDashboard() {
           </CardContent>
         </Card>
 
-        {/* LEAD STATUS CHART (Re-implemented) */}
+        {/* LEAD STATUS CHART */}
         <Card className="col-span-3">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <PieChart className="h-5 w-5" />
-              Lead Status Overview
+              <PieChart className="h-5 w-5" /> Lead Status Overview
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-4 pt-2">
               {chartData.length > 0 ? (
                 chartData.map((item) => {
-                  // Calculate percentage for bar width
                   const percentage = Math.round((item.count / (totalLeads || 1)) * 100)
                   return (
                     <div key={item.status} className="space-y-1">
@@ -156,10 +136,7 @@ export default async function AdminDashboard() {
                         <span className="text-gray-500">{item.count} ({percentage}%)</span>
                       </div>
                       <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-blue-600 rounded-full transition-all duration-500" 
-                          style={{ width: `${percentage}%` }}
-                        />
+                        <div className="h-full bg-blue-600 rounded-full" style={{ width: `${percentage}%` }} />
                       </div>
                     </div>
                   )
@@ -173,26 +150,74 @@ export default async function AdminDashboard() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </>
   )
 }
 
-// Simple Helper Component for the Cards
-function StatsCard({ title, value, icon, description }: { title: string, value: number, icon: any, description: string }) {
+// --- HELPER COMPONENTS ---
+
+function StatsCard({ title, value, icon, description }: any) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium">
-          {title}
-        </CardTitle>
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
         {icon}
       </CardHeader>
       <CardContent>
         <div className="text-2xl font-bold">{value}</div>
-        <p className="text-xs text-muted-foreground">
-          {description}
-        </p>
+        <p className="text-xs text-muted-foreground">{description}</p>
       </CardContent>
     </Card>
+  )
+}
+
+function DashboardSkeleton() {
+  return (
+    <>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {[1, 2, 3, 4].map((i) => (
+          <Card key={i}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <Skeleton className="h-4 w-[100px]" />
+              <Skeleton className="h-4 w-4 rounded-full" />
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="h-8 w-[60px] mb-2" />
+              <Skeleton className="h-3 w-[120px]" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+        <Card className="col-span-4">
+          <CardHeader><Skeleton className="h-6 w-[140px]" /></CardHeader>
+          <CardContent className="space-y-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="flex justify-between items-center">
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-[150px]" />
+                  <Skeleton className="h-3 w-[100px]" />
+                </div>
+                <Skeleton className="h-6 w-[80px] rounded-full" />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+        <Card className="col-span-3">
+          <CardHeader><Skeleton className="h-6 w-[180px]" /></CardHeader>
+          <CardContent className="space-y-6 pt-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="space-y-2">
+                <div className="flex justify-between">
+                  <Skeleton className="h-3 w-[80px]" />
+                  <Skeleton className="h-3 w-[40px]" />
+                </div>
+                <Skeleton className="h-2 w-full rounded-full" />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    </>
   )
 }
