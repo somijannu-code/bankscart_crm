@@ -10,14 +10,14 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Skeleton } from "@/components/skeleton"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   UserPlus, Search, Trash2, Ban, CheckCircle, MoreHorizontal, Filter, Shield, Eye
 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { EmptyState } from "@/components/ui/empty-state" 
+import { EmptyState } from "@/components/empty-state" 
 
 // --- TYPES ---
 interface UserProfile {
