@@ -7,19 +7,44 @@ import {
   CheckSquare, Calendar, Clock, ArrowRight, AlertTriangle, 
   CheckCircle2, History, Plus 
 } from "lucide-react"
-import { isSameDay, startOfToday, isBefore, format, endOfToday } from "date-fns"
+import { isSameDay, startOfToday, isBefore, format, endOfToday, addDays } from "date-fns"
 import { redirect } from "next/navigation"
 import Link from "next/link" 
 import { TaskCard } from "@/components/task-card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { EmptyState } from "@/components/empty-state"
+import { EmptyState } from "@/components/ui/empty-state"
 
 export const dynamic = "force-dynamic"
+
+// --- 🛡️ ROBUST SANITIZER ---
+// Prevents "undefined" errors by ensuring strings are never null
+const sanitizeTask = (task: any) => {
+  const rawLead = task.leads || {}
+  return {
+    ...task,
+    id: task.id || `temp-${Math.random()}`,
+    title: task.title || "Untitled Task",
+    // Fallback status to 'pending' if null so .replace works
+    status: task.status || "pending", 
+    priority: task.priority || "medium",
+    description: task.description || "",
+    scheduled_at: task.scheduled_at || new Date().toISOString(),
+    completed_at: task.completed_at || null,
+    leads: {
+      id: rawLead.id || "unknown",
+      name: rawLead.name || "Unknown Lead",
+      phone: rawLead.phone || "",
+      email: rawLead.email || "",
+      company: rawLead.company || "",
+      status: rawLead.status || "new" 
+    }
+  }
+}
 
 export default function TasksPage() {
   return (
     <div className="p-6 space-y-6 max-w-[1200px] mx-auto">
-      {/* HEADER WITH ACTION */}
+      {/* HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">My Tasks</h1>
@@ -57,36 +82,14 @@ async function TasksContent() {
     .order("scheduled_at", { ascending: true })
     .limit(200)
 
-  // --- 🛡️ DEEP DATA SANITIZATION (CRITICAL FIX) ---
-  // We ensure EVERY string property that might use .replace() is guaranteed to be a string.
-  const followUps = (rawTasks || []).map(task => {
-    // 1. Sanitize the Lead object
-    const rawLead = task.leads || {}
-    const safeLead = {
-      id: rawLead.id || "unknown",
-      name: rawLead.name || "Unknown Lead",
-      phone: rawLead.phone || "",
-      email: rawLead.email || "",
-      company: rawLead.company || "",
-      status: rawLead.status || "new" // <--- Prevents crash if lead status is null
-    }
-
-    // 2. Return safe task object
-    return {
-      ...task,
-      title: task.title || "Untitled Task",
-      status: task.status || "pending",
-      priority: task.priority || "medium",
-      description: task.description || "",
-      leads: safeLead // <--- Attach sanitized lead
-    }
-  })
+  // Apply Sanitizer
+  const followUps = (rawTasks || []).map(sanitizeTask)
 
   // --- DATE LOGIC ---
   const todayStart = startOfToday()
   const todayEnd = endOfToday()
   
-  const safeDate = (dateStr: string | null) => dateStr ? new Date(dateStr) : new Date()
+  const safeDate = (dateStr: string) => new Date(dateStr)
 
   const overdueTasks = followUps.filter(task => isBefore(safeDate(task.scheduled_at), todayStart))
   const todayTasks = followUps.filter(task => {
@@ -145,6 +148,8 @@ async function TasksContent() {
       </div>
 
       {/* 3. TAB CONTENT */}
+      
+      {/* FOCUS TAB */}
       <TabsContent value="focus" className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
         
         {/* A. Overdue Section */}
@@ -181,6 +186,7 @@ async function TasksContent() {
         </div>
       </TabsContent>
 
+      {/* UPCOMING TAB */}
       <TabsContent value="upcoming" className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
         {upcomingTasks.length > 0 ? (
           <GroupedTasks tasks={upcomingTasks} />
@@ -189,6 +195,7 @@ async function TasksContent() {
         )}
       </TabsContent>
 
+      {/* HISTORY TAB */}
       <TabsContent value="history">
         <Suspense fallback={<HistorySkeleton />}>
             <CompletedTasksList userId={user.id} />
@@ -235,8 +242,7 @@ function TabTrigger({ value, label, count }: any) {
 
 function GroupedTasks({ tasks }: { tasks: any[] }) {
   const grouped = tasks.reduce((acc, task) => {
-    const dateStr = task.scheduled_at || new Date().toISOString()
-    const dateKey = format(new Date(dateStr), "yyyy-MM-dd")
+    const dateKey = format(new Date(task.scheduled_at), "yyyy-MM-dd")
     if (!acc[dateKey]) acc[dateKey] = []
     acc[dateKey].push(task)
     return acc
@@ -263,22 +269,29 @@ function GroupedTasks({ tasks }: { tasks: any[] }) {
   })
 }
 
+// Async component for History Tab
 async function CompletedTasksList({ userId }: { userId: string }) {
   const supabase = await createClient()
   
-  const { data } = await supabase
+  const { data: rawData } = await supabase
     .from("follow_ups")
-    .select(`*, leads(name, company)`)
+    .select(`
+      id, title, scheduled_at, priority, status, description, completed_at,
+      leads(id, name, phone, email, company, status)
+    `)
     .eq("user_id", userId)
     .eq("status", "completed")
     .order("completed_at", { ascending: false })
     .limit(50)
 
-  if (!data?.length) return <EmptyState icon={History} title="No History" description="You haven't completed any tasks yet." />
+  // 🔥 CRITICAL FIX: Sanitize history data too!
+  const data = (rawData || []).map(sanitizeTask)
+
+  if (!data.length) return <EmptyState icon={History} title="No History" description="You haven't completed any tasks yet." />
 
   return (
     <div className="space-y-2">
-      {data.map(task => (
+      {data.map((task: any) => (
         <div key={task.id} className="group flex items-center justify-between p-4 bg-white hover:bg-slate-50 rounded-xl border border-slate-100 transition-colors">
           <div className="flex items-center gap-4">
             <div className="bg-green-50 p-2 rounded-full text-green-600 border border-green-100">
@@ -287,9 +300,9 @@ async function CompletedTasksList({ userId }: { userId: string }) {
             <div>
               <p className="text-sm font-medium text-slate-700 line-through decoration-slate-300 decoration-2">{task.title}</p>
               <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
-                 <span className="font-medium">{task.leads?.name || "Unknown Lead"}</span>
+                 <span className="font-medium">{task.leads.name}</span>
                  <span>•</span>
-                 <span>{format(new Date(task.completed_at || task.scheduled_at || new Date()), "MMM d, h:mm a")}</span>
+                 <span>{format(new Date(task.completed_at || task.scheduled_at), "MMM d, h:mm a")}</span>
               </div>
             </div>
           </div>
@@ -301,6 +314,8 @@ async function CompletedTasksList({ userId }: { userId: string }) {
     </div>
   )
 }
+
+// --- SKELETONS ---
 
 function TasksSkeleton() {
   return (
