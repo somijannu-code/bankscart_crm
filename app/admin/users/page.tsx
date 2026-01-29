@@ -10,14 +10,14 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@/components/skeleton"
 import {
   UserPlus, Search, Trash2, Ban, CheckCircle, MoreHorizontal, Filter, Shield, Eye
 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { EmptyState } from "@/components/empty-state" 
+import { EmptyState } from "@/components/ui/empty-state" 
 
 // --- TYPES ---
 interface UserProfile {
@@ -65,12 +65,12 @@ export default function UsersPage() {
         if (profile) setCurrentUserRole(profile.role)
       }
 
-      // 2. Fetch Users (FIX APPLIED: Removed explicit foreign key hint)
+      // 2. Fetch Users (FIXED: Using explicit foreign key constraint name)
       const { data, error } = await supabase
         .from("users")
         .select(`
           *,
-          manager:users(full_name) 
+          manager:users!users_manager_id_fkey(full_name) 
         `)
         .order("created_at", { ascending: false })
       
@@ -90,7 +90,7 @@ export default function UsersPage() {
 
     } catch (err: any) {
       console.error(err)
-      toast.error("Failed to load users. Check database console.")
+      toast.error(err.message || "Failed to load users")
     } finally {
       setIsLoading(false)
     }
