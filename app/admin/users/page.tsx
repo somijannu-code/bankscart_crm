@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -12,12 +12,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
-  UserPlus, Search, Trash2, Ban, CheckCircle, MoreHorizontal, Filter, Shield, Eye
+  UserPlus, Search, Trash2, Ban, CheckCircle, MoreHorizontal, Filter, Shield, Eye, Mail, Phone, Loader2
 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { EmptyState } from "@/components/empty-state" 
+import { EmptyState } from "@/components/ui/empty-state" 
 
 // --- TYPES ---
 interface UserProfile {
@@ -29,8 +29,6 @@ interface UserProfile {
   is_active: boolean
   created_at: string
   manager_id: string | null
-  manager?: { full_name: string }
-  last_active?: string
 }
 
 const ITEMS_PER_PAGE = 10
@@ -55,57 +53,62 @@ export default function UsersPage() {
   const [statusFilter, setStatusFilter] = useState("all")
 
   // --- DATA FETCHING ---
-  const fetchData = useCallback(async () => {
-    setIsLoading(true)
-    try {
-      // 1. Get Current User Role
-      const { data: { user: authUser } } = await supabase.auth.getUser()
-      if (authUser) {
-        const { data: profile } = await supabase.from("users").select("role").eq("id", authUser.id).single()
-        if (profile) setCurrentUserRole(profile.role)
-      }
-
-      // 2. Fetch Users (FIXED: Using explicit foreign key constraint name)
-      const { data, error } = await supabase
-        .from("users")
-        .select(`
-          *,
-          manager:users!users_manager_id_fkey(full_name) 
-        `)
-        .order("created_at", { ascending: false })
-      
-      if (error) throw error
-
-      // 3. Fetch Online Status & Last Active
-      const today = new Date().toISOString().split('T')[0]
-      const { data: attendance } = await supabase.from("attendance").select("user_id, check_in").eq("date", today)
-      
-      const statusMap: Record<string, boolean> = {}
-      attendance?.forEach((r: any) => {
-          if(r.check_in) statusMap[r.user_id] = true
-      })
-      setTelecallerStatus(statusMap)
-
-      setUsers(data || [])
-
-    } catch (err: any) {
-      console.error(err)
-      toast.error(err.message || "Failed to load users")
-    } finally {
-      setIsLoading(false)
-    }
-  }, [supabase])
-
   useEffect(() => {
-    fetchData()
-  }, [fetchData])
+    const fetchUsersAndPermissions = async () => {
+      setIsLoading(true)
+      try {
+        // 1. Get Current User Role
+        const { data: { user: authUser } } = await supabase.auth.getUser()
+        if (authUser) {
+          const { data: profile } = await supabase.from("users").select("role").eq("id", authUser.id).single()
+          if (profile) setCurrentUserRole(profile.role)
+        }
+
+        // 2. Fetch Users (Safe Mode: No Joins)
+        const { data: userData, error: userError } = await supabase
+          .from("users")
+          .select("id, email, full_name, role, phone, is_active, created_at, manager_id")
+          .order("is_active", { ascending: false }) 
+          .order("created_at", { ascending: false })
+          .limit(100)
+
+        if (userError) throw userError
+        
+        setUsers(userData || [])
+
+        // 3. Fetch Online Status
+        const today = new Date().toISOString().split('T')[0]
+        const { data: attendanceData } = await supabase
+          .from("attendance")
+          .select("user_id, check_in")
+          .eq("date", today)
+          .not("check_in", "is", null)
+        
+        if (attendanceData) {
+          const statusMap = attendanceData.reduce((acc: Record<string, boolean>, record: any) => {
+            acc[record.user_id] = true
+            return acc
+          }, {})
+          setTelecallerStatus(statusMap)
+        }
+
+      } catch (err: any) {
+        console.error("Error fetching users:", err)
+        toast.error("Failed to load users")
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchUsersAndPermissions()
+  }, [])
 
   // --- FILTER & PAGINATION LOGIC ---
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
       const matchesSearch = 
-        user.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.email?.toLowerCase().includes(searchQuery.toLowerCase())
+        (user.full_name?.toLowerCase() || "").includes(searchQuery.toLowerCase()) ||
+        (user.email?.toLowerCase() || "").includes(searchQuery.toLowerCase())
       
       const matchesRole = roleFilter === "all" || user.role === roleFilter
       const matchesStatus = statusFilter === "all" || (statusFilter === "active" ? user.is_active : !user.is_active)
@@ -120,6 +123,14 @@ export default function UsersPage() {
   }, [filteredUsers, currentPage])
 
   const totalPages = Math.ceil(filteredUsers.length / ITEMS_PER_PAGE)
+
+  // --- HELPER: Get Manager Name (Client-Side Join) ---
+  // Since we have all users in state, we can find the manager name without a DB join
+  const getManagerName = (managerId: string | null) => {
+    if (!managerId) return null
+    const manager = users.find(u => u.id === managerId)
+    return manager ? manager.full_name : "Unknown"
+  }
 
   // --- ACTIONS ---
   const handleBulkAction = async (action: 'delete' | 'deactivate') => {
@@ -158,14 +169,14 @@ export default function UsersPage() {
 
   // --- RENDER HELPERS ---
   const getRoleBadge = (role: string) => {
-    const styles = {
+    const styles: Record<string, string> = {
       admin: "bg-purple-100 text-purple-700 border-purple-200",
       super_admin: "bg-purple-100 text-purple-700 border-purple-200",
       manager: "bg-blue-100 text-blue-700 border-blue-200",
       telecaller: "bg-slate-100 text-slate-700 border-slate-200"
     }
     return (
-        <Badge variant="outline" className={`capitalize font-medium border-0 ${styles[role as keyof typeof styles] || styles.telecaller}`}>
+        <Badge variant="outline" className={`capitalize font-medium border-0 ${styles[role] || styles.telecaller}`}>
             {role.replace('_', ' ')}
         </Badge>
     )
@@ -237,7 +248,7 @@ export default function UsersPage() {
                   <Ban className="h-4 w-4 mr-2" /> Deactivate
                 </Button>
                 <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => handleBulkAction('delete')} disabled={isProcessing}>
-                  <Trash2 className="h-4 w-4 mr-2" /> Delete
+                  {isProcessing ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4 mr-2" />} Delete
                 </Button>
               </div>
           </div>
@@ -317,10 +328,10 @@ export default function UsersPage() {
                           )}
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-sm font-semibold text-slate-900">{user.full_name}</span>
-                          <span className="text-xs text-slate-500 flex items-center gap-1">
-                            {user.email}
-                          </span>
+                          <span className="text-sm font-semibold text-slate-900">{user.full_name || "Unnamed"}</span>
+                          <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <span className="flex items-center gap-1"><Mail className="h-3 w-3" /> {user.email}</span>
+                          </div>
                         </div>
                       </div>
                     </TableCell>
@@ -339,10 +350,10 @@ export default function UsersPage() {
                       )}
                     </TableCell>
                     <TableCell className="hidden md:table-cell text-sm text-slate-600">
-                      {user.manager?.full_name ? (
+                      {user.manager_id ? (
                           <div className="flex items-center gap-1.5">
                               <Shield className="h-3 w-3 text-slate-400" />
-                              {user.manager.full_name}
+                              {getManagerName(user.manager_id)}
                           </div>
                       ) : (
                           <span className="text-slate-400 text-xs italic">Unassigned</span>
