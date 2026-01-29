@@ -17,7 +17,7 @@ import {
 import Link from "next/link"
 import { toast } from "sonner"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { EmptyState } from "@/components/ui/empty-state" 
+import { EmptyState } from "@/components/empty-state" 
 
 // --- TYPES ---
 interface UserProfile {
