@@ -1,11 +1,12 @@
+import { Suspense } from "react"
 import { createClient } from "@/lib/supabase/server"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { FileSpreadsheet, Upload, UserPlus, Filter, Loader2 } from "lucide-react"
+import { Skeleton } from "@/components/ui/skeleton"
+import { FileSpreadsheet, Upload, UserPlus, Filter } from "lucide-react"
 import Link from "next/link"
 import { LeadsTable } from "@/components/leads-table"
 import { LeadFilters } from "@/components/lead-filters"
-import { Suspense } from "react"
 
 interface SearchParams {
   status?: string
@@ -18,36 +19,59 @@ interface SearchParams {
   to?: string
 }
 
-export default async function LeadsPage({
-  searchParams,
-}: {
-  searchParams: SearchParams
-}) {
+// --- MAIN PAGE COMPONENT ---
+export default function LeadsPage({ searchParams }: { searchParams: SearchParams }) {
+  return (
+    <div className="p-6 space-y-6">
+      {/* Header Area */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Lead Management</h1>
+          <p className="text-gray-600 mt-1">Manage, track, and convert your pipeline.</p>
+        </div>
+        <div className="flex gap-3">
+          <Link href="/admin/upload">
+            <Button variant="outline" className="flex items-center gap-2 bg-transparent">
+              <Upload className="h-4 w-4" /> Upload CSV
+            </Button>
+          </Link>
+          <Link href="/admin/leads/new">
+            <Button className="flex items-center gap-2 shadow-sm">
+              <UserPlus className="h-4 w-4" /> Add Lead
+            </Button>
+          </Link>
+        </div>
+      </div>
+
+      <Suspense fallback={<LeadsPageSkeleton />}>
+        <LeadsContent searchParams={searchParams} />
+      </Suspense>
+    </div>
+  )
+}
+
+// --- DATA FETCHING COMPONENT ---
+async function LeadsContent({ searchParams }: { searchParams: SearchParams }) {
   const supabase = await createClient()
   
-  // 1. Base Query
+  // 1. Base Query Construction
   let query = supabase
     .from("leads")
-    .select(`
-      *,
-      assigned_user:users!leads_assigned_to_fkey(id, full_name),
-      assigner:users!leads_assigned_by_fkey(id, full_name)
-    `)
+    .select(`*, assigned_user:users!leads_assigned_to_fkey(id, full_name), assigner:users!leads_assigned_by_fkey(id, full_name)`)
     .order("created_at", { ascending: false })
 
-  // 2. Apply Server-Side Filters (Efficient)
+  // 2. Filters
   if (searchParams.status && searchParams.status !== 'all') query = query.eq("status", searchParams.status)
   if (searchParams.priority && searchParams.priority !== 'all') query = query.eq("priority", searchParams.priority)
   if (searchParams.assigned_to && searchParams.assigned_to !== 'all') {
-     if(searchParams.assigned_to === 'unassigned') query = query.is("assigned_to", null)
-     else query = query.eq("assigned_to", searchParams.assigned_to)
+      if(searchParams.assigned_to === 'unassigned') query = query.is("assigned_to", null)
+      else query = query.eq("assigned_to", searchParams.assigned_to)
   }
   if (searchParams.source && searchParams.source !== 'all') query = query.ilike("source", `%${searchParams.source}%`)
   if (searchParams.search) {
     query = query.or(`name.ilike.%${searchParams.search}%,email.ilike.%${searchParams.search}%,phone.ilike.%${searchParams.search}%,company.ilike.%${searchParams.search}%`)
   }
 
-  // Date Logic
   if (searchParams.date_range && searchParams.date_range !== 'all') {
     const today = new Date()
     today.setHours(0, 0, 0, 0) 
@@ -69,9 +93,9 @@ export default async function LeadsPage({
     }
   }
 
-  // 3. Parallel Data Fetching
   const todayDate = new Date().toISOString().split('T')[0]
 
+  // 3. Parallel Fetching
   const [
     { data: leads },
     { data: telecallers },
@@ -79,99 +103,34 @@ export default async function LeadsPage({
     { count: unassignedLeads },
     { data: attendanceData }
   ] = await Promise.all([
-    query, // The filtered leads
+    query,
     supabase.from("users").select("id, full_name").eq("role", "telecaller").eq("is_active", true),
     supabase.from("leads").select("*", { count: "exact", head: true }),
     supabase.from("leads").select("*", { count: "exact", head: true }).is("assigned_to", null),
     supabase.from("attendance").select("user_id").eq("date", todayDate).not("check_in", "is", null)
   ])
 
-  // 4. Process Attendance Map
   const telecallerStatus: Record<string, boolean> = {}
-  attendanceData?.forEach((rec: any) => {
-    telecallerStatus[rec.user_id] = true
-  })
+  attendanceData?.forEach((rec: any) => { telecallerStatus[rec.user_id] = true })
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Lead Management</h1>
-          <p className="text-gray-600 mt-1">Manage, track, and convert your pipeline.</p>
-        </div>
-        <div className="flex gap-3">
-          <Link href="/admin/upload">
-            <Button variant="outline" className="flex items-center gap-2 bg-transparent">
-              <Upload className="h-4 w-4" />
-              Upload CSV
-            </Button>
-          </Link>
-          <Link href="/admin/leads/new">
-            <Button className="flex items-center gap-2 shadow-sm">
-              <UserPlus className="h-4 w-4" />
-              Add Lead
-            </Button>
-          </Link>
-        </div>
-      </div>
-
+    <>
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="shadow-sm">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Leads</p>
-                <p className="text-3xl font-bold text-gray-900 mt-2">{totalLeads?.toLocaleString() || 0}</p>
-              </div>
-              <div className="p-3 rounded-full bg-blue-50">
-                <FileSpreadsheet className="h-6 w-6 text-blue-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-sm">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Unassigned</p>
-                <p className="text-3xl font-bold text-gray-900 mt-2">{unassignedLeads?.toLocaleString() || 0}</p>
-              </div>
-              <div className="p-3 rounded-full bg-orange-50">
-                <UserPlus className="h-6 w-6 text-orange-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-sm">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Active Agents</p>
-                <p className="text-3xl font-bold text-gray-900 mt-2">{attendanceData?.length || 0} <span className="text-sm text-gray-400 font-normal">/ {telecallers?.length || 0}</span></p>
-              </div>
-              <div className="p-3 rounded-full bg-green-50">
-                <UserPlus className="h-6 w-6 text-green-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <StatsCard title="Total Leads" value={totalLeads} icon={<FileSpreadsheet className="h-6 w-6 text-blue-600" />} color="bg-blue-50" />
+        <StatsCard title="Unassigned" value={unassignedLeads} icon={<UserPlus className="h-6 w-6 text-orange-600" />} color="bg-orange-50" />
+        <StatsCard title="Active Agents" value={`${attendanceData?.length || 0} / ${telecallers?.length || 0}`} icon={<UserPlus className="h-6 w-6 text-green-600" />} color="bg-green-50" />
       </div>
 
-      {/* Filters Area */}
+      {/* Filters */}
       <Card className="shadow-sm">
         <CardHeader className="pb-3 border-b">
           <CardTitle className="flex items-center gap-2 text-base">
-            <Filter className="h-4 w-4 text-gray-500" />
-            Filters
+            <Filter className="h-4 w-4 text-gray-500" /> Filters
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-4">
-          <Suspense fallback={<div className="h-10 bg-gray-100 rounded animate-pulse" />}>
-            <LeadFilters telecallers={telecallers || []} telecallerStatus={telecallerStatus} />
-          </Suspense>
+          <LeadFilters telecallers={telecallers || []} telecallerStatus={telecallerStatus} />
         </CardContent>
       </Card>
 
@@ -186,13 +145,73 @@ export default async function LeadsPage({
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          <LeadsTable 
-            leads={leads || []} 
-            telecallers={telecallers || []} 
-            telecallerStatus={telecallerStatus} 
-          />
+          <LeadsTable leads={leads || []} telecallers={telecallers || []} telecallerStatus={telecallerStatus} />
         </CardContent>
       </Card>
-    </div>
+    </>
+  )
+}
+
+// --- HELPERS & SKELETONS ---
+
+function StatsCard({ title, value, icon, color }: any) {
+  return (
+    <Card className="shadow-sm">
+      <CardContent className="p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-600">{title}</p>
+            <p className="text-3xl font-bold text-gray-900 mt-2">{typeof value === 'number' ? value.toLocaleString() : value}</p>
+          </div>
+          <div className={`p-3 rounded-full ${color}`}>{icon}</div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function LeadsPageSkeleton() {
+  return (
+    <>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {[1, 2, 3].map((i) => (
+          <Card key={i} className="shadow-sm">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-8 w-12" />
+                </div>
+                <Skeleton className="h-12 w-12 rounded-full" />
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="shadow-sm">
+        <CardHeader className="pb-3 border-b">
+          <Skeleton className="h-5 w-24" />
+        </CardHeader>
+        <CardContent className="pt-4 grid grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-10 w-full" />)}
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-sm">
+        <CardHeader className="pb-3 border-b">
+          <Skeleton className="h-5 w-32" />
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="space-y-4 p-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="flex gap-4">
+                <Skeleton className="h-12 w-full rounded-md" />
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </>
   )
 }
