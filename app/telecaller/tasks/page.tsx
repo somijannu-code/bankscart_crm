@@ -1,324 +1,414 @@
-import { Suspense } from "react"
-import { createClient } from "@/lib/supabase/server"
-import { Card, CardContent } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Button } from "@/components/ui/button" // Added Button
-import { 
-  CheckSquare, Calendar, Clock, ArrowRight, AlertTriangle, 
-  CheckCircle2, History, Plus, Loader2 
-} from "lucide-react"
-import { isSameDay, startOfToday, isBefore, format, addDays, endOfToday } from "date-fns"
-import { redirect } from "next/navigation"
-import Link from "next/link" // Added Link
-import { TaskCard } from "@/components/task-card"
+"use client"
+
+import { useState, useEffect, useMemo, useCallback } from "react"
+import { createClient } from "@/lib/supabase/client"
+import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Skeleton } from "@/components/ui/skeleton"
-import { EmptyState } from "@/components/empty-state"
+import {
+  UserPlus, Search, Trash2, Ban, CheckCircle, MoreHorizontal, Filter, Shield, Mail, Loader2, Eye, Edit
+} from "lucide-react"
+import Link from "next/link"
+import { useRouter } from "next/navigation" 
+import { toast } from "sonner"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { EmptyState } from "@/components/ui/empty-state" 
 
-export const dynamic = "force-dynamic"
-
-export default function TasksPage() {
-  return (
-    <div className="p-6 space-y-6 max-w-[1200px] mx-auto">
-      {/* HEADER WITH ACTION */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">My Tasks</h1>
-          <p className="text-gray-500 mt-1">Manage your follow-ups and scheduled activities</p>
-        </div>
-        <Link href="/leads">
-            {/* Navigates to leads page to start a new task context, or open a dialog */}
-            <Button className="shadow-sm bg-blue-600 hover:bg-blue-700">
-                <Plus className="h-4 w-4 mr-2" /> New Follow-up
-            </Button>
-        </Link>
-      </div>
-
-      <Suspense fallback={<TasksSkeleton />}>
-        <TasksContent />
-      </Suspense>
-    </div>
-  )
+// --- TYPES ---
+interface UserProfile {
+  id: string
+  email: string
+  full_name: string
+  role: string
+  phone: string | null
+  is_active: boolean
+  created_at: string
+  manager_id: string | null
+  manager_name?: string
 }
 
-async function TasksContent() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+const ITEMS_PER_PAGE = 10
 
-  if (!user) redirect("/auth/login")
+export default function UsersPage() {
+  const supabase = createClient()
+  const router = useRouter()
 
-  // Fetch Pending Tasks (Optimized: Removed unnecessary fields, added limit)
-  const { data: followUps } = await supabase
-    .from("follow_ups")
-    .select(`
-      id, title, scheduled_at, priority, status,
-      leads(id, name, phone, email, company, status)
-    `)
-    .eq("user_id", user.id)
-    .neq("status", "completed") 
-    .order("scheduled_at", { ascending: true })
-    .limit(200) // Safety limit
-
-  // --- DATE LOGIC ---
-  const todayStart = startOfToday()
-  const todayEnd = endOfToday()
+  // State
+  const [users, setUsers] = useState<UserProfile[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [currentUserRole, setCurrentUserRole] = useState("telecaller")
+  const [telecallerStatus, setTelecallerStatus] = useState<Record<string, boolean>>({})
   
-  const overdueTasks = followUps?.filter(task => isBefore(new Date(task.scheduled_at), todayStart)) || []
-  const todayTasks = followUps?.filter(task => {
-      const date = new Date(task.scheduled_at)
-      return date >= todayStart && date <= todayEnd
-  }) || []
-  const upcomingTasks = followUps?.filter(task => new Date(task.scheduled_at) > todayEnd) || []
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1)
 
-  return (
-    <Tabs defaultValue="focus" className="space-y-8">
+  // Filters
+  const [searchQuery, setSearchQuery] = useState("")
+  const [roleFilter, setRoleFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState("all")
+
+  // --- DATA FETCHING ---
+  const fetchData = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      if (authUser) {
+        const { data: profile } = await supabase.from("users").select("role").eq("id", authUser.id).single()
+        if (profile) setCurrentUserRole(profile.role)
+      }
+
+      const { data: userData, error: userError } = await supabase
+        .from("users")
+        .select("*")
+        .order("created_at", { ascending: false })
       
-      {/* 1. METRICS CARDS */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <SummaryCard 
-          title="Overdue" 
-          count={overdueTasks.length} 
-          icon={AlertTriangle} 
-          color="text-red-600" 
-          bg="bg-red-50" 
-          borderColor="border-red-200"
-          pulse={overdueTasks.length > 0} 
-        />
-        <SummaryCard 
-          title="Today" 
-          count={todayTasks.length} 
-          icon={Calendar} 
-          color="text-blue-600" 
-          bg="bg-blue-50" 
-          borderColor="border-blue-200" 
-        />
-        <SummaryCard 
-          title="Upcoming" 
-          count={upcomingTasks.length} 
-          icon={ArrowRight} 
-          color="text-purple-600" 
-          bg="bg-purple-50" 
-          borderColor="border-purple-200" 
-        />
-        <SummaryCard 
-          title="Total Pending" 
-          count={(followUps?.length || 0)} 
-          icon={CheckSquare} 
-          color="text-slate-600" 
-          bg="bg-slate-50" 
-          borderColor="border-slate-200" 
-        />
-      </div>
+      if (userError) throw userError
 
-      {/* 2. TABS NAVIGATION */}
-      <div className="border-b sticky top-0 bg-white/95 backdrop-blur z-10 pt-2">
-        <TabsList className="bg-transparent h-auto p-0 space-x-6 w-full justify-start">
-          <TabTrigger value="focus" label="Focus Mode" count={overdueTasks.length + todayTasks.length} />
-          <TabTrigger value="upcoming" label="Upcoming" count={upcomingTasks.length} />
-          <TabTrigger value="history" label="History" />
-        </TabsList>
-      </div>
+      // SAFE MAPPING: Ensure no undefined values slip through
+      let enrichedUsers: UserProfile[] = (userData || []).map(u => ({
+          ...u,
+          role: u.role || "telecaller", // Default fallback
+          full_name: u.full_name || "Unknown User",
+          email: u.email || ""
+      }))
 
-      {/* 3. TAB CONTENT */}
+      const managerIds = Array.from(new Set(userData?.map(u => u.manager_id).filter(Boolean))) as string[]
       
-      {/* FOCUS TAB */}
-      <TabsContent value="focus" className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+      if (managerIds.length > 0) {
+        const { data: managers } = await supabase
+          .from("users")
+          .select("id, full_name")
+          .in("id", managerIds)
         
-        {/* A. Overdue Section */}
-        {overdueTasks.length > 0 && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-red-600 flex items-center gap-2 uppercase tracking-wider">
-                <AlertTriangle className="h-4 w-4" /> Overdue ({overdueTasks.length})
-                </h3>
-            </div>
-            <div className="grid gap-3">
-              {overdueTasks.map(task => <TaskCard key={task.id} task={task} isOverdue={true} />)}
-            </div>
-          </div>
-        )}
+        const managerMap = (managers || []).reduce((acc: any, curr: any) => {
+            acc[curr.id] = curr.full_name
+            return acc
+        }, {})
 
-        {/* B. Today Section */}
-        <div className="space-y-3">
-          <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2 uppercase tracking-wider">
-            <Calendar className="h-4 w-4" /> Today's Schedule ({todayTasks.length})
-          </h3>
-          {todayTasks.length > 0 ? (
-            <div className="grid gap-3">
-              {todayTasks.map(task => <TaskCard key={task.id} task={task} />)}
-            </div>
-          ) : (
-            <EmptyState 
-              icon={CheckCircle2} 
-              title="All Caught Up!" 
-              description="You have no tasks scheduled for the rest of today."
-              variant="dashed"
+        enrichedUsers = enrichedUsers.map((u: any) => ({
+            ...u,
+            manager_name: u.manager_id ? managerMap[u.manager_id] : null
+        }))
+      }
+
+      const today = new Date().toISOString().split('T')[0]
+      const { data: attendance } = await supabase.from("attendance").select("user_id, check_in").eq("date", today)
+      
+      const statusMap: Record<string, boolean> = {}
+      attendance?.forEach((r: any) => {
+          if(r.check_in) statusMap[r.user_id] = true
+      })
+      setTelecallerStatus(statusMap)
+
+      setUsers(enrichedUsers)
+
+    } catch (err: any) {
+      console.error(err)
+      toast.error("Failed to load users")
+    } finally {
+      setIsLoading(false)
+    }
+  }, [supabase])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  // --- FILTER & PAGINATION ---
+  const filteredUsers = useMemo(() => {
+    return users.filter(user => {
+      const matchesSearch = 
+        (user.full_name?.toLowerCase() || "").includes(searchQuery.toLowerCase()) ||
+        (user.email?.toLowerCase() || "").includes(searchQuery.toLowerCase())
+      
+      const matchesRole = roleFilter === "all" || user.role === roleFilter
+      const matchesStatus = statusFilter === "all" || (statusFilter === "active" ? user.is_active : !user.is_active)
+
+      return matchesSearch && matchesRole && matchesStatus
+    })
+  }, [users, searchQuery, roleFilter, statusFilter])
+
+  const paginatedUsers = useMemo(() => {
+      const start = (currentPage - 1) * ITEMS_PER_PAGE
+      return filteredUsers.slice(start, start + ITEMS_PER_PAGE)
+  }, [filteredUsers, currentPage])
+
+  const totalPages = Math.ceil(filteredUsers.length / ITEMS_PER_PAGE)
+
+  // --- ACTIONS ---
+  const handleBulkAction = async (action: 'delete' | 'deactivate') => {
+    if (!confirm(`Are you sure you want to ${action} ${selectedUserIds.length} users?`)) return
+
+    setIsProcessing(true)
+    try {
+      if (action === 'delete') {
+        const { error } = await supabase.from("users").delete().in("id", selectedUserIds)
+        if (error) throw error
+        setUsers(prev => prev.filter(u => !selectedUserIds.includes(u.id)))
+        toast.success("Users deleted permanently")
+      } else {
+        const { error } = await supabase.from("users").update({ is_active: false }).in("id", selectedUserIds)
+        if (error) throw error
+        setUsers(prev => prev.map(u => selectedUserIds.includes(u.id) ? { ...u, is_active: false } : u))
+        toast.success("Users deactivated")
+      }
+      setSelectedUserIds([])
+    } catch (err: any) {
+      toast.error(`Action failed: ${err.message}`)
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  const toggleSelection = (id: string) => {
+    setSelectedUserIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id])
+  }
+
+  const toggleSelectAll = () => {
+    setSelectedUserIds(selectedUserIds.length === paginatedUsers.length ? [] : paginatedUsers.map(u => u.id))
+  }
+
+  const canManage = ['super_admin', 'admin', 'owner'].includes(currentUserRole)
+
+  // --- RENDER HELPERS ---
+  const getRoleBadge = (role: string) => {
+    // SAFETY CHECK: Ensure role is a string
+    const safeRole = role || "unknown"; 
+    
+    const styles: Record<string, string> = {
+      admin: "bg-purple-100 text-purple-700 border-purple-200",
+      super_admin: "bg-purple-100 text-purple-700 border-purple-200",
+      manager: "bg-blue-100 text-blue-700 border-blue-200",
+      telecaller: "bg-slate-100 text-slate-700 border-slate-200"
+    }
+    return (
+        <Badge variant="outline" className={`capitalize font-medium border-0 ${styles[safeRole] || styles.telecaller}`}>
+            {safeRole.replace('_', ' ')}
+        </Badge>
+    )
+  }
+
+  return (
+    <div className="p-6 space-y-6 max-w-[1600px] mx-auto min-h-screen bg-slate-50/50">
+      
+      <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Team Management</h1>
+          <p className="text-sm text-gray-500 mt-1">Manage {users.length} members across your organization.</p>
+        </div>
+        
+        {canManage && (
+          <Link href="/admin/users/new">
+            <Button className="shadow-sm bg-indigo-600 hover:bg-indigo-700 transition-all">
+              <UserPlus className="h-4 w-4 mr-2" /> Add Member
+            </Button>
+          </Link>
+        )}
+      </div>
+
+      {/* FILTERS */}
+      <div className="flex flex-col sm:flex-row gap-3 items-center justify-between bg-white p-1 rounded-xl border shadow-sm">
+        <div className="relative w-full sm:w-80">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+            <Input 
+                placeholder="Search team..." 
+                className="pl-9 border-0 bg-transparent focus-visible:ring-0" 
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
             />
-          )}
         </div>
-      </TabsContent>
+        <div className="flex gap-2 w-full sm:w-auto p-1">
+            <Select value={roleFilter} onValueChange={setRoleFilter}>
+                <SelectTrigger className="w-[130px] h-8 text-xs bg-slate-50 border-slate-200">
+                    <Filter className="h-3 w-3 mr-2" />
+                    <SelectValue placeholder="Role" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">All Roles</SelectItem>
+                    <SelectItem value="telecaller">Telecaller</SelectItem>
+                    <SelectItem value="manager">Manager</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                </SelectContent>
+            </Select>
 
-      {/* UPCOMING TAB */}
-      <TabsContent value="upcoming" className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
-        {upcomingTasks.length > 0 ? (
-          <GroupedTasks tasks={upcomingTasks} />
-        ) : (
-          <EmptyState icon={Calendar} title="No Upcoming Tasks" description="Your schedule is clear for the coming days." />
-        )}
-      </TabsContent>
-
-      {/* HISTORY TAB (Suspended for Performance) */}
-      <TabsContent value="history">
-        <Suspense fallback={<HistorySkeleton />}>
-            <CompletedTasksList userId={user.id} />
-        </Suspense>
-      </TabsContent>
-
-    </Tabs>
-  )
-}
-
-// --- HELPER COMPONENTS ---
-
-function SummaryCard({ title, count, icon: Icon, color, bg, borderColor, pulse }: any) {
-  return (
-    <Card className={`border shadow-sm transition-all hover:shadow-md ${borderColor} ${pulse ? "animate-pulse ring-1 ring-red-100" : ""}`}>
-      <CardContent className="p-4 flex items-center justify-between">
-        <div className="space-y-1">
-          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">{title}</p>
-          <p className={`text-3xl font-bold tracking-tight ${color}`}>{count}</p>
-        </div>
-        <div className={`p-3 rounded-xl ${bg}`}>
-          <Icon className={`h-5 w-5 ${color}`} />
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function TabTrigger({ value, label, count }: any) {
-  return (
-    <TabsTrigger 
-      value={value}
-      className="rounded-none border-b-2 border-transparent data-[state=active]:border-blue-600 data-[state=active]:text-blue-700 data-[state=active]:shadow-none px-2 py-3 transition-all hover:text-slate-900"
-    >
-      <span className="mr-2 text-sm font-medium">{label}</span>
-      {count !== undefined && count > 0 && (
-        <span className="bg-slate-100 text-slate-600 text-[10px] px-2 py-0.5 rounded-full font-bold">
-          {count}
-        </span>
-      )}
-    </TabsTrigger>
-  )
-}
-
-function GroupedTasks({ tasks }: { tasks: any[] }) {
-  const grouped = tasks.reduce((acc, task) => {
-    const dateKey = format(new Date(task.scheduled_at), "yyyy-MM-dd")
-    if (!acc[dateKey]) acc[dateKey] = []
-    acc[dateKey].push(task)
-    return acc
-  }, {} as Record<string, typeof tasks>)
-
-  return Object.entries(grouped).map(([dateKey, groupTasks]) => {
-    const date = new Date(dateKey)
-    const isTom = isSameDay(date, addDays(new Date(), 1)) 
-    const label = isTom ? "Tomorrow" : format(date, "EEEE, MMM do")
-
-    return (
-      <div key={dateKey} className="space-y-3">
-        <div className="flex items-center gap-4">
-          <div className={`text-sm font-bold px-3 py-1 rounded-full ${isTom ? "bg-purple-100 text-purple-700" : "bg-slate-100 text-slate-600"}`}>
-            {label}
-          </div>
-          <div className="h-px bg-slate-100 w-full" />
-        </div>
-        <div className="grid gap-3">
-          {groupTasks.map((task: any) => <TaskCard key={task.id} task={task} />)}
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-[130px] h-8 text-xs bg-slate-50 border-slate-200">
+                    <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                </SelectContent>
+            </Select>
         </div>
       </div>
-    )
-  })
-}
 
-// Async component for History Tab
-async function CompletedTasksList({ userId }: { userId: string }) {
-  const supabase = await createClient()
-  
-  // Artificial delay to demonstrate streaming (Remove in production)
-  // await new Promise(resolve => setTimeout(resolve, 500))
-
-  const { data } = await supabase
-    .from("follow_ups")
-    .select(`*, leads(name, company)`)
-    .eq("user_id", userId)
-    .eq("status", "completed")
-    .order("completed_at", { ascending: false })
-    .limit(50)
-
-  if (!data?.length) return <EmptyState icon={History} title="No History" description="You haven't completed any tasks yet." />
-
-  return (
-    <div className="space-y-2">
-      {data.map(task => (
-        <div key={task.id} className="group flex items-center justify-between p-4 bg-white hover:bg-slate-50 rounded-xl border border-slate-100 transition-colors">
-          <div className="flex items-center gap-4">
-            <div className="bg-green-50 p-2 rounded-full text-green-600 border border-green-100">
-                <CheckSquare className="h-4 w-4" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-700 line-through decoration-slate-300 decoration-2">{task.title}</p>
-              <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
-                 <span className="font-medium">{task.leads?.name}</span>
-                 <span>•</span>
-                 <span>{format(new Date(task.completed_at || task.scheduled_at), "MMM d, h:mm a")}</span>
+      {/* BULK ACTIONS */}
+      {selectedUserIds.length > 0 && canManage && (
+          <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-2 px-4 flex items-center justify-between animate-in slide-in-from-top-2">
+              <span className="text-sm text-indigo-700 font-medium">{selectedUserIds.length} users selected</span>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" className="text-indigo-600 hover:text-indigo-700 hover:bg-indigo-100" onClick={() => handleBulkAction('deactivate')} disabled={isProcessing}>
+                  <Ban className="h-4 w-4 mr-2" /> Deactivate
+                </Button>
+                <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => handleBulkAction('delete')} disabled={isProcessing}>
+                  {isProcessing ? <Loader2 className="h-4 w-4 animate-spin"/> : <Trash2 className="h-4 w-4 mr-2" />} Delete
+                </Button>
               </div>
-            </div>
           </div>
-          <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-1 rounded-md uppercase tracking-wide">
-            Done
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
+      )}
 
-// --- SKELETONS ---
-
-function TasksSkeleton() {
-  return (
-    <div className="space-y-8 animate-pulse">
-      <div className="grid grid-cols-4 gap-4">
-        {[1,2,3,4].map(i => <Skeleton key={i} className="h-28 w-full rounded-xl" />)}
-      </div>
-      <div className="flex gap-6 border-b pb-2">
-        <Skeleton className="h-8 w-32" />
-        <Skeleton className="h-8 w-32" />
-        <Skeleton className="h-8 w-32" />
-      </div>
-      <div className="space-y-4">
-        <Skeleton className="h-6 w-48 mb-4" />
-        {[1,2,3].map(i => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}
-      </div>
-    </div>
-  )
-}
-
-function HistorySkeleton() {
-    return (
-        <div className="space-y-3">
-            {[1,2,3,4,5].map(i => (
-                <div key={i} className="flex items-center justify-between p-4 border rounded-xl">
-                    <div className="flex items-center gap-3">
-                        <Skeleton className="h-10 w-10 rounded-full" />
-                        <div className="space-y-2">
-                            <Skeleton className="h-4 w-48" />
-                            <Skeleton className="h-3 w-32" />
+      {/* TABLE */}
+      <Card className="shadow-sm border-slate-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader className="bg-slate-50/80">
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-[40px] text-center">
+                  <Checkbox 
+                    checked={paginatedUsers.length > 0 && selectedUserIds.length === paginatedUsers.length}
+                    onCheckedChange={toggleSelectAll}
+                  />
+                </TableHead>
+                <TableHead className="w-[300px]">User Profile</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="hidden md:table-cell">Manager</TableHead>
+                <TableHead className="hidden md:table-cell">Joined</TableHead>
+                <TableHead className="w-[50px]"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                [...Array(5)].map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell><Skeleton className="h-4 w-4 rounded" /></TableCell>
+                    <TableCell><div className="flex items-center gap-3"><Skeleton className="h-9 w-9 rounded-full" /><div className="space-y-1"><Skeleton className="h-4 w-24" /><Skeleton className="h-3 w-32" /></div></div></TableCell>
+                    <TableCell><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
+                    <TableCell><Skeleton className="h-5 w-12 rounded-full" /></TableCell>
+                    <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-20" /></TableCell>
+                    <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-24" /></TableCell>
+                    <TableCell><Skeleton className="h-8 w-8 rounded" /></TableCell>
+                  </TableRow>
+                ))
+              ) : filteredUsers.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="h-64 text-center">
+                    <EmptyState icon={Search} title="No users found" description="Try adjusting your search." variant="ghost" />
+                  </TableCell>
+                </TableRow>
+              ) : (
+                paginatedUsers.map((user) => (
+                  <TableRow key={user.id} className={`group transition-colors ${selectedUserIds.includes(user.id) ? "bg-indigo-50/50 hover:bg-indigo-50" : "hover:bg-slate-50"}`}>
+                    <TableCell className="text-center">
+                      <Checkbox checked={selectedUserIds.includes(user.id)} onCheckedChange={() => toggleSelection(user.id)} />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <div className="relative">
+                          <Avatar className="h-9 w-9 border border-slate-200">
+                            <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${user.full_name}`} />
+                            <AvatarFallback className="bg-indigo-100 text-indigo-700">{user.full_name?.[0]}</AvatarFallback>
+                          </Avatar>
+                          {user.role === 'telecaller' && (
+                            <span className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-white ${telecallerStatus[user.id] ? "bg-green-500" : "bg-slate-300"}`} />
+                          )}
                         </div>
-                    </div>
-                    <Skeleton className="h-6 w-16" />
-                </div>
-            ))}
+                        <div className="flex flex-col">
+                          <span className="text-sm font-semibold text-slate-900">{user.full_name}</span>
+                          <span className="text-xs text-slate-500 flex items-center gap-1">{user.email}</span>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>{getRoleBadge(user.role)}</TableCell>
+                    <TableCell>
+                      {user.is_active ? (
+                        <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full w-fit border border-emerald-100"><CheckCircle className="h-3 w-3" /> Active</div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-100 px-2 py-1 rounded-full w-fit border border-slate-200"><Ban className="h-3 w-3" /> Inactive</div>
+                      )}
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell text-sm text-slate-600">
+                      {user.manager_name ? <div className="flex items-center gap-1.5"><Shield className="h-3 w-3 text-slate-400" />{user.manager_name}</div> : <span className="text-slate-400 text-xs italic">Unassigned</span>}
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell text-sm text-slate-500">
+                      {new Date(user.created_at).toLocaleDateString()}
+                    </TableCell>
+                    
+                    {/* --- ACTIONS COLUMN (Fixed: Using standard button + router push) --- */}
+                    <TableCell>
+                      {canManage && (
+                        <DropdownMenu modal={false}>
+                          <DropdownMenuTrigger asChild>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-8 w-8 text-slate-500 hover:text-slate-700 hover:bg-slate-100 data-[state=open]:bg-slate-100"
+                            >
+                              <span className="sr-only">Open menu</span>
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48 bg-white shadow-lg border border-slate-200 z-50">
+                            <DropdownMenuLabel>User Actions</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            
+                            <DropdownMenuItem 
+                              className="cursor-pointer"
+                              onClick={() => router.push(`/admin/users/${user.id}/edit`)}
+                            >
+                              <Edit className="h-4 w-4 mr-2" /> Edit Details
+                            </DropdownMenuItem>
+                            
+                            {currentUserRole === 'super_admin' && (
+                                <DropdownMenuItem className="cursor-pointer" onClick={() => toast.info("Impersonate coming soon")}>
+                                    <Eye className="h-4 w-4 mr-2" /> Impersonate
+                                </DropdownMenuItem>
+                            )}
+                            
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem 
+                              className="text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer" 
+                              onClick={() => {
+                                setSelectedUserIds([user.id])
+                                handleBulkAction('delete')
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" /> Delete User
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
         </div>
-    )
+        
+        {/* PAGINATION */}
+        {filteredUsers.length > 0 && (
+            <div className="border-t p-4 flex items-center justify-between bg-slate-50/50">
+                <span className="text-xs text-slate-500">
+                    Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, filteredUsers.length)} of {filteredUsers.length} entries
+                </span>
+                <div className="flex gap-2">
+                    <Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>Previous</Button>
+                    <Button variant="outline" size="sm" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>Next</Button>
+                </div>
+            </div>
+        )}
+      </Card>
+    </div>
+  )
 }
