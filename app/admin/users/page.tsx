@@ -29,7 +29,7 @@ interface UserProfile {
   is_active: boolean
   created_at: string
   manager_id: string | null
-  manager?: { full_name: string } // Join data
+  manager_name?: string // We will populate this manually
 }
 
 const ITEMS_PER_PAGE = 10
@@ -54,61 +54,72 @@ export default function UsersPage() {
   const [statusFilter, setStatusFilter] = useState("all")
 
   // --- DATA FETCHING ---
-  useEffect(() => {
-    const fetchUsersAndPermissions = async () => {
-      setIsLoading(true)
-      try {
-        // 1. Get Current User Role
-        const { data: { user: authUser } } = await supabase.auth.getUser()
-        if (authUser) {
-          const { data: profile } = await supabase.from("users").select("role").eq("id", authUser.id).single()
-          if (profile) setCurrentUserRole(profile.role)
-        }
-
-        // 2. Fetch Users with Manager Join (Corrected Query)
-        // We remove the explicit foreign key hint if it causes issues, assuming standard naming
-        const { data: userData, error: userError } = await supabase
-          .from("users")
-          .select(`
-            id, email, full_name, role, phone, is_active, created_at, manager_id,
-            manager:users!users_manager_id_fkey(full_name)
-          `) 
-          // Note: If you get a PGRST error here again, remove "!users_manager_id_fkey" 
-          // and just use "manager:users(full_name)"
-          .order("created_at", { ascending: false })
-          .limit(100)
-
-        if (userError) throw userError
-        
-        // Safely cast data
-        setUsers((userData as any) || [])
-
-        // 3. Fetch Online Status
-        const today = new Date().toISOString().split('T')[0]
-        const { data: attendanceData } = await supabase
-          .from("attendance")
-          .select("user_id, check_in")
-          .eq("date", today)
-          .not("check_in", "is", null)
-        
-        if (attendanceData) {
-          const statusMap = attendanceData.reduce((acc: Record<string, boolean>, record: any) => {
-            acc[record.user_id] = true
-            return acc
-          }, {})
-          setTelecallerStatus(statusMap)
-        }
-
-      } catch (err: any) {
-        console.error("Error fetching users:", err)
-        toast.error("Failed to load users")
-      } finally {
-        setIsLoading(false)
+  const fetchData = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      // 1. Get Current User Role
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      if (authUser) {
+        const { data: profile } = await supabase.from("users").select("role").eq("id", authUser.id).single()
+        if (profile) setCurrentUserRole(profile.role)
       }
-    }
 
-    fetchUsersAndPermissions()
-  }, [])
+      // 2. Fetch Users (CRASH FIX: Removed the failing join 'manager:users!...')
+      const { data: userData, error: userError } = await supabase
+        .from("users")
+        .select("*")
+        .order("created_at", { ascending: false })
+      
+      if (userError) throw userError
+
+      // 3. Manual "Client-Side Join" to get Manager Names
+      // This bypasses the database constraint naming error entirely
+      let enrichedUsers: UserProfile[] = userData || []
+      
+      const managerIds = Array.from(new Set(userData?.map(u => u.manager_id).filter(Boolean))) as string[]
+      
+      if (managerIds.length > 0) {
+        const { data: managers } = await supabase
+          .from("users")
+          .select("id, full_name")
+          .in("id", managerIds)
+        
+        // Create a lookup map: { 'user-id-1': 'John Doe', ... }
+        const managerMap = (managers || []).reduce((acc: any, curr: any) => {
+            acc[curr.id] = curr.full_name
+            return acc
+        }, {})
+
+        // Attach names to users
+        enrichedUsers = userData!.map((u: any) => ({
+            ...u,
+            manager_name: u.manager_id ? managerMap[u.manager_id] : null
+        }))
+      }
+
+      // 4. Fetch Online Status
+      const today = new Date().toISOString().split('T')[0]
+      const { data: attendance } = await supabase.from("attendance").select("user_id, check_in").eq("date", today)
+      
+      const statusMap: Record<string, boolean> = {}
+      attendance?.forEach((r: any) => {
+          if(r.check_in) statusMap[r.user_id] = true
+      })
+      setTelecallerStatus(statusMap)
+
+      setUsers(enrichedUsers)
+
+    } catch (err: any) {
+      console.error(err)
+      toast.error("Failed to load users")
+    } finally {
+      setIsLoading(false)
+    }
+  }, [supabase])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
 
   // --- FILTER & PAGINATION LOGIC ---
   const filteredUsers = useMemo(() => {
@@ -349,10 +360,10 @@ export default function UsersPage() {
                       )}
                     </TableCell>
                     <TableCell className="hidden md:table-cell text-sm text-slate-600">
-                      {user.manager?.full_name ? (
+                      {user.manager_name ? (
                           <div className="flex items-center gap-1.5">
                               <Shield className="h-3 w-3 text-slate-400" />
-                              {user.manager.full_name}
+                              {user.manager_name}
                           </div>
                       ) : (
                           <span className="text-slate-400 text-xs italic">Unassigned</span>
@@ -366,7 +377,6 @@ export default function UsersPage() {
                         <DropdownMenu modal={false}>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:text-slate-700 hover:bg-slate-100">
-                              <span className="sr-only">Open menu</span>
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
@@ -374,9 +384,9 @@ export default function UsersPage() {
                             <DropdownMenuLabel>User Actions</DropdownMenuLabel>
                             <DropdownMenuSeparator />
                             
-                            {/* FIX: Using asChild for Link to prevent click conflicts */}
+                            {/* FIX: Using asChild for Next.js Link compatibility */}
                             <DropdownMenuItem asChild>
-                              <Link href={`/admin/users/${user.id}/edit`} className="w-full cursor-pointer flex items-center">
+                              <Link href={`/admin/users/${user.id}/edit`} className="cursor-pointer w-full flex items-center">
                                 Edit Details
                               </Link>
                             </DropdownMenuItem>
