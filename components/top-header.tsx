@@ -208,20 +208,21 @@ export function TopHeader({ user: initialUser, onMenuClick }: TopHeaderProps) {
             <Skeleton className="h-9 w-9 rounded-full" />
           </div>
         ) : (
-          /* FIX: Removed modal={false} here to restore standard dropdown behavior in header */
           <DropdownMenu>
+            {/* FIX: Replaced custom Button component with native button to ensure event propagation */}
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="rounded-full h-9 w-9 border border-slate-200 hover:shadow-md transition-all focus-visible:ring-2 focus-visible:ring-offset-2">
+              <button className="rounded-full h-9 w-9 border border-slate-200 hover:shadow-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 flex items-center justify-center bg-white cursor-pointer">
                 <Avatar className="h-full w-full">
                   <AvatarImage src={user?.user_metadata?.avatar_url} />
                   <AvatarFallback className="bg-gradient-to-br from-blue-600 to-indigo-600 text-white font-medium text-xs">
                     {getInitials()}
                   </AvatarFallback>
                 </Avatar>
-              </Button>
+              </button>
             </DropdownMenuTrigger>
             
-            <DropdownMenuContent className="w-56 mt-2" align="end" forceMount>
+            {/* FIX: Removed forceMount to prevent visual locking */}
+            <DropdownMenuContent className="w-56 mt-2 mr-2" align="end">
               <DropdownMenuLabel className="font-normal">
                 <div className="flex flex-col space-y-1">
                   <p className="text-sm font-medium leading-none truncate">{user?.user_metadata?.full_name || "User"}</p>
