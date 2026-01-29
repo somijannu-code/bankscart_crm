@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/client"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { User } from "@supabase/supabase-js"
 import Link from "next/link"
-import { useDebounce } from "@/hooks/use-debounce" // Ensure you have this hook or use setTimeout
 
 // UI Components
 import { Button } from "@/components/ui/button"
@@ -64,7 +63,7 @@ export function TopHeader({ user: initialUser, onMenuClick }: TopHeaderProps) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
-  // Debounce Search to prevent URL spam
+  // Debounce Search
   useEffect(() => {
     const timer = setTimeout(() => {
       const params = new URLSearchParams(searchParams)
@@ -73,11 +72,10 @@ export function TopHeader({ user: initialUser, onMenuClick }: TopHeaderProps) {
       } else {
         params.delete('search')
       }
-      // Only push if changed
       if (params.toString() !== searchParams.toString()) {
         router.replace(`${pathname}?${params.toString()}`)
       }
-    }, 400) // 400ms delay
+    }, 400)
 
     return () => clearTimeout(timer)
   }, [searchValue, router, pathname, searchParams])
@@ -114,12 +112,9 @@ export function TopHeader({ user: initialUser, onMenuClick }: TopHeaderProps) {
   // Breadcrumb Logic
   const breadcrumbs = pathname.split('/').filter(Boolean).map((segment, index, arr) => {
     const href = `/${arr.slice(0, index + 1).join('/')}`
-    
-    // Check if UUID (rough check for 32+ chars)
     const isUUID = segment.length > 30 
     const label = isUUID ? "Details" : (ROUTE_LABELS[segment] || segment.replace(/-/g, ' '))
     const isLast = index === arr.length - 1
-    
     return { href, label, isLast }
   })
 
@@ -172,17 +167,14 @@ export function TopHeader({ user: initialUser, onMenuClick }: TopHeaderProps) {
         </div>
       </div>
 
-      {/* MIDDLE: Search Bar (Responsive) */}
+      {/* MIDDLE: Search Bar */}
       <div className={`flex items-center justify-end transition-all duration-300 ${isSearchOpen ? 'w-full md:w-auto' : 'w-auto'}`}>
-        
-        {/* Mobile Search Trigger */}
         {!isSearchOpen && (
           <Button variant="ghost" size="icon" className="md:hidden mr-2" onClick={() => setIsSearchOpen(true)}>
             <Search className="h-5 w-5 text-slate-500" />
           </Button>
         )}
 
-        {/* The Input */}
         <div className={`${isSearchOpen ? 'flex w-full md:w-96' : 'hidden md:flex md:w-80'} relative group transition-all`}>
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400 group-focus-within:text-blue-500 transition-colors pointer-events-none" />
           <Input 
@@ -193,8 +185,6 @@ export function TopHeader({ user: initialUser, onMenuClick }: TopHeaderProps) {
             onChange={(e) => setSearchValue(e.target.value)}
             onBlur={() => !searchValue && setIsSearchOpen(false)} 
           />
-          
-          {/* Close Button (Mobile) or Kbd (Desktop) */}
           <div className="absolute right-2 top-2 flex items-center">
             {isSearchOpen ? (
                <button onClick={() => { setSearchValue(""); setIsSearchOpen(false); }} className="md:hidden text-slate-400">
@@ -218,7 +208,8 @@ export function TopHeader({ user: initialUser, onMenuClick }: TopHeaderProps) {
             <Skeleton className="h-9 w-9 rounded-full" />
           </div>
         ) : (
-          <DropdownMenu>
+          /* FIX: Added modal={false} to prevent focus locking issues */
+          <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="relative h-9 w-9 rounded-full p-0 hover:bg-transparent focus-visible:ring-2 focus-visible:ring-offset-2">
                 <Avatar className="h-9 w-9 border border-slate-200 hover:shadow-md transition-all">
@@ -229,7 +220,9 @@ export function TopHeader({ user: initialUser, onMenuClick }: TopHeaderProps) {
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-56" align="end" forceMount>
+            
+            {/* FIX: Removed forceMount to allow standard open/close behavior */}
+            <DropdownMenuContent className="w-56" align="end">
               <DropdownMenuLabel className="font-normal">
                 <div className="flex flex-col space-y-1">
                   <p className="text-sm font-medium leading-none truncate">{user?.user_metadata?.full_name || "User"}</p>
