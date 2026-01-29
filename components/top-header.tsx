@@ -35,7 +35,7 @@ import {
 
 import { NotificationCenter } from "@/components/notification-center"
 
-// Route Mapping for Clean Breadcrumbs
+// Route Mapping
 const ROUTE_LABELS: Record<string, string> = {
   admin: "Dashboard",
   leads: "Lead Management",
@@ -109,7 +109,7 @@ export function TopHeader({ user: initialUser, onMenuClick }: TopHeaderProps) {
     return () => document.removeEventListener("keydown", down)
   }, [])
 
-  // Breadcrumb Logic
+  // Breadcrumbs
   const breadcrumbs = pathname.split('/').filter(Boolean).map((segment, index, arr) => {
     const href = `/${arr.slice(0, index + 1).join('/')}`
     const isUUID = segment.length > 30 
@@ -208,11 +208,11 @@ export function TopHeader({ user: initialUser, onMenuClick }: TopHeaderProps) {
             <Skeleton className="h-9 w-9 rounded-full" />
           </div>
         ) : (
-          /* FIX: Added modal={false} to prevent focus locking issues */
-          <DropdownMenu modal={false}>
+          /* FIX: Removed modal={false} here to restore standard dropdown behavior in header */
+          <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="relative h-9 w-9 rounded-full p-0 hover:bg-transparent focus-visible:ring-2 focus-visible:ring-offset-2">
-                <Avatar className="h-9 w-9 border border-slate-200 hover:shadow-md transition-all">
+              <Button variant="ghost" size="icon" className="rounded-full h-9 w-9 border border-slate-200 hover:shadow-md transition-all focus-visible:ring-2 focus-visible:ring-offset-2">
+                <Avatar className="h-full w-full">
                   <AvatarImage src={user?.user_metadata?.avatar_url} />
                   <AvatarFallback className="bg-gradient-to-br from-blue-600 to-indigo-600 text-white font-medium text-xs">
                     {getInitials()}
@@ -221,8 +221,7 @@ export function TopHeader({ user: initialUser, onMenuClick }: TopHeaderProps) {
               </Button>
             </DropdownMenuTrigger>
             
-            {/* FIX: Removed forceMount to allow standard open/close behavior */}
-            <DropdownMenuContent className="w-56" align="end">
+            <DropdownMenuContent className="w-56 mt-2" align="end" forceMount>
               <DropdownMenuLabel className="font-normal">
                 <div className="flex flex-col space-y-1">
                   <p className="text-sm font-medium leading-none truncate">{user?.user_metadata?.full_name || "User"}</p>
