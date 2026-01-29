@@ -1,6 +1,5 @@
 "use client"
 
-// FIX: Added useCallback to the import list
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card } from "@/components/ui/card"
@@ -13,9 +12,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
-  UserPlus, Search, Trash2, Ban, CheckCircle, MoreHorizontal, Filter, Shield, Mail, Loader2, Eye
+  UserPlus, Search, Trash2, Ban, CheckCircle, MoreHorizontal, Filter, Shield, Mail, Loader2, Eye, Edit
 } from "lucide-react"
 import Link from "next/link"
+import { useRouter } from "next/navigation" // <--- Import Router
 import { toast } from "sonner"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { EmptyState } from "@/components/empty-state" 
@@ -37,6 +37,7 @@ const ITEMS_PER_PAGE = 10
 
 export default function UsersPage() {
   const supabase = createClient()
+  const router = useRouter() // <--- Initialize Router
 
   // State
   const [users, setUsers] = useState<UserProfile[]>([])
@@ -58,14 +59,12 @@ export default function UsersPage() {
   const fetchData = useCallback(async () => {
     setIsLoading(true)
     try {
-      // 1. Get Current User Role
       const { data: { user: authUser } } = await supabase.auth.getUser()
       if (authUser) {
         const { data: profile } = await supabase.from("users").select("role").eq("id", authUser.id).single()
         if (profile) setCurrentUserRole(profile.role)
       }
 
-      // 2. Fetch Users (No joins to avoid PGRST errors)
       const { data: userData, error: userError } = await supabase
         .from("users")
         .select("*")
@@ -73,7 +72,6 @@ export default function UsersPage() {
       
       if (userError) throw userError
 
-      // 3. Manual Client-Side Join for Managers
       let enrichedUsers: UserProfile[] = userData || []
       const managerIds = Array.from(new Set(userData?.map(u => u.manager_id).filter(Boolean))) as string[]
       
@@ -94,7 +92,6 @@ export default function UsersPage() {
         }))
       }
 
-      // 4. Fetch Online Status
       const today = new Date().toISOString().split('T')[0]
       const { data: attendance } = await supabase.from("attendance").select("user_id, check_in").eq("date", today)
       
@@ -118,7 +115,7 @@ export default function UsersPage() {
     fetchData()
   }, [fetchData])
 
-  // --- FILTER & PAGINATION LOGIC ---
+  // --- FILTER & PAGINATION ---
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
       const matchesSearch = 
@@ -174,7 +171,6 @@ export default function UsersPage() {
 
   const canManage = ['super_admin', 'admin', 'owner'].includes(currentUserRole)
 
-  // --- RENDER HELPERS ---
   const getRoleBadge = (role: string) => {
     const styles: Record<string, string> = {
       admin: "bg-purple-100 text-purple-700 border-purple-200",
@@ -192,7 +188,6 @@ export default function UsersPage() {
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto min-h-screen bg-slate-50/50">
       
-      {/* HEADER */}
       <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Team Management</h1>
@@ -208,7 +203,7 @@ export default function UsersPage() {
         )}
       </div>
 
-      {/* FILTERS TOOLBAR */}
+      {/* FILTERS */}
       <div className="flex flex-col sm:flex-row gap-3 items-center justify-between bg-white p-1 rounded-xl border shadow-sm">
         <div className="relative w-full sm:w-80">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
@@ -246,7 +241,7 @@ export default function UsersPage() {
         </div>
       </div>
 
-      {/* BULK ACTIONS BANNER */}
+      {/* BULK ACTIONS */}
       {selectedUserIds.length > 0 && canManage && (
           <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-2 px-4 flex items-center justify-between animate-in slide-in-from-top-2">
               <span className="text-sm text-indigo-700 font-medium">{selectedUserIds.length} users selected</span>
@@ -261,7 +256,7 @@ export default function UsersPage() {
           </div>
       )}
 
-      {/* DATA TABLE */}
+      {/* TABLE */}
       <Card className="shadow-sm border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
           <Table>
@@ -286,15 +281,7 @@ export default function UsersPage() {
                 [...Array(5)].map((_, i) => (
                   <TableRow key={i}>
                     <TableCell><Skeleton className="h-4 w-4 rounded" /></TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <Skeleton className="h-9 w-9 rounded-full" />
-                        <div className="space-y-1">
-                          <Skeleton className="h-4 w-24" />
-                          <Skeleton className="h-3 w-32" />
-                        </div>
-                      </div>
-                    </TableCell>
+                    <TableCell><div className="flex items-center gap-3"><Skeleton className="h-9 w-9 rounded-full" /><div className="space-y-1"><Skeleton className="h-4 w-24" /><Skeleton className="h-3 w-32" /></div></div></TableCell>
                     <TableCell><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
                     <TableCell><Skeleton className="h-5 w-12 rounded-full" /></TableCell>
                     <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-20" /></TableCell>
@@ -305,22 +292,14 @@ export default function UsersPage() {
               ) : filteredUsers.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} className="h-64 text-center">
-                    <EmptyState 
-                        icon={Search} 
-                        title="No users found" 
-                        description="Try adjusting your search or filters to find team members." 
-                        variant="ghost"
-                    />
+                    <EmptyState icon={Search} title="No users found" description="Try adjusting your search." variant="ghost" />
                   </TableCell>
                 </TableRow>
               ) : (
                 paginatedUsers.map((user) => (
                   <TableRow key={user.id} className={`group transition-colors ${selectedUserIds.includes(user.id) ? "bg-indigo-50/50 hover:bg-indigo-50" : "hover:bg-slate-50"}`}>
                     <TableCell className="text-center">
-                      <Checkbox 
-                        checked={selectedUserIds.includes(user.id)}
-                        onCheckedChange={() => toggleSelection(user.id)}
-                      />
+                      <Checkbox checked={selectedUserIds.includes(user.id)} onCheckedChange={() => toggleSelection(user.id)} />
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-3">
@@ -329,69 +308,71 @@ export default function UsersPage() {
                             <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${user.full_name}`} />
                             <AvatarFallback className="bg-indigo-100 text-indigo-700">{user.full_name?.[0]}</AvatarFallback>
                           </Avatar>
-                          {/* Online Dot */}
                           {user.role === 'telecaller' && (
                             <span className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-white ${telecallerStatus[user.id] ? "bg-green-500" : "bg-slate-300"}`} />
                           )}
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-sm font-semibold text-slate-900">{user.full_name || "Unnamed"}</span>
-                          <div className="flex items-center gap-2 text-xs text-slate-500">
-                            <span className="flex items-center gap-1"><Mail className="h-3 w-3" /> {user.email}</span>
-                          </div>
+                          <span className="text-sm font-semibold text-slate-900">{user.full_name}</span>
+                          <span className="text-xs text-slate-500 flex items-center gap-1">{user.email}</span>
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell>
-                      {getRoleBadge(user.role)}
-                    </TableCell>
+                    <TableCell>{getRoleBadge(user.role)}</TableCell>
                     <TableCell>
                       {user.is_active ? (
-                        <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full w-fit border border-emerald-100">
-                          <CheckCircle className="h-3 w-3" /> Active
-                        </div>
+                        <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full w-fit border border-emerald-100"><CheckCircle className="h-3 w-3" /> Active</div>
                       ) : (
-                        <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-100 px-2 py-1 rounded-full w-fit border border-slate-200">
-                          <Ban className="h-3 w-3" /> Inactive
-                        </div>
+                        <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-100 px-2 py-1 rounded-full w-fit border border-slate-200"><Ban className="h-3 w-3" /> Inactive</div>
                       )}
                     </TableCell>
                     <TableCell className="hidden md:table-cell text-sm text-slate-600">
-                      {user.manager_name ? (
-                          <div className="flex items-center gap-1.5">
-                              <Shield className="h-3 w-3 text-slate-400" />
-                              {user.manager_name}
-                          </div>
-                      ) : (
-                          <span className="text-slate-400 text-xs italic">Unassigned</span>
-                      )}
+                      {user.manager_name ? <div className="flex items-center gap-1.5"><Shield className="h-3 w-3 text-slate-400" />{user.manager_name}</div> : <span className="text-slate-400 text-xs italic">Unassigned</span>}
                     </TableCell>
                     <TableCell className="hidden md:table-cell text-sm text-slate-500">
-                      {new Date(user.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {new Date(user.created_at).toLocaleDateString()}
                     </TableCell>
+                    
+                    {/* --- ACTIONS COLUMN (FIXED) --- */}
                     <TableCell>
                       {canManage && (
                         <DropdownMenu modal={false}>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:text-slate-700 hover:bg-slate-100">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-8 w-8 text-slate-500 hover:text-slate-700 hover:bg-slate-100 data-[state=open]:bg-slate-100"
+                              onClick={(e) => e.stopPropagation()} // Stop row click interference
+                            >
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-48">
-                            <DropdownMenuLabel>User Actions</DropdownMenuLabel>
+                          <DropdownMenuContent align="end" className="w-48 bg-white shadow-lg border border-slate-200 z-50">
+                            <DropdownMenuLabel>Actions</DropdownMenuLabel>
                             <DropdownMenuSeparator />
                             
-                            <DropdownMenuItem asChild>
-                              <Link href={`/admin/users/${user.id}/edit`} className="cursor-pointer w-full flex items-center">
-                                Edit Details
-                              </Link>
+                            {/* FIX: Use onClick + Router Push instead of nested Link */}
+                            <DropdownMenuItem 
+                              className="cursor-pointer"
+                              onClick={() => router.push(`/admin/users/${user.id}/edit`)}
+                            >
+                              <Edit className="h-4 w-4 mr-2" /> Edit Details
                             </DropdownMenuItem>
                             
+                            {currentUserRole === 'super_admin' && (
+                                <DropdownMenuItem className="cursor-pointer" onClick={() => toast.info("Impersonate coming soon")}>
+                                    <Eye className="h-4 w-4 mr-2" /> Impersonate
+                                </DropdownMenuItem>
+                            )}
+                            
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem className="text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer" onClick={() => {
+                            <DropdownMenuItem 
+                              className="text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer" 
+                              onClick={() => {
                                 setSelectedUserIds([user.id])
                                 handleBulkAction('delete')
-                            }}>
+                              }}
+                            >
                               <Trash2 className="h-4 w-4 mr-2" /> Delete User
                             </DropdownMenuItem>
                           </DropdownMenuContent>
@@ -405,29 +386,15 @@ export default function UsersPage() {
           </Table>
         </div>
         
-        {/* PAGINATION FOOTER */}
+        {/* PAGINATION */}
         {filteredUsers.length > 0 && (
             <div className="border-t p-4 flex items-center justify-between bg-slate-50/50">
                 <span className="text-xs text-slate-500">
                     Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, filteredUsers.length)} of {filteredUsers.length} entries
                 </span>
                 <div className="flex gap-2">
-                    <Button 
-                        variant="outline" 
-                        size="sm" 
-                        disabled={currentPage === 1} 
-                        onClick={() => setCurrentPage(p => p - 1)}
-                    >
-                        Previous
-                    </Button>
-                    <Button 
-                        variant="outline" 
-                        size="sm" 
-                        disabled={currentPage === totalPages} 
-                        onClick={() => setCurrentPage(p => p + 1)}
-                    >
-                        Next
-                    </Button>
+                    <Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>Previous</Button>
+                    <Button variant="outline" size="sm" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>Next</Button>
                 </div>
             </div>
         )}
