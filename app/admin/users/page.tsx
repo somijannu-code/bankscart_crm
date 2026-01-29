@@ -17,7 +17,7 @@ import {
 import Link from "next/link"
 import { toast } from "sonner"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { EmptyState } from "@/components/empty-state" // Assuming you have this
+import { EmptyState } from "@/components/empty-state" 
 
 // --- TYPES ---
 interface UserProfile {
@@ -30,7 +30,7 @@ interface UserProfile {
   created_at: string
   manager_id: string | null
   manager?: { full_name: string }
-  last_active?: string // Derived from attendance
+  last_active?: string
 }
 
 const ITEMS_PER_PAGE = 10
@@ -65,12 +65,12 @@ export default function UsersPage() {
         if (profile) setCurrentUserRole(profile.role)
       }
 
-      // 2. Fetch Users
+      // 2. Fetch Users (FIX APPLIED: Removed explicit foreign key hint)
       const { data, error } = await supabase
         .from("users")
         .select(`
           *,
-          manager:users!users_manager_id_fkey(full_name)
+          manager:users(full_name) 
         `)
         .order("created_at", { ascending: false })
       
@@ -90,7 +90,7 @@ export default function UsersPage() {
 
     } catch (err: any) {
       console.error(err)
-      toast.error("Failed to load users")
+      toast.error("Failed to load users. Check database console.")
     } finally {
       setIsLoading(false)
     }
