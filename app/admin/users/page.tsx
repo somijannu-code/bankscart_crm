@@ -29,6 +29,7 @@ interface UserProfile {
   is_active: boolean
   created_at: string
   manager_id: string | null
+  manager?: { full_name: string } // Join data
 }
 
 const ITEMS_PER_PAGE = 10
@@ -64,17 +65,23 @@ export default function UsersPage() {
           if (profile) setCurrentUserRole(profile.role)
         }
 
-        // 2. Fetch Users (Safe Mode: No Joins)
+        // 2. Fetch Users with Manager Join (Corrected Query)
+        // We remove the explicit foreign key hint if it causes issues, assuming standard naming
         const { data: userData, error: userError } = await supabase
           .from("users")
-          .select("id, email, full_name, role, phone, is_active, created_at, manager_id")
-          .order("is_active", { ascending: false }) 
+          .select(`
+            id, email, full_name, role, phone, is_active, created_at, manager_id,
+            manager:users!users_manager_id_fkey(full_name)
+          `) 
+          // Note: If you get a PGRST error here again, remove "!users_manager_id_fkey" 
+          // and just use "manager:users(full_name)"
           .order("created_at", { ascending: false })
           .limit(100)
 
         if (userError) throw userError
         
-        setUsers(userData || [])
+        // Safely cast data
+        setUsers((userData as any) || [])
 
         // 3. Fetch Online Status
         const today = new Date().toISOString().split('T')[0]
@@ -123,14 +130,6 @@ export default function UsersPage() {
   }, [filteredUsers, currentPage])
 
   const totalPages = Math.ceil(filteredUsers.length / ITEMS_PER_PAGE)
-
-  // --- HELPER: Get Manager Name (Client-Side Join) ---
-  // Since we have all users in state, we can find the manager name without a DB join
-  const getManagerName = (managerId: string | null) => {
-    if (!managerId) return null
-    const manager = users.find(u => u.id === managerId)
-    return manager ? manager.full_name : "Unknown"
-  }
 
   // --- ACTIONS ---
   const handleBulkAction = async (action: 'delete' | 'deactivate') => {
@@ -350,10 +349,10 @@ export default function UsersPage() {
                       )}
                     </TableCell>
                     <TableCell className="hidden md:table-cell text-sm text-slate-600">
-                      {user.manager_id ? (
+                      {user.manager?.full_name ? (
                           <div className="flex items-center gap-1.5">
                               <Shield className="h-3 w-3 text-slate-400" />
-                              {getManagerName(user.manager_id)}
+                              {user.manager.full_name}
                           </div>
                       ) : (
                           <span className="text-slate-400 text-xs italic">Unassigned</span>
@@ -364,28 +363,26 @@ export default function UsersPage() {
                     </TableCell>
                     <TableCell>
                       {canManage && (
-                        <DropdownMenu>
+                        <DropdownMenu modal={false}>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-500 hover:text-slate-700 hover:bg-slate-100">
+                              <span className="sr-only">Open menu</span>
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-48">
                             <DropdownMenuLabel>User Actions</DropdownMenuLabel>
                             <DropdownMenuSeparator />
-                            <Link href={`/admin/users/${user.id}/edit`}>
-                              <DropdownMenuItem>Edit Details</DropdownMenuItem>
-                            </Link>
                             
-                            {/* Impersonation Feature (For Admins) */}
-                            {currentUserRole === 'super_admin' && (
-                                <DropdownMenuItem onClick={() => toast.info("Impersonation feature coming soon!")}>
-                                    <Eye className="h-4 w-4 mr-2 text-slate-500" /> Impersonate
-                                </DropdownMenuItem>
-                            )}
+                            {/* FIX: Using asChild for Link to prevent click conflicts */}
+                            <DropdownMenuItem asChild>
+                              <Link href={`/admin/users/${user.id}/edit`} className="w-full cursor-pointer flex items-center">
+                                Edit Details
+                              </Link>
+                            </DropdownMenuItem>
                             
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem className="text-red-600 focus:text-red-600 focus:bg-red-50" onClick={() => {
+                            <DropdownMenuItem className="text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer" onClick={() => {
                                 setSelectedUserIds([user.id])
                                 handleBulkAction('delete')
                             }}>
