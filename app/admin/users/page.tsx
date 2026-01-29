@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+// FIX: Added useCallback to the import list
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -12,12 +13,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
-  UserPlus, Search, Trash2, Ban, CheckCircle, MoreHorizontal, Filter, Shield, Eye, Mail, Phone, Loader2
+  UserPlus, Search, Trash2, Ban, CheckCircle, MoreHorizontal, Filter, Shield, Mail, Loader2, Eye
 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { EmptyState } from "@/components/empty-state" 
+import { EmptyState } from "@/components/ui/empty-state" 
 
 // --- TYPES ---
 interface UserProfile {
@@ -29,7 +30,7 @@ interface UserProfile {
   is_active: boolean
   created_at: string
   manager_id: string | null
-  manager_name?: string // We will populate this manually
+  manager_name?: string
 }
 
 const ITEMS_PER_PAGE = 10
@@ -64,7 +65,7 @@ export default function UsersPage() {
         if (profile) setCurrentUserRole(profile.role)
       }
 
-      // 2. Fetch Users (CRASH FIX: Removed the failing join 'manager:users!...')
+      // 2. Fetch Users (No joins to avoid PGRST errors)
       const { data: userData, error: userError } = await supabase
         .from("users")
         .select("*")
@@ -72,10 +73,8 @@ export default function UsersPage() {
       
       if (userError) throw userError
 
-      // 3. Manual "Client-Side Join" to get Manager Names
-      // This bypasses the database constraint naming error entirely
+      // 3. Manual Client-Side Join for Managers
       let enrichedUsers: UserProfile[] = userData || []
-      
       const managerIds = Array.from(new Set(userData?.map(u => u.manager_id).filter(Boolean))) as string[]
       
       if (managerIds.length > 0) {
@@ -84,13 +83,11 @@ export default function UsersPage() {
           .select("id, full_name")
           .in("id", managerIds)
         
-        // Create a lookup map: { 'user-id-1': 'John Doe', ... }
         const managerMap = (managers || []).reduce((acc: any, curr: any) => {
             acc[curr.id] = curr.full_name
             return acc
         }, {})
 
-        // Attach names to users
         enrichedUsers = userData!.map((u: any) => ({
             ...u,
             manager_name: u.manager_id ? managerMap[u.manager_id] : null
@@ -384,7 +381,6 @@ export default function UsersPage() {
                             <DropdownMenuLabel>User Actions</DropdownMenuLabel>
                             <DropdownMenuSeparator />
                             
-                            {/* FIX: Using asChild for Next.js Link compatibility */}
                             <DropdownMenuItem asChild>
                               <Link href={`/admin/users/${user.id}/edit`} className="cursor-pointer w-full flex items-center">
                                 Edit Details
