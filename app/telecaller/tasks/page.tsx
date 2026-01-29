@@ -2,14 +2,14 @@ import { Suspense } from "react"
 import { createClient } from "@/lib/supabase/server"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Button } from "@/components/ui/button"
+import { Button } from "@/components/ui/button" 
 import { 
   CheckSquare, Calendar, Clock, ArrowRight, AlertTriangle, 
   CheckCircle2, History, Plus 
 } from "lucide-react"
-import { isSameDay, startOfToday, isBefore, format, addDays, endOfToday } from "date-fns"
+import { isSameDay, startOfToday, isBefore, format, endOfToday } from "date-fns"
 import { redirect } from "next/navigation"
-import Link from "next/link"
+import Link from "next/link" 
 import { TaskCard } from "@/components/task-card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/empty-state"
@@ -19,8 +19,7 @@ export const dynamic = "force-dynamic"
 export default function TasksPage() {
   return (
     <div className="p-6 space-y-6 max-w-[1200px] mx-auto">
-      
-      {/* HEADER */}
+      {/* HEADER WITH ACTION */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">My Tasks</h1>
@@ -77,12 +76,15 @@ async function TasksContent() {
   const todayStart = startOfToday()
   const todayEnd = endOfToday()
   
-  const overdueTasks = followUps.filter(task => isBefore(new Date(task.scheduled_at), todayStart))
+  // Safe date parsing helper
+  const safeDate = (dateStr: string | null) => dateStr ? new Date(dateStr) : new Date()
+
+  const overdueTasks = followUps.filter(task => isBefore(safeDate(task.scheduled_at), todayStart))
   const todayTasks = followUps.filter(task => {
-      const date = new Date(task.scheduled_at)
+      const date = safeDate(task.scheduled_at)
       return date >= todayStart && date <= todayEnd
   })
-  const upcomingTasks = followUps.filter(task => new Date(task.scheduled_at) > todayEnd)
+  const upcomingTasks = followUps.filter(task => safeDate(task.scheduled_at) > todayEnd)
 
   return (
     <Tabs defaultValue="focus" className="space-y-8">
@@ -228,7 +230,9 @@ function TabTrigger({ value, label, count }: any) {
 
 function GroupedTasks({ tasks }: { tasks: any[] }) {
   const grouped = tasks.reduce((acc, task) => {
-    const dateKey = format(new Date(task.scheduled_at), "yyyy-MM-dd")
+    // Check if scheduled_at exists before formatting
+    const dateStr = task.scheduled_at || new Date().toISOString()
+    const dateKey = format(new Date(dateStr), "yyyy-MM-dd")
     if (!acc[dateKey]) acc[dateKey] = []
     acc[dateKey].push(task)
     return acc
@@ -280,9 +284,9 @@ async function CompletedTasksList({ userId }: { userId: string }) {
             <div>
               <p className="text-sm font-medium text-slate-700 line-through decoration-slate-300 decoration-2">{task.title}</p>
               <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
-                 <span className="font-medium">{task.leads?.name || "Unknown"}</span>
+                 <span className="font-medium">{task.leads?.name || "Unknown Lead"}</span>
                  <span>•</span>
-                 <span>{format(new Date(task.completed_at || task.scheduled_at), "MMM d, h:mm a")}</span>
+                 <span>{format(new Date(task.completed_at || task.scheduled_at || new Date()), "MMM d, h:mm a")}</span>
               </div>
             </div>
           </div>
