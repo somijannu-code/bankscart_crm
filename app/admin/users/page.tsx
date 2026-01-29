@@ -15,7 +15,6 @@ import {
   UserPlus, Search, Trash2, Ban, CheckCircle, MoreHorizontal, Filter, Shield, Mail, Loader2, Eye, Edit
 } from "lucide-react"
 import Link from "next/link"
-import { useRouter } from "next/navigation" // <--- Import Router
 import { toast } from "sonner"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { EmptyState } from "@/components/empty-state" 
@@ -37,7 +36,6 @@ const ITEMS_PER_PAGE = 10
 
 export default function UsersPage() {
   const supabase = createClient()
-  const router = useRouter() // <--- Initialize Router
 
   // State
   const [users, setUsers] = useState<UserProfile[]>([])
@@ -333,30 +331,31 @@ export default function UsersPage() {
                       {new Date(user.created_at).toLocaleDateString()}
                     </TableCell>
                     
-                    {/* --- ACTIONS COLUMN (FIXED) --- */}
+                    {/* --- FIXED DROPDOWN --- */}
                     <TableCell>
                       {canManage && (
                         <DropdownMenu modal={false}>
                           <DropdownMenuTrigger asChild>
+                            {/* Removed onClick={stopPropagation} as it can break trigger logic */}
                             <Button 
                               variant="ghost" 
                               size="icon" 
                               className="h-8 w-8 text-slate-500 hover:text-slate-700 hover:bg-slate-100 data-[state=open]:bg-slate-100"
-                              onClick={(e) => e.stopPropagation()} // Stop row click interference
                             >
+                              <span className="sr-only">Open menu</span>
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
+                          
                           <DropdownMenuContent align="end" className="w-48 bg-white shadow-lg border border-slate-200 z-50">
-                            <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                            <DropdownMenuLabel>User Actions</DropdownMenuLabel>
                             <DropdownMenuSeparator />
                             
-                            {/* FIX: Use onClick + Router Push instead of nested Link */}
-                            <DropdownMenuItem 
-                              className="cursor-pointer"
-                              onClick={() => router.push(`/admin/users/${user.id}/edit`)}
-                            >
-                              <Edit className="h-4 w-4 mr-2" /> Edit Details
+                            {/* FIX: Use asChild + Link. This is the correct Shadcn/Next.js pattern */}
+                            <DropdownMenuItem asChild>
+                              <Link href={`/admin/users/${user.id}/edit`} className="w-full flex items-center cursor-pointer">
+                                <Edit className="h-4 w-4 mr-2" /> Edit Details
+                              </Link>
                             </DropdownMenuItem>
                             
                             {currentUserRole === 'super_admin' && (
@@ -366,9 +365,10 @@ export default function UsersPage() {
                             )}
                             
                             <DropdownMenuSeparator />
+                            
                             <DropdownMenuItem 
                               className="text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer" 
-                              onClick={() => {
+                              onSelect={() => { // Changed to onSelect for better event handling in menus
                                 setSelectedUserIds([user.id])
                                 handleBulkAction('delete')
                               }}
