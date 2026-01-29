@@ -189,7 +189,7 @@ export default function TelecallerDashboard() {
       color: "text-emerald-600",
       bgColor: "bg-emerald-50",
       borderColor: "border-emerald-100",
-      description: "Based on 0.5% comm.",
+      description: "Based on 0.5% comm.(without Target completion no Incentive)",
       trend: "up"
     },
     {
