@@ -12,7 +12,7 @@ import { redirect } from "next/navigation"
 import Link from "next/link" 
 import { TaskCard } from "@/components/task-card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { EmptyState } from "@/components/ui/empty-state"
+import { EmptyState } from "@/components/empty-state"
 
 export const dynamic = "force-dynamic"
 
