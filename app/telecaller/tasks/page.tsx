@@ -10,7 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Skeleton } from "@/components/skeleton"
 import {
   UserPlus, Search, Trash2, Ban, CheckCircle, MoreHorizontal, Filter, Shield, Mail, Loader2, Eye, Edit
 } from "lucide-react"
