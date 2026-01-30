@@ -60,22 +60,25 @@ export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchPa
     })
   }
   
-  // AUTOMATION: Power Hour Mode
+  // AUTOMATION: Power Hour Mode (Modified)
   const togglePowerMode = () => {
     const params = new URLSearchParams(searchParams.toString());
     const isPowerMode = params.get('mode') === 'power';
 
     if (isPowerMode) {
-        // Turn OFF
+        // Turn OFF - Reset all automation filters
         params.delete('mode');
         params.delete('status');
+        params.delete('priority'); 
         params.delete('sort_by');
         params.delete('sort_order');
     } else {
-        // Turn ON: New Leads + High Priority + Sorted by Priority
+        // Turn ON: New Leads ONLY (Priority condition removed as requested)
         params.set('mode', 'power');
         params.set('status', 'new'); 
-        params.set('priority', 'high'); 
+        
+        // We REMOVED the priority filter here.
+        // We still keep sorting by priority so the list is ordered intelligently (High -> Low)
         params.set('sort_by', 'priority');
         params.set('sort_order', 'desc');
     }
