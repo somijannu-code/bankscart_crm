@@ -3,15 +3,15 @@
 import { useState, useTransition } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { 
-  User, Building, Clock, Eye, MessageSquare, 
-  ChevronDown, ChevronUp, AlertCircle, ArrowUpRight, CheckSquare, X, Loader2, Copy, PhoneMissed
+  Building, Clock, ChevronDown, ChevronUp, AlertCircle, ArrowUpRight, 
+  CheckSquare, X, Loader2, Copy, PhoneMissed, MessageSquare 
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { LeadStatusDialog } from "@/components/lead-status-dialog" 
 import { QuickActions } from "@/components/quick-actions" 
-import { Pagination, PaginationContent, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from "@/components/ui/pagination"
+import { Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious } from "@/components/ui/pagination"
 import { useRouter, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
@@ -19,7 +19,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { toast } from "sonner"
 import { formatDistanceToNow } from "date-fns"
 
-// ... (Keep your Lead Interface) ...
 interface Lead {
   id: string
   name: string
@@ -108,12 +107,9 @@ export function TelecallerLeadsTable({
     // Check if there is a next lead
     if (currentIndex >= 0 && currentIndex < leads.length - 1) {
         const nextLead = leads[currentIndex + 1];
-        
         // Brief transition for UX
-        toast.info(`Loading next: ${nextLead.name}`);
         setSelectedLead(nextLead);
-        // We keep isStatusDialogOpen = true
-        // We keep isCallInitiated = true (if you want to auto-start call) OR false (to reset)
+        // Ensure call mode stays active for the next lead
         setIsCallInitiated(true); 
     } else {
         setIsStatusDialogOpen(false);
@@ -126,7 +122,6 @@ export function TelecallerLeadsTable({
     e.stopPropagation();
     toast.message("Marking No Response...", { description: "Scheduling callback for tomorrow." });
 
-    // 1. Calculate tomorrow 11 AM
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(11, 0, 0, 0);
@@ -180,7 +175,6 @@ export function TelecallerLeadsTable({
 
   // --- 3. STATUS UPDATER ---
   const handleStatusUpdate = async (newStatus: string, note?: string, callbackDate?: string) => {
-    // This is handled inside the Dialog usually, but if the Dialog calls back:
     setIsStatusDialogOpen(false)
     router.refresh()
   }
@@ -277,7 +271,6 @@ export function TelecallerLeadsTable({
                     
                     <TableCell>
                         <div className="flex items-center gap-1">
-                            {/* Quick Call Button */}
                             <QuickActions 
                                 phone={lead.phone || ""} 
                                 email={lead.email || ""} 
@@ -390,7 +383,6 @@ export function TelecallerLeadsTable({
         </div>
       </div>
 
-      {/* Pagination */}
       <div className="py-4 border-t flex justify-end">
         {totalPages > 1 && (
             <Pagination>
@@ -415,10 +407,6 @@ export function TelecallerLeadsTable({
         )}
       </div>
 
-      {/* IMPORTANT: We pass 'handleNextLead' to the dialog here. 
-         Make sure your LeadStatusDialog component accepts `onNextLead`.
-         If it doesn't, you need to update LeadStatusDialog to forward this prop to LeadStatusUpdater.
-      */}
       {selectedLead && (
         <LeadStatusDialog
           leadId={selectedLead.id}
@@ -431,7 +419,10 @@ export function TelecallerLeadsTable({
           onStatusUpdate={handleStatusUpdate}
           isCallInitiated={isCallInitiated}
           onCallLogged={handleCallLogged}
-          // PASS THE NEXT FUNCTION HERE
+          
+          // PASSING PROPS DOWN FOR AUTOMATION
+          leadPhoneNumber={selectedLead.phone}
+          telecallerName="Agent"
           onNextLead={handleNextLead}
         />
       )}
