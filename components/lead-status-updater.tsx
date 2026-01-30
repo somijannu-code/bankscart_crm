@@ -8,11 +8,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox" // Make sure you have this component
 import { 
   Phone, Clock, MessageSquare, IndianRupee, AlertCircle, Sparkles, 
   Send, Command, Copy, RotateCcw, ThumbsUp, ThumbsDown, 
   FileText, LogIn, CheckCircle2, XCircle, PhoneForwarded, 
-  PhoneMissed, Briefcase, Plus, X, Activity 
+  PhoneMissed, Briefcase, Plus, X, Activity, ArrowRight
 } from "lucide-react" 
 import { useCallTracking } from "@/context/call-tracking-context"
 import { toast } from "sonner"
@@ -29,6 +30,7 @@ interface LeadStatusUpdaterProps {
   initialLoanAmount?: number | null 
   leadPhoneNumber: string | null | undefined
   telecallerName: string | null | undefined
+  onNextLead?: () => void // New Prop for "Save & Next"
 }
 
 const STATUS_OPTIONS = [
@@ -61,6 +63,7 @@ export function LeadStatusUpdater({
   initialLoanAmount = null,
   leadPhoneNumber = "",
   telecallerName = "Telecaller",
+  onNextLead
 }: LeadStatusUpdaterProps) {
   const supabase = createClient()
   const { activeCall, endCall, updateCallDuration } = useCallTracking()
@@ -72,6 +75,9 @@ export function LeadStatusUpdater({
   const [remarks, setRemarks] = useState("") // General Notes
   const [loanAmount, setLoanAmount] = useState<number | null>(initialLoanAmount)
   const [isModalOpen, setIsModalOpen] = useState(false) 
+  
+  // AUTOMATION STATE
+  const [autoNext, setAutoNext] = useState(false)
    
   // Call Timer State
   const [elapsedTime, setElapsedTime] = useState(0)
@@ -100,7 +106,7 @@ export function LeadStatusUpdater({
   // --- EFFECTS ---
   useEffect(() => { setLoanAmount(initialLoanAmount) }, [initialLoanAmount]);
    
-  // Live Timer for Active Call
+  // AUTOMATION 1: Short Call Detection (<10s) -> Suggest NR
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isCallInitiated && !callDurationOverride) {
@@ -109,6 +115,10 @@ export function LeadStatusUpdater({
             const seconds = Math.floor((Date.now() - startTime) / 1000);
             setElapsedTime(seconds);
         }, 1000);
+    } else if (!isCallInitiated && elapsedTime > 0 && elapsedTime < 10 && !status) {
+        // Call ended quickly, user hasn't selected status yet
+        setStatus("nr");
+        toast.info("Short call detected", { description: "Auto-selected 'No Response'" });
     }
     return () => clearInterval(interval);
   }, [isCallInitiated, activeCall, callDurationOverride]);
@@ -163,6 +173,31 @@ export function LeadStatusUpdater({
       });
   }
 
+  const handleQuickSchedule = (type: '1hr' | 'evening' | 'tomorrow') => {
+    const date = new Date();
+    let noteText = "";
+    
+    if (type === '1hr') {
+        date.setHours(date.getHours() + 1);
+        noteText = "Call back in 1 hour";
+    } else if (type === 'evening') {
+        date.setHours(18, 0, 0, 0);
+        noteText = "Call back in evening";
+    } else if (type === 'tomorrow') {
+        date.setDate(date.getDate() + 1);
+        date.setHours(11, 0, 0, 0);
+        noteText = "Call back tomorrow";
+    }
+    
+    // We treat this as a "Follow Up" status update with a specific date
+    // You might need to adjust onStatusUpdate signature or logic to accept the date directly
+    // Ideally, pass this to a specialized handler or just open modal with pre-filled date
+    // For now, let's open modal but maybe we can automate it fully if API allows
+    setIsModalOpen(true); 
+    // If you want fully auto, you'd need to bypass the modal. 
+    // Let's stick to modal for safety but pre-fill logic would be in the modal component (which we updated).
+  }
+
   const handleQuickAmount = (amount: number) => {
       setLoanAmount(amount);
   }
@@ -180,6 +215,7 @@ export function LeadStatusUpdater({
       setNote("");
       setLoanAmount(initialLoanAmount);
       setNotEligibleReason("");
+      setCallDurationOverride(null);
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -195,7 +231,7 @@ export function LeadStatusUpdater({
     if (status === "not_eligible" && !note.trim()) { toast.error("Reason Required", { description: "Specify why not eligible." }); return }
     if (status === "follow_up") { setIsModalOpen(true); return }
     if (isLoanAmountMissing) { toast.error("Loan Amount Required", { description: "Please enter a valid loan amount for this status." }); return; }
-    
+     
     const finalDuration = callDurationOverride ?? elapsedTime;
     if (isCallInitiated && status !== 'nr' && finalDuration <= 0) {
         toast.error("Invalid Duration", { description: "Call duration must be > 0 seconds." }); return
@@ -228,6 +264,16 @@ export function LeadStatusUpdater({
       
       updateData.status = finalStatus;
 
+      // AUTOMATION 2: Auto-WhatsApp
+      if (["Interested", "Documents_Sent"].includes(finalStatus) && leadPhoneNumber) {
+         let msg = "";
+         if(finalStatus === 'Interested') msg = `Hi ${telecallerName ? telecallerName : "there"}, regarding your loan application...`;
+         if(finalStatus === 'Documents_Sent') msg = "I have shared the documents list via email. Please check.";
+         
+         const wUrl = `https://wa.me/${leadPhoneNumber.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
+         window.open(wUrl, '_blank');
+      }
+
       const { error } = await supabase.from("leads").update(updateData).eq("id", leadId)
       if (error) throw error;
       
@@ -245,6 +291,11 @@ export function LeadStatusUpdater({
       
       setNote(""); setRemarks(""); setCallDurationOverride(null); setElapsedTime(0); setNotEligibleReason(""); setStatus("");
       toast.success("Updated successfully!")
+
+      // AUTOMATION 3: Save & Next
+      if (autoNext && onNextLead) {
+        onNextLead();
+      }
 
     } catch (error: any) {
       console.error(error); toast.error(`Update failed: ${error.message}`)
@@ -265,6 +316,12 @@ export function LeadStatusUpdater({
       onStatusUpdate?.("follow_up", note) 
       setRemarks(""); setNote(""); setCallDurationOverride(null); setElapsedTime(0);
       toast.success("Call Back Scheduled.");
+
+      // AUTOMATION 3: Save & Next (also for Follow-ups)
+      if (autoNext && onNextLead) {
+        onNextLead();
+      }
+
     } catch (error) { console.error(error); toast.error("Failed to update status.") }
   }
 
@@ -332,9 +389,6 @@ export function LeadStatusUpdater({
         </div>
       </CardHeader>
       
-      {/* UPDATED: Added max-h-[60vh], overflow-y-auto and pr-2
-        This makes the content scrollable when it expands.
-      */}
       <CardContent className="space-y-5 pt-4 relative z-10 max-h-[60vh] overflow-y-auto pr-2">
         {/* Current Status & Reset */}
         <div className="flex justify-between items-center bg-slate-50 p-2 rounded border border-slate-100">
@@ -352,6 +406,13 @@ export function LeadStatusUpdater({
         {/* Status Selector */}
         <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-700 uppercase">New Outcome</label>
+            {status === "follow_up" && (
+                <div className="flex gap-2 mb-2 animate-in slide-in-from-left-2">
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleQuickSchedule('1hr')}>+1 Hr</Button>
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleQuickSchedule('evening')}>Evening</Button>
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleQuickSchedule('tomorrow')}>Tomorrow</Button>
+                </div>
+            )}
             <Select value={status} onValueChange={(val) => {
                 if (val === "follow_up") setIsModalOpen(true)
                 else setStatus(val)
@@ -478,17 +539,36 @@ export function LeadStatusUpdater({
             </div>
         </div>
 
-        {/* Submit Button */}
-        <Button 
-            onClick={handleStatusUpdate} 
-            disabled={isButtonDisabled} 
-            className={cn(
-                "w-full h-10 text-sm font-semibold shadow-sm transition-all duration-300", 
-                selectedStatusOption?.btnColor || "bg-primary hover:bg-primary/90"
-            )}
-        >
-            {isUpdating ? "Saving..." : status === 'Disbursed' ? <><Sparkles className="w-4 h-4 mr-2 animate-spin-slow"/> Confirm Disbursal</> : isCallInitiated ? "End Call & Update" : "Update Status"}
-        </Button>
+        {/* Submit Section */}
+        <div className="space-y-2">
+            {/* Auto-Next Toggle */}
+            <div className="flex items-center justify-end space-x-2">
+                <Checkbox 
+                  id="auto-next" 
+                  checked={autoNext} 
+                  onCheckedChange={(checked) => setAutoNext(checked as boolean)}
+                  className="w-4 h-4 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                />
+                <label
+                    htmlFor="auto-next"
+                    className="text-xs font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-slate-600"
+                >
+                    Auto-load next lead
+                </label>
+            </div>
+
+            <Button 
+                onClick={handleStatusUpdate} 
+                disabled={isButtonDisabled} 
+                className={cn(
+                    "w-full h-10 text-sm font-semibold shadow-sm transition-all duration-300", 
+                    selectedStatusOption?.btnColor || "bg-primary hover:bg-primary/90"
+                )}
+            >
+                {isUpdating ? "Saving..." : status === 'Disbursed' ? <><Sparkles className="w-4 h-4 mr-2 animate-spin-slow"/> Confirm Disbursal</> : isCallInitiated ? "End Call & Update" : "Update Status"}
+                {autoNext && !isUpdating && <ArrowRight className="w-4 h-4 ml-2 opacity-60" />}
+            </Button>
+        </div>
       </CardContent>
 
       <ScheduleFollowUpModal 
