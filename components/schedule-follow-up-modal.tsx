@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -39,9 +39,9 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input"; 
 import { 
   Plus, Loader2, Check, ChevronsUpDown, 
-  Phone, Users, Mail, MessageSquare, AlertTriangle, AlertCircle 
+  Phone, Users, Mail, MessageSquare, AlertTriangle, AlertCircle, Command as CommandIcon
 } from "lucide-react";
-import { format, addDays, nextMonday, setHours, setMinutes, isPast, isToday, isTomorrow, addMinutes, nextFriday, startOfToday } from "date-fns";
+import { format, addDays, nextMonday, setHours, setMinutes, isPast, isToday, isTomorrow, addMinutes, nextFriday, addHours } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -69,10 +69,10 @@ const TIME_SLOTS = [
 ];
 
 const ACTIVITY_TYPES = [
-  { id: "call", label: "Call", icon: Phone, placeholder: "Call agenda or talking points...", actionLabel: "Schedule Call" },
-  { id: "meeting", label: "Meeting", icon: Users, placeholder: "Meeting location and agenda...", actionLabel: "Schedule Meeting" },
-  { id: "whatsapp", label: "WhatsApp", icon: MessageSquare, placeholder: "Draft your WhatsApp message here...", actionLabel: "Schedule WhatsApp" },
-  { id: "email", label: "Email", icon: Mail, placeholder: "Email subject or key points...", actionLabel: "Schedule Email" },
+  { id: "call", label: "Call", icon: Phone, placeholder: "Call agenda or talking points...", actionLabel: "Schedule Call", defaultDuration: "15" },
+  { id: "meeting", label: "Meeting", icon: Users, placeholder: "Meeting location and agenda...", actionLabel: "Schedule Meeting", defaultDuration: "60" },
+  { id: "whatsapp", label: "WhatsApp", icon: MessageSquare, placeholder: "Draft your WhatsApp message here...", actionLabel: "Schedule WhatsApp", defaultDuration: "15" },
+  { id: "email", label: "Email", icon: Mail, placeholder: "Email subject or key points...", actionLabel: "Schedule Email", defaultDuration: "15" },
 ];
 
 const QUICK_NOTES = ["Discuss Rates", "Collect Docs", "Negotiation", "Final Closing", "Intro Call"];
@@ -100,12 +100,12 @@ export function ScheduleFollowUpModal({
   // Form State
   const [date, setDate] = useState<Date | undefined>(undefined);
   const [time, setTime] = useState("10:00");
-  const [duration, setDuration] = useState("30"); 
+  const [duration, setDuration] = useState("15"); 
   const [leadId, setLeadId] = useState("");
   const [notes, setNotes] = useState("");
   const [activityType, setActivityType] = useState("call");
   const [priority, setPriority] = useState("normal");
-  
+   
   // UI State
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(false);
@@ -113,7 +113,7 @@ export function ScheduleFollowUpModal({
   const [leadOpen, setLeadOpen] = useState(false);
   const [conflictCount, setConflictCount] = useState(0);
   const [existingFollowUp, setExistingFollowUp] = useState<string | null>(null);
-  
+   
   const supabase = createClient();
   const router = useRouter();
 
@@ -137,6 +137,17 @@ export function ScheduleFollowUpModal({
       setExistingFollowUp(null);
     }
   }, [isOpen, defaultLeadId]);
+
+  // AUTOMATION: Smart Duration & Priority based on Activity
+  useEffect(() => {
+    const activity = ACTIVITY_TYPES.find(a => a.id === activityType);
+    if (activity) {
+        setDuration(activity.defaultDuration);
+        // Auto-set priority to high for meetings, normal for others (unless manually changed later)
+        if (activityType === 'meeting') setPriority('high');
+        else setPriority('normal');
+    }
+  }, [activityType]);
 
   // Conflict & Duplicate Check Effect
   useEffect(() => {
@@ -210,15 +221,36 @@ export function ScheduleFollowUpModal({
     } catch (error) { setExistingFollowUp(null); }
   };
 
-  const setQuickSchedule = (type: "tomorrow" | "3days" | "next_week" | "friday") => {
+  const setQuickSchedule = (type: "later_today" | "tomorrow" | "same_time_tomorrow" | "3days" | "next_week") => {
     const now = new Date();
     let newDate = new Date();
 
     switch (type) {
-      case "tomorrow": newDate = addDays(now, 1); setTime("10:00"); break;
-      case "3days": newDate = addDays(now, 3); setTime("11:00"); break;
-      case "next_week": newDate = nextMonday(now); setTime("10:00"); break;
-      case "friday": newDate = nextFriday(now); setTime("15:00"); break;
+      case "later_today": 
+        newDate = now; 
+        const nextHour = addHours(now, 2);
+        // Round to nearest 30
+        const minutes = nextHour.getMinutes() >= 30 ? "30" : "00";
+        setTime(`${nextHour.getHours().toString().padStart(2, '0')}:${minutes}`);
+        break;
+      case "tomorrow": 
+        newDate = addDays(now, 1); 
+        setTime("10:00"); 
+        break;
+      case "same_time_tomorrow":
+        newDate = addDays(now, 1);
+        const currentH = now.getHours().toString().padStart(2, '0');
+        const currentM = now.getMinutes() >= 30 ? "30" : "00";
+        setTime(`${currentH}:${currentM}`);
+        break;
+      case "3days": 
+        newDate = addDays(now, 3); 
+        setTime("11:00"); 
+        break;
+      case "next_week": 
+        newDate = nextMonday(now); 
+        setTime("10:00"); 
+        break;
     }
     setDate(newDate);
   };
@@ -226,6 +258,13 @@ export function ScheduleFollowUpModal({
   const handleQuickNote = (text: string) => {
     setNotes(prev => prev ? `${prev}, ${text}` : text);
   };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        handleSchedule();
+    }
+  }
 
   const generateGCalLink = (title: string, dateObj: Date, durationMins: number, description: string) => {
     const start = dateObj.toISOString().replace(/-|:|\.\d\d\d/g, "");
@@ -312,7 +351,7 @@ ${notes || "No additional notes."}
       const { error: leadError } = await supabase
         .from("leads")
         .update({ 
-            status: "follow_up",
+            status: "follow_up", 
             last_contacted: new Date().toISOString() 
         })
         .eq("id", leadId);
@@ -362,7 +401,7 @@ ${notes || "No additional notes."}
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto" onOpenAutoFocus={(e) => e.preventDefault()}>
         <DialogHeader>
           <DialogTitle>Schedule Follow-up</DialogTitle>
           <DialogDescription>Set a reminder for your next interaction.</DialogDescription>
@@ -392,11 +431,11 @@ ${notes || "No additional notes."}
           </div>
 
           {/* Quick Actions - ALL have type="button" */}
-          <div className="flex gap-2">
-            <Button type="button" variant="outline" size="xs" onClick={() => setQuickSchedule("tomorrow")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Tomorrow</Button>
-            <Button type="button" variant="outline" size="xs" onClick={() => setQuickSchedule("3days")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">In 3 Days</Button>
-            <Button type="button" variant="outline" size="xs" onClick={() => setQuickSchedule("friday")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Friday</Button>
-            <Button type="button" variant="outline" size="xs" onClick={() => setQuickSchedule("next_week")} className="text-xs h-7 flex-1 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Next Week</Button>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <Button type="button" variant="outline" size="xs" onClick={() => setQuickSchedule("later_today")} className="text-xs h-7 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">+2 Hours</Button>
+            <Button type="button" variant="outline" size="xs" onClick={() => setQuickSchedule("tomorrow")} className="text-xs h-7 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Tomorrow</Button>
+            <Button type="button" variant="outline" size="xs" onClick={() => setQuickSchedule("same_time_tomorrow")} className="text-xs h-7 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Same Time Tmrw</Button>
+            <Button type="button" variant="outline" size="xs" onClick={() => setQuickSchedule("next_week")} className="text-xs h-7 bg-slate-50 border-dashed hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200">Next Week</Button>
           </div>
 
           {/* Lead Selection */}
@@ -461,7 +500,7 @@ ${notes || "No additional notes."}
               <Label className="text-xs font-semibold text-slate-500 uppercase">Time</Label>
               <div className="flex gap-2">
                   <Select value={time} onValueChange={setTime}>
-                      <SelectTrigger className="h-10 flex-1"><SelectValue placeholder="Time" /></SelectTrigger>
+                      <SelectTrigger className={cn("h-10 flex-1 transition-colors", conflictCount > 0 ? "border-amber-400 bg-amber-50 ring-amber-100" : "")}><SelectValue placeholder="Time" /></SelectTrigger>
                       <SelectContent className="max-h-[250px] z-[9999]">
                           {TIME_SLOTS.map((group) => (
                           <SelectGroup key={group.label}>
@@ -511,13 +550,19 @@ ${notes || "No additional notes."}
                   </div>
               </div>
             </div>
-            <Textarea 
-              placeholder={currentActivity.placeholder} // <-- Dynamic Placeholder
-              value={notes} 
-              onChange={(e) => setNotes(e.target.value)} 
-              className="resize-none focus-visible:ring-blue-500" 
-              rows={3} 
-            />
+            <div className="relative">
+                <Textarea 
+                placeholder={currentActivity.placeholder} // <-- Dynamic Placeholder
+                value={notes} 
+                onChange={(e) => setNotes(e.target.value)} 
+                onKeyDown={handleKeyDown}
+                className="resize-none focus-visible:ring-blue-500 pr-8" 
+                rows={3} 
+                />
+                <div className="absolute bottom-2 right-2 text-slate-300">
+                    <CommandIcon className="h-3 w-3" />
+                </div>
+            </div>
             {/* Quick Notes - ALL have type="button" */}
             <div className="flex gap-1 flex-wrap mt-1">
                 {QUICK_NOTES.slice(0, 4).map(note => (
