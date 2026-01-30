@@ -164,7 +164,7 @@ export function AdminAttendanceDashboard() {
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [dateRange, view]);
+  }, [dateRange, view]); // Re-fetch when dateRange or view changes
 
   // Reset pagination when filters change
   useEffect(() => {
@@ -176,13 +176,17 @@ export function AdminAttendanceDashboard() {
     setLoading(true);
     try {
       const startDateStr = format(dateRange.start, "yyyy-MM-dd");
+      // Ensure end date covers the full range correctly
       const endDateStr = format(dateRange.end, "yyyy-MM-dd");
       const feedDateStr = format(new Date(), "yyyy-MM-dd"); 
       const yesterdayStr = format(subDays(new Date(), 1), "yyyy-MM-dd");
 
       const [usersRes, attendanceRes, feedRes, missingRes] = await Promise.all([
         supabase.from("users").select("*").eq("is_active", true).order("full_name"),
-        supabase.from("attendance").select(`*, user:users!attendance_user_id_fkey(full_name, email, department)`).gte("date", startDateStr).lte("date", endDateStr).order("date", { ascending: false }),
+        supabase.from("attendance").select(`*, user:users!attendance_user_id_fkey(full_name, email, department)`)
+          .gte("date", startDateStr)
+          .lte("date", endDateStr)
+          .order("date", { ascending: false }),
         supabase.from("attendance").select(`*, user:users!attendance_user_id_fkey(full_name)`).eq("date", feedDateStr),
         supabase.from("attendance").select(`*, user:users!attendance_user_id_fkey(full_name)`).eq("date", yesterdayStr).not("check_in", "is", null).is("check_out", null)
       ]);
@@ -228,6 +232,7 @@ export function AdminAttendanceDashboard() {
   const openUserModal = async (user: User) => {
     setSelectedUser(user);
     setLoadingModal(true);
+    // Explicitly calculate month start/end based on current view date range
     const monthStart = format(startOfMonth(dateRange.start), "yyyy-MM-dd");
     const monthEnd = format(endOfMonth(dateRange.start), "yyyy-MM-dd");
 
@@ -530,6 +535,18 @@ export function AdminAttendanceDashboard() {
     }
   };
 
+  const toggleView = (newView: 'daily' | 'monthly') => {
+    setView(newView);
+    const today = new Date();
+    if (newView === 'monthly') {
+      // Set to full month range
+      setDateRange({ start: startOfMonth(today), end: endOfMonth(today) });
+    } else {
+      // Set to today only
+      setDateRange({ start: today, end: today });
+    }
+  };
+
   const handlePrint = () => { window.print(); };
   const handleExport = () => { setIsExporting(true); setTimeout(() => setIsExporting(false), 500); };
 
@@ -632,8 +649,8 @@ export function AdminAttendanceDashboard() {
            </TabsList>
            
            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
-              <Button variant={view === 'daily' ? 'default' : 'ghost'} size="sm" onClick={() => setView('daily')} className="text-xs h-7">Daily</Button>
-              <Button variant={view === 'monthly' ? 'default' : 'ghost'} size="sm" onClick={() => setView('monthly')} className="text-xs h-7">Monthly</Button>
+              <Button variant={view === 'daily' ? 'default' : 'ghost'} size="sm" onClick={() => toggleView('daily')} className="text-xs h-7">Daily</Button>
+              <Button variant={view === 'monthly' ? 'default' : 'ghost'} size="sm" onClick={() => toggleView('monthly')} className="text-xs h-7">Monthly</Button>
            </div>
         </div>
 
