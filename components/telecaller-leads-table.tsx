@@ -99,25 +99,43 @@ export function TelecallerLeadsTable({
     router.refresh()
   }
 
-  // AUTOMATION: The Logic for "Save & Next"
+  // AUTOMATION: ROBUST NEXT LEAD LOGIC
   const handleNextLead = () => {
     if (!selectedLead) return;
+    
+    // Find where we are in the list
     const currentIndex = leads.findIndex(l => l.id === selectedLead.id);
     
-    // Check if there is a next lead
-    if (currentIndex >= 0 && currentIndex < leads.length - 1) {
-        const nextLead = leads[currentIndex + 1];
-        // Brief transition for UX
-        setSelectedLead(nextLead);
-        // Ensure call mode stays active for the next lead
-        setIsCallInitiated(true); 
+    let nextIndex = -1;
+
+    if (currentIndex !== -1 && currentIndex < leads.length - 1) {
+        // Normal case: Move to the next person
+        nextIndex = currentIndex + 1;
+    } else if (currentIndex === -1 && leads.length > 0) {
+        // Edge Case: The current lead disappeared (e.g. status changed from "New" to "Interested" and filter is "New")
+        // In this case, the list shifted up, so the *next* person is now at the *top* (or same index).
+        // Let's default to the first one to be safe and keep the flow moving.
+        nextIndex = 0;
+    }
+
+    if (nextIndex !== -1 && leads[nextIndex]) {
+        const nextLead = leads[nextIndex];
+        
+        // 1. Close briefly to force reset (optional, but Key prop handles this better)
+        // setIsStatusDialogOpen(false);
+        
+        // 2. Load Next
+        setTimeout(() => {
+            setSelectedLead(nextLead);
+            setIsCallInitiated(true); // Ensure Dialer stays ON
+            setIsStatusDialogOpen(true);
+        }, 50); // Tiny delay to allow React to process
     } else {
         setIsStatusDialogOpen(false);
-        toast.success("You've reached the end of this list!");
+        toast.success("List completed! No more leads to call.");
     }
   }
 
-  // AUTOMATION: One-Click NR (No Response)
   const handleQuickNR = async (e: React.MouseEvent, lead: Lead) => {
     e.stopPropagation();
     toast.message("Marking No Response...", { description: "Scheduling callback for tomorrow." });
@@ -142,7 +160,7 @@ export function TelecallerLeadsTable({
         ]);
         
         router.refresh();
-        toast.success("Marked NR", { description: "Moved to tomorrow's queue." });
+        toast.success("Marked NR");
     } catch (error) {
         toast.error("Failed to update");
     }
@@ -173,13 +191,11 @@ export function TelecallerLeadsTable({
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount)
   }
 
-  // --- 3. STATUS UPDATER ---
   const handleStatusUpdate = async (newStatus: string, note?: string, callbackDate?: string) => {
     setIsStatusDialogOpen(false)
     router.refresh()
   }
 
-  // --- 4. BULK ACTIONS ---
   const toggleSelectAll = () => {
     if (selectedIds.length === leads.length) setSelectedIds([])
     else setSelectedIds(leads.map(l => l.id))
@@ -209,7 +225,6 @@ export function TelecallerLeadsTable({
 
   return (
     <div className="space-y-4">
-      {/* Bulk Action Bar */}
       {selectedIds.length > 0 && (
         <div className="flex items-center justify-between bg-blue-50 p-2 px-4 rounded-md border border-blue-200 animate-in slide-in-from-top-2">
           <div className="flex items-center gap-2">
@@ -228,7 +243,6 @@ export function TelecallerLeadsTable({
         </div>
       )}
 
-      {/* Main Table */}
       <div className={cn("rounded-md border bg-white shadow-sm overflow-hidden relative transition-opacity duration-200", isPending ? "opacity-50 pointer-events-none" : "opacity-100")}>
         <div className="overflow-x-auto">
           <Table>
@@ -237,13 +251,10 @@ export function TelecallerLeadsTable({
                 <TableHead className="w-10">
                   <input type="checkbox" checked={selectedIds.length === leads.length && leads.length > 0} onChange={toggleSelectAll} className="rounded border-gray-300"/>
                 </TableHead>
-                
                 <TableHead className="w-[120px]">Contact</TableHead>
-
                 <TableHead className="w-[200px] md:w-[250px] cursor-pointer hover:bg-slate-100" onClick={() => handleSort('name')}>
                     <div className="flex items-center">Name <SortIcon field="name"/></div>
                 </TableHead>
-
                 <TableHead className="hidden md:table-cell">Status</TableHead>
                 <TableHead className="cursor-pointer hover:bg-slate-100" onClick={() => handleSort('loan_amount')}>
                     <div className="flex items-center">Amount <SortIcon field="loan_amount"/></div>
@@ -268,7 +279,6 @@ export function TelecallerLeadsTable({
                     <TableCell>
                       <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(lead.id)} className="rounded border-gray-300"/>
                     </TableCell>
-                    
                     <TableCell>
                         <div className="flex items-center gap-1">
                             <QuickActions 
@@ -299,7 +309,6 @@ export function TelecallerLeadsTable({
                             </TooltipProvider>
                         </div>
                     </TableCell>
-
                     <TableCell>
                       <div className="flex flex-col">
                         <Link href={`/telecaller/leads/${lead.id}`} className="font-semibold text-slate-900 hover:text-blue-600 flex items-center gap-2">
@@ -316,7 +325,6 @@ export function TelecallerLeadsTable({
                         </div>
                       </div>
                     </TableCell>
-                    
                     <TableCell className="hidden md:table-cell">
                         <Badge variant="outline" className={cn(
                            "capitalize font-medium border-0 px-2.5 py-0.5 rounded-md", 
@@ -328,17 +336,14 @@ export function TelecallerLeadsTable({
                          {lead.status?.replace(/_/g, " ")}
                         </Badge>
                     </TableCell>
-
                     <TableCell className="font-mono text-sm text-slate-600">
                         {formatCurrency(lead.loan_amount)}
                     </TableCell>
-
                     <TableCell className="hidden md:table-cell">
                         {lead.priority === 'high' && <Badge variant="destructive" className="text-[10px] px-1.5">HIGH</Badge>}
                         {lead.priority === 'medium' && <Badge variant="secondary" className="text-[10px] bg-amber-100 text-amber-800 hover:bg-amber-100 border-0 px-1.5">MED</Badge>}
                         {lead.priority === 'low' && <Badge variant="outline" className="text-[10px] text-slate-500 border-slate-300 px-1.5">LOW</Badge>}
                     </TableCell>
-
                     <TableCell>
                         <div className="flex items-center gap-2 text-xs">
                             <Clock className={cn("h-3.5 w-3.5", stale ? "text-red-500" : "text-slate-400")} />
@@ -350,10 +355,8 @@ export function TelecallerLeadsTable({
                             {stale && <AlertCircle className="h-3 w-3 text-red-500 animate-pulse" />}
                         </div>
                     </TableCell>
-
                     <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                            {/* Quick NR Button (Automation) */}
                             <TooltipProvider>
                                 <Tooltip>
                                     <TooltipTrigger asChild>
@@ -366,10 +369,9 @@ export function TelecallerLeadsTable({
                                             <PhoneMissed className="h-4 w-4" />
                                         </Button>
                                     </TooltipTrigger>
-                                    <TooltipContent>One-Click NR (Retry Tmrw)</TooltipContent>
+                                    <TooltipContent>One-Click NR</TooltipContent>
                                 </Tooltip>
                             </TooltipProvider>
-
                             <Button variant="ghost" size="sm" className="h-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50" onClick={() => { setSelectedLead(lead); setIsStatusDialogOpen(true); }}>
                                 Update
                             </Button>
@@ -388,19 +390,11 @@ export function TelecallerLeadsTable({
             <Pagination>
             <PaginationContent>
                 <PaginationItem>
-                <PaginationPrevious 
-                    href={`?page=${Math.max(1, currentPage - 1)}`} 
-                    className={currentPage === 1 ? 'pointer-events-none opacity-50' : ''}
-                />
+                <PaginationPrevious href={`?page=${Math.max(1, currentPage - 1)}`} className={currentPage === 1 ? 'pointer-events-none opacity-50' : ''}/>
                 </PaginationItem>
+                <PaginationItem><div className="px-4 text-sm text-slate-500">Page {currentPage} of {totalPages}</div></PaginationItem>
                 <PaginationItem>
-                    <div className="px-4 text-sm text-slate-500">Page {currentPage} of {totalPages}</div>
-                </PaginationItem>
-                <PaginationItem>
-                <PaginationNext 
-                    href={`?page=${Math.min(totalPages, currentPage + 1)}`} 
-                    className={currentPage >= totalPages ? 'pointer-events-none opacity-50' : ''}
-                />
+                <PaginationNext href={`?page=${Math.min(totalPages, currentPage + 1)}`} className={currentPage >= totalPages ? 'pointer-events-none opacity-50' : ''}/>
                 </PaginationItem>
             </PaginationContent>
             </Pagination>
@@ -409,6 +403,7 @@ export function TelecallerLeadsTable({
 
       {selectedLead && (
         <LeadStatusDialog
+          key={selectedLead.id} /* FIX: Forces fresh instance for every lead */
           leadId={selectedLead.id}
           currentStatus={selectedLead.status}
           open={isStatusDialogOpen}
@@ -419,8 +414,6 @@ export function TelecallerLeadsTable({
           onStatusUpdate={handleStatusUpdate}
           isCallInitiated={isCallInitiated}
           onCallLogged={handleCallLogged}
-          
-          // PASSING PROPS DOWN FOR AUTOMATION
           leadPhoneNumber={selectedLead.phone}
           telecallerName="Agent"
           onNextLead={handleNextLead}
