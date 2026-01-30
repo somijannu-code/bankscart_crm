@@ -3,10 +3,11 @@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, X, SlidersHorizontal, RefreshCcw, Loader2 } from "lucide-react"
+import { Search, X, SlidersHorizontal, RefreshCcw, Loader2, Zap } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useState, useEffect, useTransition } from "react"
 import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 
 export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchParams: any }) {
   const router = useRouter()
@@ -27,6 +28,10 @@ export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchPa
   const updateFilters = (key: string, value: string) => {
     const params = new URLSearchParams(searchParams.toString())
     params.set("page", "1")
+    
+    // Disable Focus Mode if manual filters are changed
+    params.delete('mode');
+
     if (value && value !== "all") params.set(key, value)
     else params.delete(key)
     
@@ -54,17 +59,42 @@ export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchPa
       router.push("/telecaller/leads")
     })
   }
+  
+  // AUTOMATION: Power Hour Mode
+  const togglePowerMode = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    const isPowerMode = params.get('mode') === 'power';
+
+    if (isPowerMode) {
+        // Turn OFF
+        params.delete('mode');
+        params.delete('status');
+        params.delete('sort_by');
+        params.delete('sort_order');
+    } else {
+        // Turn ON: New Leads + High Priority + Sorted by Priority
+        params.set('mode', 'power');
+        params.set('status', 'new'); 
+        params.set('priority', 'high'); 
+        params.set('sort_by', 'priority');
+        params.set('sort_order', 'desc');
+    }
+    startTransition(() => {
+        router.push(`/telecaller/leads?${params.toString()}`)
+    })
+  }
 
   const hasActiveFilters = status !== "all" || priority !== "all" || search !== "";
+  const isPowerMode = searchParams.get('mode') === 'power';
 
   return (
     <div className="space-y-3">
       <div className="flex flex-col lg:flex-row gap-3 p-1">
         <div className="flex-1 relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-4 w-4" />
-          <Input
-            placeholder="Search by name, phone, company..."
-            value={search}
+          <Input 
+            placeholder="Search by name, phone, company..." 
+            value={search} 
             onChange={(e) => setSearch(e.target.value)}
             className="pl-10 bg-white"
             onKeyDown={(e) => e.key === "Enter" && applySearch()}
@@ -72,6 +102,16 @@ export function TelecallerLeadFilters({ initialSearchParams }: { initialSearchPa
         </div>
 
         <div className="flex gap-2 w-full lg:w-auto overflow-x-auto pb-1 lg:pb-0">
+          {/* POWER HOUR BUTTON */}
+          <Button 
+            variant={isPowerMode ? "default" : "outline"}
+            onClick={togglePowerMode}
+            className={cn("whitespace-nowrap", isPowerMode ? "bg-amber-500 hover:bg-amber-600 text-white border-amber-600" : "text-amber-700 border-amber-200 hover:bg-amber-50")}
+          >
+            <Zap className={cn("h-4 w-4 mr-2", isPowerMode ? "fill-white" : "fill-amber-500")} />
+            {isPowerMode ? "Power Mode ON" : "Power Hour"}
+          </Button>
+
           <Select value={status} onValueChange={(val) => { setStatus(val); updateFilters('status', val); }}>
             <SelectTrigger className="w-[160px] bg-white">
               <SelectValue placeholder="Status" />
