@@ -76,14 +76,18 @@ export function LeadStatusUpdater({
   const [loanAmount, setLoanAmount] = useState<number | null>(initialLoanAmount)
   const [isModalOpen, setIsModalOpen] = useState(false) 
   
-  // AUTOMATION STATE: Default to TRUE for speed? (Set to false if you prefer manual start)
-  const [autoNext, setAutoNext] = useState(false)
+  // AUTOMATION STATE: Default to TRUE for speed
+  const [autoNext, setAutoNext] = useState(true)
    
   // Call Timer State
   const [elapsedTime, setElapsedTime] = useState(0)
   const [callDurationOverride, setCallDurationOverride] = useState<number | null>(null) 
    
   const [notEligibleReason, setNotEligibleReason] = useState<string>("")
+
+  // --- REFS FOR AUTOMATION ---
+  // Tracks the ID of the last lead we successfully triggered a dial for
+  const lastDialedIdRef = useRef<string>("")
 
   // --- DERIVED STATE ---
   const currentStatusOption = useMemo(() => STATUS_OPTIONS.find((o) => o.value === currentStatus), [currentStatus])
@@ -99,36 +103,61 @@ export function LeadStatusUpdater({
   const isWhatsappEnabled = whatsappLink !== "#";
   const hasUnsavedChanges = status !== "" || remarks !== "" || (loanAmount !== initialLoanAmount);
 
-  // Critical Status Check
   const isRevenueStatus = status === "Login" || status === "Disbursed";
   const isLoanAmountMissing = isRevenueStatus && (!loanAmount || loanAmount <= 0);
 
   // --- EFFECTS ---
-  useEffect(() => { setLoanAmount(initialLoanAmount) }, [initialLoanAmount]);
+  
+  // 1. Reset Logic when Lead ID Changes
+  useEffect(() => { 
+    setLoanAmount(initialLoanAmount);
+    handleReset();
+    // Do NOT reset autoNext here, we want that to persist across leads
+  }, [leadId, initialLoanAmount]);
 
   // ------------------------------------------------------------------
-  // AUTOMATION 1: AUTO-DIALER (THE FIX)
+  // AUTOMATION 1: ROBUST AUTO-DIALER (FIXED)
   // ------------------------------------------------------------------
   useEffect(() => {
-    // If a call is initiated (from Table or Next button) AND we have a number...
-    if (isCallInitiated && leadPhoneNumber && leadId) {
+    // Only proceed if we are in "Call Mode" and have a valid number
+    if (isCallInitiated && leadId && leadPhoneNumber) {
         
-        // 1.5s delay allows the agent to read the Customer Name first
-        const timer = setTimeout(() => {
-            // This triggers your default calling app (Softphone/Mobile)
-            window.location.href = `tel:${leadPhoneNumber}`;
+        // Check if we already dialed this specific lead ID
+        if (lastDialedIdRef.current !== leadId) {
             
-            toast.info("Auto-dialing...", { 
-                icon: <Phone className="h-4 w-4 animate-pulse text-green-500" />,
-                duration: 2000 
-            });
-        }, 1500);
+            // Mark as dialed immediately to prevent loops
+            lastDialedIdRef.current = leadId;
 
-        return () => clearTimeout(timer);
+            const timer = setTimeout(() => {
+                // Use invisible link click (more robust than window.location)
+                const link = document.createElement('a');
+                link.href = `tel:${leadPhoneNumber}`;
+                link.style.display = 'none';
+                document.body.appendChild(link);
+                link.click();
+                
+                // Cleanup
+                setTimeout(() => {
+                    if (document.body.contains(link)) {
+                        document.body.removeChild(link);
+                    }
+                }, 100);
+
+                toast.info(`Dialing ${leadPhoneNumber}...`, { 
+                    icon: <Phone className="h-4 w-4 animate-pulse text-green-500" />,
+                    duration: 3000 
+                });
+            }, 1000); // 1s delay gives agent just enough time to see the name
+
+            return () => clearTimeout(timer);
+        }
+    } else if (!isCallInitiated) {
+        // Reset the ref if we exit call mode, so we can dial again later if needed
+        lastDialedIdRef.current = "";
     }
   }, [leadId, isCallInitiated, leadPhoneNumber]);
 
-  // AUTOMATION 2: Short Call Detection (<10s) -> Suggest NR
+  // AUTOMATION 2: Short Call Detection
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isCallInitiated && !callDurationOverride) {
@@ -192,7 +221,6 @@ export function LeadStatusUpdater({
 
   const handleQuickSchedule = (type: '1hr' | 'evening' | 'tomorrow') => {
     setIsModalOpen(true); 
-    // Ideally pass 'type' to modal to pre-fill it, but for now we open the modal
   }
 
   const handleQuickAmount = (amount: number) => {
@@ -291,7 +319,9 @@ export function LeadStatusUpdater({
 
       // AUTOMATION 4: Save & Next Trigger
       if (autoNext && onNextLead) {
-        onNextLead(); // This swaps the ID, which triggers the useEffect above to dial
+        onNextLead(); 
+        // NOTE: We don't dial here directly. 
+        // We just switch the lead. The useEffect at the top will detect the new lead ID and dial.
       }
 
     } catch (error: any) {
