@@ -13,7 +13,7 @@ import {
   Phone, Clock, MessageSquare, IndianRupee, AlertCircle, Sparkles, 
   Send, Command, Copy, RotateCcw, ThumbsUp, ThumbsDown, 
   FileText, LogIn, CheckCircle2, XCircle, PhoneForwarded, 
-  PhoneMissed, Briefcase, Plus, X, Activity, ArrowRight
+  PhoneMissed, Briefcase, Plus, X, Activity, ArrowRight, Loader2
 } from "lucide-react" 
 import { useCallTracking } from "@/context/call-tracking-context"
 import { toast } from "sonner"
@@ -75,19 +75,18 @@ export function LeadStatusUpdater({
   const [remarks, setRemarks] = useState("") 
   const [loanAmount, setLoanAmount] = useState<number | null>(initialLoanAmount)
   const [isModalOpen, setIsModalOpen] = useState(false) 
-  
-  // AUTOMATION STATE: Default to TRUE for speed
   const [autoNext, setAutoNext] = useState(true)
-   
-  // Call Timer State
+  
+  // Call Timer & Dialer State
   const [elapsedTime, setElapsedTime] = useState(0)
   const [callDurationOverride, setCallDurationOverride] = useState<number | null>(null) 
+  const [dialing, setDialing] = useState(false);
    
   const [notEligibleReason, setNotEligibleReason] = useState<string>("")
 
-  // --- REFS FOR AUTOMATION ---
-  // Tracks the ID of the last lead we successfully triggered a dial for
-  const lastDialedIdRef = useRef<string>("")
+  // --- REFS ---
+  // We use this to prevent infinite loops of dialing the same number
+  const lastDialedIdRef = useRef<string | null>(null)
 
   // --- DERIVED STATE ---
   const currentStatusOption = useMemo(() => STATUS_OPTIONS.find((o) => o.value === currentStatus), [currentStatus])
@@ -102,60 +101,53 @@ export function LeadStatusUpdater({
 
   const isWhatsappEnabled = whatsappLink !== "#";
   const hasUnsavedChanges = status !== "" || remarks !== "" || (loanAmount !== initialLoanAmount);
-
   const isRevenueStatus = status === "Login" || status === "Disbursed";
   const isLoanAmountMissing = isRevenueStatus && (!loanAmount || loanAmount <= 0);
 
   // --- EFFECTS ---
   
-  // 1. Reset Logic when Lead ID Changes
+  // 1. Reset Form & State when Lead ID Changes
   useEffect(() => { 
     setLoanAmount(initialLoanAmount);
     handleReset();
-    // Do NOT reset autoNext here, we want that to persist across leads
+    // CRITICAL: Reset the dialer ref so the new lead CAN be dialed
+    if (leadId !== lastDialedIdRef.current) {
+        setDialing(false); // Reset dialing UI
+    }
   }, [leadId, initialLoanAmount]);
 
   // ------------------------------------------------------------------
-  // AUTOMATION 1: ROBUST AUTO-DIALER (FIXED)
+  // AUTOMATION: ROBUST AUTO-DIALER v2
   // ------------------------------------------------------------------
   useEffect(() => {
-    // Only proceed if we are in "Call Mode" and have a valid number
-    if (isCallInitiated && leadId && leadPhoneNumber) {
+    // Requirements: Call mode ON, Valid ID, Valid Phone, and NOT already dialed this ID
+    if (isCallInitiated && leadId && leadPhoneNumber && lastDialedIdRef.current !== leadId) {
         
-        // Check if we already dialed this specific lead ID
-        if (lastDialedIdRef.current !== leadId) {
+        // 1. Lock it immediately to prevent double-fire
+        lastDialedIdRef.current = leadId;
+        setDialing(true);
+
+        // 2. Short delay to allow UI to render the new name (UX)
+        const timer = setTimeout(() => {
+            const cleanNumber = leadPhoneNumber.replace(/\D/g, ''); // Strip non-digits
+            const telUrl = `tel:${cleanNumber}`;
             
-            // Mark as dialed immediately to prevent loops
-            lastDialedIdRef.current = leadId;
+            // Method A: Window Open (Often bypasses popup blockers for protocols)
+            window.open(telUrl, '_self');
+            
+            // UI Feedback
+            toast.info(`Dialing ${leadPhoneNumber}...`, { 
+                icon: <Phone className="h-4 w-4 animate-pulse text-green-500" />,
+                duration: 2000 
+            });
+            setDialing(false);
 
-            const timer = setTimeout(() => {
-                // Use invisible link click (more robust than window.location)
-                const link = document.createElement('a');
-                link.href = `tel:${leadPhoneNumber}`;
-                link.style.display = 'none';
-                document.body.appendChild(link);
-                link.click();
-                
-                // Cleanup
-                setTimeout(() => {
-                    if (document.body.contains(link)) {
-                        document.body.removeChild(link);
-                    }
-                }, 100);
+        }, 500); // 500ms is the sweet spot
 
-                toast.info(`Dialing ${leadPhoneNumber}...`, { 
-                    icon: <Phone className="h-4 w-4 animate-pulse text-green-500" />,
-                    duration: 3000 
-                });
-            }, 1000); // 1s delay gives agent just enough time to see the name
-
-            return () => clearTimeout(timer);
-        }
-    } else if (!isCallInitiated) {
-        // Reset the ref if we exit call mode, so we can dial again later if needed
-        lastDialedIdRef.current = "";
+        return () => clearTimeout(timer);
     }
   }, [leadId, isCallInitiated, leadPhoneNumber]);
+
 
   // AUTOMATION 2: Short Call Detection
   useEffect(() => {
@@ -173,7 +165,7 @@ export function LeadStatusUpdater({
     return () => clearInterval(interval);
   }, [isCallInitiated, activeCall, callDurationOverride]);
 
-  // Reset fields on status change
+  // Reset fields logic
   useEffect(() => {
     if (status !== 'not_eligible') {
       setNotEligibleReason("")
@@ -273,7 +265,6 @@ export function LeadStatusUpdater({
         updateData.notes = updateData.notes ? `${updateData.notes}\n\nNot Eligible: ${note}` : `Not Eligible: ${note}`
       }
 
-      // Automation Rule: Strike System
       if (status === "Not_Interested") {
         const { data: leadData } = await supabase.from("leads").select("tags").eq("id", leadId).single()
         let currentTags: string[] = [];
@@ -289,7 +280,7 @@ export function LeadStatusUpdater({
       
       updateData.status = finalStatus;
 
-      // AUTOMATION 3: Auto-WhatsApp
+      // Auto-WhatsApp
       if (["Interested", "Documents_Sent"].includes(finalStatus) && leadPhoneNumber) {
          let msg = "";
          if(finalStatus === 'Interested') msg = `Hi ${telecallerName ? telecallerName : "there"}, regarding your loan application...`;
@@ -317,11 +308,8 @@ export function LeadStatusUpdater({
       setNote(""); setRemarks(""); setCallDurationOverride(null); setElapsedTime(0); setNotEligibleReason(""); setStatus("");
       toast.success("Updated successfully!")
 
-      // AUTOMATION 4: Save & Next Trigger
       if (autoNext && onNextLead) {
         onNextLead(); 
-        // NOTE: We don't dial here directly. 
-        // We just switch the lead. The useEffect at the top will detect the new lead ID and dial.
       }
 
     } catch (error: any) {
@@ -381,8 +369,17 @@ export function LeadStatusUpdater({
 
       <CardHeader className="flex-none flex flex-row items-center justify-between py-3 bg-slate-50/50">
         <CardTitle className="text-base font-semibold flex items-center gap-2">
-          {isCallInitiated ? <Phone className="h-4 w-4 text-blue-600 animate-pulse"/> : <Activity className="h-4 w-4 text-slate-500"/>}
-          {isCallInitiated ? "Active Call Session" : "Update Status"}
+          {/* Dialer Status Indicator */}
+          {dialing ? (
+             <span className="flex items-center gap-2 text-green-600 animate-pulse">
+                <Loader2 className="h-4 w-4 animate-spin"/> Connecting...
+             </span>
+          ) : (
+             <>
+               {isCallInitiated ? <Phone className="h-4 w-4 text-blue-600 animate-pulse"/> : <Activity className="h-4 w-4 text-slate-500"/>}
+               {isCallInitiated ? "Active Call Session" : "Update Status"}
+             </>
+          )}
         </CardTitle>
         <div className="flex gap-1">
             <TooltipProvider>
