@@ -76,17 +76,17 @@ export function LeadStatusUpdater({
   const [loanAmount, setLoanAmount] = useState<number | null>(initialLoanAmount)
   const [isModalOpen, setIsModalOpen] = useState(false) 
   
-  // FIX 1: Initialize State from LocalStorage to persist across re-renders
+  // Persistence State
   const [autoNext, setAutoNext] = useState(true)
   
-  // Call Timer & Dialer State
+  // Dialer State
   const [elapsedTime, setElapsedTime] = useState(0)
   const [callDurationOverride, setCallDurationOverride] = useState<number | null>(null) 
-  const [dialing, setDialing] = useState(false);
+  
+  // COUNTDOWN STATE
+  const [countdown, setCountdown] = useState<number | null>(null);
    
   const [notEligibleReason, setNotEligibleReason] = useState<string>("")
-
-  // --- REFS ---
   const lastDialedIdRef = useRef<string | null>(null)
 
   // --- DERIVED STATE ---
@@ -107,12 +107,9 @@ export function LeadStatusUpdater({
 
   // --- EFFECTS ---
 
-  // Load persistence for AutoNext
   useEffect(() => {
     const saved = localStorage.getItem("crm_auto_next");
-    if (saved !== null) {
-        setAutoNext(saved === "true");
-    }
+    if (saved !== null) setAutoNext(saved === "true");
   }, []);
 
   const toggleAutoNext = (checked: boolean) => {
@@ -120,62 +117,51 @@ export function LeadStatusUpdater({
     localStorage.setItem("crm_auto_next", String(checked));
   }
   
-  // 1. Reset Form when Lead ID Changes
+  // Reset Form on Lead Change
   useEffect(() => { 
     setLoanAmount(initialLoanAmount);
     handleReset();
-    
-    // CRITICAL: Reset the dialer ref when ID changes so we can dial the new person
+    // Allow re-dialing if ID changed
     if (leadId !== lastDialedIdRef.current) {
-        setDialing(false); 
-        // We do NOT reset lastDialedIdRef here; we let the next Effect handle the check
+        setCountdown(null); 
     }
   }, [leadId, initialLoanAmount]);
 
   // ------------------------------------------------------------------
-  // AUTOMATION: ROBUST IFRAME AUTO-DIALER (FIXED)
+  // AUTOMATION: VISUAL COUNTDOWN DIALER
   // ------------------------------------------------------------------
   useEffect(() => {
-    // Only dial if: Call Initiated + Valid Phone + New Lead ID + AutoNext is actually ON (or it's the first load)
+    // Start condition: Call Mode ON, Valid ID, Valid Phone, Not yet dialed this ID
     if (isCallInitiated && leadId && leadPhoneNumber && lastDialedIdRef.current !== leadId) {
         
-        lastDialedIdRef.current = leadId; // Lock immediately
-        setDialing(true);
+        lastDialedIdRef.current = leadId; // Mark as processed
+        setCountdown(3); // Start 3s countdown
 
-        const timer = setTimeout(() => {
-            const cleanNumber = leadPhoneNumber.replace(/\D/g, '');
-            
-            // FIX 2: Use Hidden Iframe instead of window.location
-            // This prevents the page from navigating away or being blocked as a popup
-            const iframe = document.createElement('iframe');
-            iframe.style.display = 'none';
-            document.body.appendChild(iframe);
-            iframe.src = `tel:${cleanNumber}`;
-            
-            toast.info(`Dialing ${leadPhoneNumber}...`, { 
-                icon: <Phone className="h-4 w-4 animate-pulse text-green-500" />,
-                duration: 2000 
-            });
-
-            // Cleanup iframe after 3 seconds
-            setTimeout(() => {
-                if (document.body.contains(iframe)) {
-                    document.body.removeChild(iframe);
+        const timer = setInterval(() => {
+            setCountdown((prev) => {
+                if (prev === null || prev <= 1) {
+                    clearInterval(timer);
+                    
+                    // TRIGGER DIAL
+                    const cleanNumber = leadPhoneNumber.replace(/\D/g, '');
+                    window.location.href = `tel:${cleanNumber}`;
+                    
+                    toast.success("Dialing...", { icon: <Phone className="h-4 w-4 animate-bounce" /> });
+                    return null; // Hide overlay
                 }
-                setDialing(false);
-            }, 3000);
+                return prev - 1;
+            });
+        }, 1000);
 
-        }, 700); // 700ms delay for UX
-
-        return () => clearTimeout(timer);
+        return () => clearInterval(timer);
     }
   }, [leadId, isCallInitiated, leadPhoneNumber]);
 
 
-  // AUTOMATION 2: Short Call Detection
+  // Short Call Detection
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (isCallInitiated && !callDurationOverride) {
+    if (isCallInitiated && !callDurationOverride && !countdown) {
         const startTime = activeCall?.startTime || Date.now();
         interval = setInterval(() => {
             const seconds = Math.floor((Date.now() - startTime) / 1000);
@@ -183,12 +169,11 @@ export function LeadStatusUpdater({
         }, 1000);
     } else if (!isCallInitiated && elapsedTime > 0 && elapsedTime < 10 && !status) {
         setStatus("nr");
-        toast.info("Short call detected", { description: "Auto-selected 'No Response'" });
     }
     return () => clearInterval(interval);
-  }, [isCallInitiated, activeCall, callDurationOverride]);
+  }, [isCallInitiated, activeCall, callDurationOverride, countdown]);
 
-  // Reset fields logic
+  // Reset fields
   useEffect(() => {
     if (status !== 'not_eligible') {
       setNotEligibleReason("")
@@ -380,29 +365,30 @@ export function LeadStatusUpdater({
     } catch (error) { console.error("Call Log Error:", error) }
   }
 
-  // --- RENDER HELPERS ---
-  const isButtonDisabled = isUpdating || !status || (status === "not_eligible" && !note.trim()) || isLoanAmountMissing;
   const timerDisplay = formatTime(callDurationOverride ?? elapsedTime);
   const formattedLoanAmount = formatCurrency(loanAmount);
+  const isButtonDisabled = isUpdating || !status || (status === "not_eligible" && !note.trim()) || isLoanAmountMissing;
 
   return (
     <Card className="border-l-4 border-l-blue-500 shadow-sm relative overflow-hidden transition-all hover:shadow-md flex flex-col max-h-full">
       {/* Celebration Effect */}
       {status === 'Disbursed' && <div className="absolute inset-0 pointer-events-none bg-emerald-500/10 animate-pulse z-0" />}
 
+      {/* AUTO-DIAL COUNTDOWN OVERLAY */}
+      {countdown !== null && (
+        <div className="absolute inset-0 z-50 bg-slate-900/90 flex flex-col items-center justify-center text-white animate-in fade-in duration-200">
+            <div className="text-4xl font-bold mb-2 animate-bounce">{countdown}</div>
+            <div className="text-sm font-medium text-slate-300">Auto-dialing {leadPhoneNumber}...</div>
+            <Button variant="secondary" size="sm" className="mt-6" onClick={() => setCountdown(null)}>Cancel</Button>
+        </div>
+      )}
+
       <CardHeader className="flex-none flex flex-row items-center justify-between py-3 bg-slate-50/50">
         <CardTitle className="text-base font-semibold flex items-center gap-2">
-          {/* Dialer Status Indicator */}
-          {dialing ? (
-             <span className="flex items-center gap-2 text-green-600 animate-pulse">
-                <Loader2 className="h-4 w-4 animate-spin"/> Connecting...
-             </span>
-          ) : (
-             <>
+            <>
                {isCallInitiated ? <Phone className="h-4 w-4 text-blue-600 animate-pulse"/> : <Activity className="h-4 w-4 text-slate-500"/>}
                {isCallInitiated ? "Active Call Session" : "Update Status"}
-             </>
-          )}
+            </>
         </CardTitle>
         <div className="flex gap-1">
             <TooltipProvider>
