@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Checkbox } from "@/components/ui/checkbox" // Make sure you have this component
+import { Checkbox } from "@/components/ui/checkbox" 
 import { 
   Phone, Clock, MessageSquare, IndianRupee, AlertCircle, Sparkles, 
   Send, Command, Copy, RotateCcw, ThumbsUp, ThumbsDown, 
@@ -30,7 +30,7 @@ interface LeadStatusUpdaterProps {
   initialLoanAmount?: number | null 
   leadPhoneNumber: string | null | undefined
   telecallerName: string | null | undefined
-  onNextLead?: () => void // New Prop for "Save & Next"
+  onNextLead?: () => void 
 }
 
 const STATUS_OPTIONS = [
@@ -71,17 +71,17 @@ export function LeadStatusUpdater({
   // --- STATE ---
   const [status, setStatus] = useState("")
   const [isUpdating, setIsUpdating] = useState(false)
-  const [note, setNote] = useState("") // For Not Eligible Reason
-  const [remarks, setRemarks] = useState("") // General Notes
+  const [note, setNote] = useState("") 
+  const [remarks, setRemarks] = useState("") 
   const [loanAmount, setLoanAmount] = useState<number | null>(initialLoanAmount)
   const [isModalOpen, setIsModalOpen] = useState(false) 
   
-  // AUTOMATION STATE
+  // AUTOMATION STATE: Default to TRUE for speed? (Set to false if you prefer manual start)
   const [autoNext, setAutoNext] = useState(false)
    
   // Call Timer State
   const [elapsedTime, setElapsedTime] = useState(0)
-  const [callDurationOverride, setCallDurationOverride] = useState<number | null>(null) // Manual override
+  const [callDurationOverride, setCallDurationOverride] = useState<number | null>(null) 
    
   const [notEligibleReason, setNotEligibleReason] = useState<string>("")
 
@@ -99,14 +99,36 @@ export function LeadStatusUpdater({
   const isWhatsappEnabled = whatsappLink !== "#";
   const hasUnsavedChanges = status !== "" || remarks !== "" || (loanAmount !== initialLoanAmount);
 
-  // Critical Status Check for Loan Amount
+  // Critical Status Check
   const isRevenueStatus = status === "Login" || status === "Disbursed";
   const isLoanAmountMissing = isRevenueStatus && (!loanAmount || loanAmount <= 0);
 
   // --- EFFECTS ---
   useEffect(() => { setLoanAmount(initialLoanAmount) }, [initialLoanAmount]);
-   
-  // AUTOMATION 1: Short Call Detection (<10s) -> Suggest NR
+
+  // ------------------------------------------------------------------
+  // AUTOMATION 1: AUTO-DIALER (THE FIX)
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    // If a call is initiated (from Table or Next button) AND we have a number...
+    if (isCallInitiated && leadPhoneNumber && leadId) {
+        
+        // 1.5s delay allows the agent to read the Customer Name first
+        const timer = setTimeout(() => {
+            // This triggers your default calling app (Softphone/Mobile)
+            window.location.href = `tel:${leadPhoneNumber}`;
+            
+            toast.info("Auto-dialing...", { 
+                icon: <Phone className="h-4 w-4 animate-pulse text-green-500" />,
+                duration: 2000 
+            });
+        }, 1500);
+
+        return () => clearTimeout(timer);
+    }
+  }, [leadId, isCallInitiated, leadPhoneNumber]);
+
+  // AUTOMATION 2: Short Call Detection (<10s) -> Suggest NR
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isCallInitiated && !callDurationOverride) {
@@ -116,7 +138,6 @@ export function LeadStatusUpdater({
             setElapsedTime(seconds);
         }, 1000);
     } else if (!isCallInitiated && elapsedTime > 0 && elapsedTime < 10 && !status) {
-        // Call ended quickly, user hasn't selected status yet
         setStatus("nr");
         toast.info("Short call detected", { description: "Auto-selected 'No Response'" });
     }
@@ -140,11 +161,7 @@ export function LeadStatusUpdater({
 
   const formatCurrency = (value: number | null) => {
     if (value === null || isNaN(value)) return "";
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 0
-    }).format(value);
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value);
   }
 
   const handleManualTimeChange = (type: 'min' | 'sec', val: string) => {
@@ -174,28 +191,8 @@ export function LeadStatusUpdater({
   }
 
   const handleQuickSchedule = (type: '1hr' | 'evening' | 'tomorrow') => {
-    const date = new Date();
-    let noteText = "";
-    
-    if (type === '1hr') {
-        date.setHours(date.getHours() + 1);
-        noteText = "Call back in 1 hour";
-    } else if (type === 'evening') {
-        date.setHours(18, 0, 0, 0);
-        noteText = "Call back in evening";
-    } else if (type === 'tomorrow') {
-        date.setDate(date.getDate() + 1);
-        date.setHours(11, 0, 0, 0);
-        noteText = "Call back tomorrow";
-    }
-    
-    // We treat this as a "Follow Up" status update with a specific date
-    // You might need to adjust onStatusUpdate signature or logic to accept the date directly
-    // Ideally, pass this to a specialized handler or just open modal with pre-filled date
-    // For now, let's open modal but maybe we can automate it fully if API allows
     setIsModalOpen(true); 
-    // If you want fully auto, you'd need to bypass the modal. 
-    // Let's stick to modal for safety but pre-fill logic would be in the modal component (which we updated).
+    // Ideally pass 'type' to modal to pre-fill it, but for now we open the modal
   }
 
   const handleQuickAmount = (amount: number) => {
@@ -264,7 +261,7 @@ export function LeadStatusUpdater({
       
       updateData.status = finalStatus;
 
-      // AUTOMATION 2: Auto-WhatsApp
+      // AUTOMATION 3: Auto-WhatsApp
       if (["Interested", "Documents_Sent"].includes(finalStatus) && leadPhoneNumber) {
          let msg = "";
          if(finalStatus === 'Interested') msg = `Hi ${telecallerName ? telecallerName : "there"}, regarding your loan application...`;
@@ -292,9 +289,9 @@ export function LeadStatusUpdater({
       setNote(""); setRemarks(""); setCallDurationOverride(null); setElapsedTime(0); setNotEligibleReason(""); setStatus("");
       toast.success("Updated successfully!")
 
-      // AUTOMATION 3: Save & Next
+      // AUTOMATION 4: Save & Next Trigger
       if (autoNext && onNextLead) {
-        onNextLead();
+        onNextLead(); // This swaps the ID, which triggers the useEffect above to dial
       }
 
     } catch (error: any) {
@@ -317,7 +314,6 @@ export function LeadStatusUpdater({
       setRemarks(""); setNote(""); setCallDurationOverride(null); setElapsedTime(0);
       toast.success("Call Back Scheduled.");
 
-      // AUTOMATION 3: Save & Next (also for Follow-ups)
       if (autoNext && onNextLead) {
         onNextLead();
       }
@@ -551,7 +547,7 @@ export function LeadStatusUpdater({
                 />
                 <label
                     htmlFor="auto-next"
-                    className="text-xs font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-slate-600"
+                    className="text-xs font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-slate-600 select-none cursor-pointer"
                 >
                     Auto-load next lead
                 </label>
