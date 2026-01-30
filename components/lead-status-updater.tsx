@@ -75,6 +75,8 @@ export function LeadStatusUpdater({
   const [remarks, setRemarks] = useState("") 
   const [loanAmount, setLoanAmount] = useState<number | null>(initialLoanAmount)
   const [isModalOpen, setIsModalOpen] = useState(false) 
+  
+  // FIX 1: Initialize State from LocalStorage to persist across re-renders
   const [autoNext, setAutoNext] = useState(true)
   
   // Call Timer & Dialer State
@@ -85,7 +87,6 @@ export function LeadStatusUpdater({
   const [notEligibleReason, setNotEligibleReason] = useState<string>("")
 
   // --- REFS ---
-  // We use this to prevent infinite loops of dialing the same number
   const lastDialedIdRef = useRef<string | null>(null)
 
   // --- DERIVED STATE ---
@@ -105,44 +106,66 @@ export function LeadStatusUpdater({
   const isLoanAmountMissing = isRevenueStatus && (!loanAmount || loanAmount <= 0);
 
   // --- EFFECTS ---
+
+  // Load persistence for AutoNext
+  useEffect(() => {
+    const saved = localStorage.getItem("crm_auto_next");
+    if (saved !== null) {
+        setAutoNext(saved === "true");
+    }
+  }, []);
+
+  const toggleAutoNext = (checked: boolean) => {
+    setAutoNext(checked);
+    localStorage.setItem("crm_auto_next", String(checked));
+  }
   
-  // 1. Reset Form & State when Lead ID Changes
+  // 1. Reset Form when Lead ID Changes
   useEffect(() => { 
     setLoanAmount(initialLoanAmount);
     handleReset();
-    // CRITICAL: Reset the dialer ref so the new lead CAN be dialed
+    
+    // CRITICAL: Reset the dialer ref when ID changes so we can dial the new person
     if (leadId !== lastDialedIdRef.current) {
-        setDialing(false); // Reset dialing UI
+        setDialing(false); 
+        // We do NOT reset lastDialedIdRef here; we let the next Effect handle the check
     }
   }, [leadId, initialLoanAmount]);
 
   // ------------------------------------------------------------------
-  // AUTOMATION: ROBUST AUTO-DIALER v2
+  // AUTOMATION: ROBUST IFRAME AUTO-DIALER (FIXED)
   // ------------------------------------------------------------------
   useEffect(() => {
-    // Requirements: Call mode ON, Valid ID, Valid Phone, and NOT already dialed this ID
+    // Only dial if: Call Initiated + Valid Phone + New Lead ID + AutoNext is actually ON (or it's the first load)
     if (isCallInitiated && leadId && leadPhoneNumber && lastDialedIdRef.current !== leadId) {
         
-        // 1. Lock it immediately to prevent double-fire
-        lastDialedIdRef.current = leadId;
+        lastDialedIdRef.current = leadId; // Lock immediately
         setDialing(true);
 
-        // 2. Short delay to allow UI to render the new name (UX)
         const timer = setTimeout(() => {
-            const cleanNumber = leadPhoneNumber.replace(/\D/g, ''); // Strip non-digits
-            const telUrl = `tel:${cleanNumber}`;
+            const cleanNumber = leadPhoneNumber.replace(/\D/g, '');
             
-            // Method A: Window Open (Often bypasses popup blockers for protocols)
-            window.open(telUrl, '_self');
+            // FIX 2: Use Hidden Iframe instead of window.location
+            // This prevents the page from navigating away or being blocked as a popup
+            const iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            document.body.appendChild(iframe);
+            iframe.src = `tel:${cleanNumber}`;
             
-            // UI Feedback
             toast.info(`Dialing ${leadPhoneNumber}...`, { 
                 icon: <Phone className="h-4 w-4 animate-pulse text-green-500" />,
                 duration: 2000 
             });
-            setDialing(false);
 
-        }, 500); // 500ms is the sweet spot
+            // Cleanup iframe after 3 seconds
+            setTimeout(() => {
+                if (document.body.contains(iframe)) {
+                    document.body.removeChild(iframe);
+                }
+                setDialing(false);
+            }, 3000);
+
+        }, 700); // 700ms delay for UX
 
         return () => clearTimeout(timer);
     }
@@ -569,7 +592,7 @@ export function LeadStatusUpdater({
                 <Checkbox 
                   id="auto-next" 
                   checked={autoNext} 
-                  onCheckedChange={(checked) => setAutoNext(checked as boolean)}
+                  onCheckedChange={(checked) => toggleAutoNext(checked as boolean)}
                   className="w-4 h-4 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
                 />
                 <label
