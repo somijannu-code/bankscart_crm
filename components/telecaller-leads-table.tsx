@@ -4,7 +4,7 @@ import { useState, useTransition } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { 
   User, Building, Clock, Eye, MessageSquare, 
-  ChevronDown, ChevronUp, AlertCircle, ArrowUpRight, CheckSquare, X, Loader2, Copy
+  ChevronDown, ChevronUp, AlertCircle, ArrowUpRight, CheckSquare, X, Loader2, Copy, PhoneMissed
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -19,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { toast } from "sonner"
 import { formatDistanceToNow } from "date-fns"
 
+// ... (Keep your Lead Interface) ...
 interface Lead {
   id: string
   name: string
@@ -61,7 +62,7 @@ export function TelecallerLeadsTable({
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
   const [isCallInitiated, setIsCallInitiated] = useState(false)
-   
+    
   // Bulk Actions State
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
@@ -99,6 +100,59 @@ export function TelecallerLeadsTable({
     router.refresh()
   }
 
+  // AUTOMATION: The Logic for "Save & Next"
+  const handleNextLead = () => {
+    if (!selectedLead) return;
+    const currentIndex = leads.findIndex(l => l.id === selectedLead.id);
+    
+    // Check if there is a next lead
+    if (currentIndex >= 0 && currentIndex < leads.length - 1) {
+        const nextLead = leads[currentIndex + 1];
+        
+        // Brief transition for UX
+        toast.info(`Loading next: ${nextLead.name}`);
+        setSelectedLead(nextLead);
+        // We keep isStatusDialogOpen = true
+        // We keep isCallInitiated = true (if you want to auto-start call) OR false (to reset)
+        setIsCallInitiated(true); 
+    } else {
+        setIsStatusDialogOpen(false);
+        toast.success("You've reached the end of this list!");
+    }
+  }
+
+  // AUTOMATION: One-Click NR (No Response)
+  const handleQuickNR = async (e: React.MouseEvent, lead: Lead) => {
+    e.stopPropagation();
+    toast.message("Marking No Response...", { description: "Scheduling callback for tomorrow." });
+
+    // 1. Calculate tomorrow 11 AM
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(11, 0, 0, 0);
+
+    try {
+        await Promise.all([
+             supabase.from("leads").update({ 
+                 status: 'nr', 
+                 last_contacted: new Date().toISOString() 
+             }).eq('id', lead.id),
+             supabase.from("follow_ups").insert({
+                 lead_id: lead.id,
+                 scheduled_at: tomorrow.toISOString(),
+                 status: "pending",
+                 title: `Retry: ${lead.name}`,
+                 notes: "Auto-scheduled: No Response"
+             })
+        ]);
+        
+        router.refresh();
+        toast.success("Marked NR", { description: "Moved to tomorrow's queue." });
+    } catch (error) {
+        toast.error("Failed to update");
+    }
+  }
+
   const getWhatsAppLink = (phone: string, name: string) => {
     if (!phone) return "#"
     const cleanedPhone = phone.replace(/\D/g, '')
@@ -126,38 +180,9 @@ export function TelecallerLeadsTable({
 
   // --- 3. STATUS UPDATER ---
   const handleStatusUpdate = async (newStatus: string, note?: string, callbackDate?: string) => {
-    if (!selectedLead) return
-    try {
-        const updateData: any = { 
-            status: newStatus,
-            last_contacted: new Date().toISOString()
-        }
-        
-        if (newStatus === "follow_up" && callbackDate) {
-            await supabase.from("follow_ups").insert({
-                lead_id: selectedLead.id,
-                scheduled_date: callbackDate,
-                status: "scheduled"
-            })
-            updateData.follow_up_date = callbackDate
-        }
-
-        if (note) {
-             await supabase.from("notes").insert({
-                lead_id: selectedLead.id,
-                note: note,
-                note_type: "status_change"
-             })
-        }
-
-        await supabase.from("leads").update(updateData).eq("id", selectedLead.id)
-        
-        setIsStatusDialogOpen(false)
-        router.refresh() 
-        toast.success(`Updated status to ${newStatus}`)
-    } catch (e: any) {
-        toast.error("Update failed")
-    }
+    // This is handled inside the Dialog usually, but if the Dialog calls back:
+    setIsStatusDialogOpen(false)
+    router.refresh()
   }
 
   // --- 4. BULK ACTIONS ---
@@ -219,10 +244,8 @@ export function TelecallerLeadsTable({
                   <input type="checkbox" checked={selectedIds.length === leads.length && leads.length > 0} onChange={toggleSelectAll} className="rounded border-gray-300"/>
                 </TableHead>
                 
-                {/* --- CHANGED: Contact (Phone) Column Moved Here --- */}
                 <TableHead className="w-[120px]">Contact</TableHead>
 
-                {/* --- CHANGED: Name Column Moved Here --- */}
                 <TableHead className="w-[200px] md:w-[250px] cursor-pointer hover:bg-slate-100" onClick={() => handleSort('name')}>
                     <div className="flex items-center">Name <SortIcon field="name"/></div>
                 </TableHead>
@@ -252,9 +275,9 @@ export function TelecallerLeadsTable({
                       <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(lead.id)} className="rounded border-gray-300"/>
                     </TableCell>
                     
-                    {/* --- CHANGED: Contact Cell (Phone) Moved Here --- */}
                     <TableCell>
                         <div className="flex items-center gap-1">
+                            {/* Quick Call Button */}
                             <QuickActions 
                                 phone={lead.phone || ""} 
                                 email={lead.email || ""} 
@@ -284,7 +307,6 @@ export function TelecallerLeadsTable({
                         </div>
                     </TableCell>
 
-                    {/* --- CHANGED: Name Cell Moved Here --- */}
                     <TableCell>
                       <div className="flex flex-col">
                         <Link href={`/telecaller/leads/${lead.id}`} className="font-semibold text-slate-900 hover:text-blue-600 flex items-center gap-2">
@@ -337,9 +359,28 @@ export function TelecallerLeadsTable({
                     </TableCell>
 
                     <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" className="h-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50" onClick={() => { setSelectedLead(lead); setIsStatusDialogOpen(true); }}>
-                            Update
-                        </Button>
+                        <div className="flex justify-end gap-2">
+                            {/* Quick NR Button (Automation) */}
+                            <TooltipProvider>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button 
+                                            variant="ghost" 
+                                            size="sm" 
+                                            className="h-8 w-8 p-0 text-slate-400 hover:text-orange-600 hover:bg-orange-50"
+                                            onClick={(e) => handleQuickNR(e, lead)}
+                                        >
+                                            <PhoneMissed className="h-4 w-4" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>One-Click NR (Retry Tmrw)</TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+
+                            <Button variant="ghost" size="sm" className="h-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50" onClick={() => { setSelectedLead(lead); setIsStatusDialogOpen(true); }}>
+                                Update
+                            </Button>
+                        </div>
                     </TableCell>
                   </TableRow>
                 )
@@ -374,7 +415,10 @@ export function TelecallerLeadsTable({
         )}
       </div>
 
-      {/* Shared Dialog for Status Update */}
+      {/* IMPORTANT: We pass 'handleNextLead' to the dialog here. 
+         Make sure your LeadStatusDialog component accepts `onNextLead`.
+         If it doesn't, you need to update LeadStatusDialog to forward this prop to LeadStatusUpdater.
+      */}
       {selectedLead && (
         <LeadStatusDialog
           leadId={selectedLead.id}
@@ -387,6 +431,8 @@ export function TelecallerLeadsTable({
           onStatusUpdate={handleStatusUpdate}
           isCallInitiated={isCallInitiated}
           onCallLogged={handleCallLogged}
+          // PASS THE NEXT FUNCTION HERE
+          onNextLead={handleNextLead}
         />
       )}
     </div>
