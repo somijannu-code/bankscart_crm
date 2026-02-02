@@ -58,7 +58,7 @@ const shuffleArray = <T,>(array: T[]): T[] => {
 
 // --- HELPER: Check for Stale Leads ---
 const isStale = (lastContacted: string | null, status: string) => {
-  if (['Disbursed', 'not_eligible', 'Not_Interested', 'nr', 'dead_bucket', 'recycle_pool'].includes(status)) return false; 
+  if (['Disbursed', 'not_eligible', 'Not_Interested', 'nr', 'dead_bucket', 'recycle_pool', 'duplicate'].includes(status)) return false; 
   if (!lastContacted) return true; 
   const diffHours = (new Date().getTime() - new Date(lastContacted).getTime()) / (1000 * 60 * 60);
   return diffHours > 48; 
@@ -84,6 +84,7 @@ const KANBAN_COLUMNS: KanbanColumn[] = [
   { id: 'dead_bucket', title: 'Dead Bucket', color: 'bg-slate-700' },
   { id: 'self_employed', title: 'Self Employed', color: 'bg-amber-500' },
   { id: 'not_eligible', title: 'Not Eligible', color: 'bg-red-900' },
+  { id: 'duplicate', title: 'Duplicates', color: 'bg-red-500' },
 ]
 
 const parseCSV = (text: string) => {
@@ -549,52 +550,54 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
     setShowDuplicatesDialog(true)
   }
 
-  // --- NEW: Bulk Resolve Duplicates ---
+  // --- UPDATED: Bulk Resolve Duplicates (Mark as 'duplicate', Keep Newest) ---
   const handleBulkResolveDuplicates = async () => {
     if (duplicates.length === 0) return;
 
-    const idsToDelete = new Set<string>();
+    const idsToUpdate = new Set<string>();
 
     duplicates.forEach(group => {
-        // Sort by created_at (Keep Oldest)
+        // Sort by created_at DESCENDING (Newest First)
         const sortedLeads = [...group.leads].sort((a: Lead, b: Lead) => 
-            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         );
         
-        // Keep index 0, delete the rest
+        // Index 0 is the NEWEST lead (Keep this one active)
+        // Loop from Index 1 onwards (The Older leads) to mark as duplicate
         for (let i = 1; i < sortedLeads.length; i++) {
-            idsToDelete.add(sortedLeads[i].id);
+            idsToUpdate.add(sortedLeads[i].id);
         }
     });
 
-    if (idsToDelete.size === 0) {
-        alert("No duplicates to remove.");
+    if (idsToUpdate.size === 0) {
+        alert("No duplicates found to update.");
         return;
     }
 
-    if (!confirm(`This will permanently DELETE ${idsToDelete.size} redundant leads. Continue?`)) {
+    if (!confirm(`This will change the status of ${idsToUpdate.size} older duplicates to 'duplicate'. The newest leads will remain active. Continue?`)) {
         return;
     }
 
     try {
-        const { error, count } = await supabase
+        // UPDATE status instead of DELETE
+        const { error } = await supabase
             .from('leads')
-            .delete({ count: 'exact' }) // Request count from Supabase
-            .in('id', Array.from(idsToDelete));
+            .update({ 
+                status: 'duplicate',
+                last_contacted: new Date().toISOString(),
+                notes: 'System: Marked as duplicate (kept newest)' 
+            }) 
+            .in('id', Array.from(idsToUpdate));
 
         if (error) throw error;
 
-        // Check if rows were actually deleted
-        if (count === 0) {
-            setErrorMessage("Operation successful but 0 leads were deleted. Check Row-Level Security (RLS) policies.");
-        } else {
-            setSuccessMessage(`Successfully removed ${count} duplicate leads.`);
-            setShowDuplicatesDialog(false);
-            window.location.reload();
-        }
+        setSuccessMessage(`Successfully marked ${idsToUpdate.size} older leads as duplicates.`);
+        setShowDuplicatesDialog(false);
+        window.location.reload();
+        
     } catch (error) {
-        console.error("Error deleting duplicates:", error);
-        setErrorMessage("Failed to delete duplicates. Check permissions.");
+        console.error("Error updating duplicates:", error);
+        setErrorMessage("Failed to update duplicates. Check permissions.");
     }
   }
 
@@ -2379,13 +2382,14 @@ export function LeadsTable({ leads = [], telecallers = [] }: LeadsTableProps) {
           </div>
           <DialogFooter className="sm:justify-between">
             <div className="text-xs text-muted-foreground self-center">
-                Review carefully before bulk deleting.
+                Review carefully before processing.
             </div>
             <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setShowDuplicatesDialog(false)}>Close</Button>
+                {/* Updated Button Logic */}
                 <Button variant="destructive" onClick={handleBulkResolveDuplicates}>
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Remove All Duplicates (Keep Oldest)
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Mark Duplicates (Keep Newest)
                 </Button>
             </div>
           </DialogFooter>
