@@ -211,13 +211,10 @@ export default function UploadPage() {
             }
         })
 
-        // Ensure we preserve the row number for error reporting
         row._originalIndex = idx + 2; 
 
-        // Deduplication Logic
         if (row.phone) {
             if (seenPhonesInFile.has(row.phone)) {
-                // Duplicate inside the file, skip it
                 if (duplicateAction === 'skip') {
                     tempSkipCount++;
                     return acc;
@@ -233,7 +230,7 @@ export default function UploadPage() {
 
     const BATCH_SIZE = 50
     let successCount = 0
-    let skipCount = tempSkipCount; // Start with in-file duplicates
+    let skipCount = tempSkipCount; 
     let failCount = 0
     const errors: any[] = []
 
@@ -250,23 +247,47 @@ export default function UploadPage() {
         const batch = uniqueRows.slice(i, i + BATCH_SIZE)
         const leadsToInsert: any[] = []
 
-        // Database-Check for Duplicates
+        // --- UPDATED DUPLICATE LOGIC START ---
         if (duplicateAction === 'skip') {
             const phones = batch.map(r => r.phone).filter(Boolean)
-            const { data: existing } = await supabase.from("leads").select("phone").in("phone", phones)
-            const existingPhones = new Set(existing?.map(e => e.phone) || [])
+            
+            // Fetch status along with phone for existing leads
+            const { data: existing } = await supabase
+                .from("leads")
+                .select("phone, status")
+                .in("phone", phones)
+            
+            // Map existing phones to their status
+            const existingMap = new Map<string, string>();
+            if (existing) {
+                existing.forEach(e => existingMap.set(e.phone, e.status));
+            }
+
+            // Define statuses that trigger a SKIP (Active Leads)
+            const skipStatuses = ['Interested', 'follow_up', 'DISBURSED', 'Disbursed', 'Login', 'Documents_Sent'];
 
             batch.forEach(row => {
-                if (existingPhones.has(row.phone)) {
-                    skipCount++
-                    // errors.push({ ...row, error: "Duplicate Phone Number (In DB)" }) // Optional: log as error or just skip silently
+                if (existingMap.has(row.phone)) {
+                    const existingStatus = existingMap.get(row.phone);
+                    
+                    // Check if status is one of the restricted ones
+                    if (existingStatus && skipStatuses.includes(existingStatus)) {
+                        // SKIP: Lead exists and is active/converted
+                        skipCount++
+                    } else {
+                        // UPLOAD: Lead exists but is junk/cold (e.g. 'new', 'Not_Interested', 'nr') -> Treat as fresh lead (Duplicate Entry)
+                        leadsToInsert.push(row)
+                    }
                 } else {
+                    // Lead does not exist -> UPLOAD
                     leadsToInsert.push(row)
                 }
             })
         } else {
+            // "Allow Duplicates" selected -> Upload everything
             leadsToInsert.push(...batch)
         }
+        // --- UPDATED DUPLICATE LOGIC END ---
 
         if (leadsToInsert.length > 0) {
             const currentBatchAssignments: Record<string, number> = {} 
@@ -283,13 +304,10 @@ export default function UploadPage() {
                     currentBatchAssignments[assigneeId] = (currentBatchAssignments[assigneeId] || 0) + 1
                  }
 
-                 // --- IMPORTANT FIX: Destructure to remove _originalIndex and _id ---
-                 // We remove internal fields so Supabase doesn't throw "Column not found" error
                  const { _originalIndex, _id, ...cleanLeadData } = lead;
 
                  return {
                     ...cleanLeadData,
-                    // --- IMPORTANT FIX: Use "other" instead of "import" and lowercase to match Check Constraint ---
                     source: (globalSource || lead.source || "other").toLowerCase(),
                     tags: globalTags ? globalTags.split(",").map(t => t.trim()) : [],
                     assigned_to: assigneeId,
@@ -299,23 +317,17 @@ export default function UploadPage() {
                     company: lead.company || null,
                     priority: 'medium',
                     status: 'new',
-                    // created_at is usually automatic, but we can send it if needed
-                    // created_at: new Date().toISOString() 
                  }
             })
 
             const { error } = await supabase.from("leads").insert(finalLeads)
             
             if (error) {
-                // If the batch fails, we need to know which rows failed.
-                // Since we don't know exactly which row caused it (unless we do single inserts),
-                // we mark the whole batch as failed.
                 failCount += leadsToInsert.length
                 leadsToInsert.forEach(l => errors.push({ ...l, error: error.message }))
             } else {
                 successCount += leadsToInsert.length
                 
-                // Update Global Assignment Summary
                 setAssignmentSummary(prev => {
                     const next = { ...prev }
                     Object.entries(currentBatchAssignments).forEach(([id, count]) => {
@@ -331,7 +343,7 @@ export default function UploadPage() {
     }
 
     setUploadStats({
-        total: uniqueRows.length + (lines.length - uniqueRows.length), // Total rows in file
+        total: uniqueRows.length + (lines.length - uniqueRows.length), 
         success: successCount,
         skipped: skipCount,
         failed: failCount
@@ -517,6 +529,9 @@ export default function UploadPage() {
                                     <SelectItem value="allow">Allow duplicates</SelectItem>
                                 </SelectContent>
                             </Select>
+                            <p className="text-[10px] text-gray-500 mt-1">
+                                * "Skip" will only block leads if existing status is: Interested, Follow Up, Login, Docs Sent, or Disbursed.
+                            </p>
                         </div>
 
                         {/* Global Attributes */}
@@ -620,7 +635,7 @@ export default function UploadPage() {
                         </div>
                         <div className="bg-amber-50 p-4 rounded-lg">
                             <div className="text-2xl font-bold text-amber-700">{uploadStats.skipped}</div>
-                            <div className="text-sm text-amber-600">Skipped (Dupes)</div>
+                            <div className="text-sm text-amber-600">Skipped (Active)</div>
                         </div>
                     </div>
 
