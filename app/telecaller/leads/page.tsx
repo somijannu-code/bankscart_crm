@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Users, Filter, TrendingUp, Clock, LogIn, CheckCircle2 } from "lucide-react"
 import { TelecallerLeadsTable } from "@/components/telecaller-leads-table"
 import { TelecallerLeadFilters } from "@/components/telecaller-lead-filters"
+import { TelecallerCreateLeadDialog } from "@/components/telecaller-create-lead-dialog" // New Import
 import { redirect } from "next/navigation"
 import { Progress } from "@/components/ui/progress"
 
@@ -36,7 +37,7 @@ export default async function TelecallerLeadsPage({
 
   // Parallel Stats Fetching
   const baseQuery = supabase.from("leads").select("*", { count: 'exact', head: true }).eq("assigned_to", user.id)
-  
+   
   const [
     { count: totalCount },
     { count: newCount },
@@ -74,6 +75,11 @@ export default async function TelecallerLeadsPage({
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">My Leads</h1>
           <p className="text-slate-500 mt-1">Manage assignments and track conversions</p>
+        </div>
+        
+        {/* Create Lead Button Added Here */}
+        <div className="flex items-center gap-2">
+           <TelecallerCreateLeadDialog currentUserId={user.id} />
         </div>
       </div>
 
