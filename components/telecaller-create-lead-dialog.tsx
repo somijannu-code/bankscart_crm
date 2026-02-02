@@ -22,8 +22,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Plus, Loader2, UserPlus } from "lucide-react"
+import { Plus, Loader2 } from "lucide-react"
 import { toast } from "sonner"
+
+// --- STATUS CONFIGURATION ---
+const LEAD_STATUSES = [
+  { id: 'new', title: 'New Leads' },
+  { id: 'contacted', title: 'Contacted' },
+  { id: 'Interested', title: 'Interested' },
+  { id: 'Documents_Sent', title: 'Docs Sent' },
+  { id: 'Login', title: 'Login' },
+  { id: 'follow_up', title: 'Follow Up' },
+  { id: 'Disbursed', title: 'Disbursed' },
+  { id: 'nr', title: 'Not Reachable' },
+  { id: 'Not_Interested', title: 'Not Interested' },
+  { id: 'recycle_pool', title: 'Recycle Pool' },
+  { id: 'dead_bucket', title: 'Dead Bucket' },
+  { id: 'self_employed', title: 'Self Employed' },
+  { id: 'not_eligible', title: 'Not Eligible' },
+]
 
 interface TelecallerCreateLeadDialogProps {
   currentUserId: string
@@ -125,10 +142,12 @@ export function TelecallerCreateLeadDialog({ currentUserId }: TelecallerCreateLe
               <SelectTrigger>
                 <SelectValue placeholder="Select Status" />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="new">New Lead</SelectItem>
-                <SelectItem value="Interested">Interested</SelectItem>
-                <SelectItem value="follow_up">Call Back</SelectItem>
+              <SelectContent className="max-h-[200px]">
+                {LEAD_STATUSES.map((status) => (
+                  <SelectItem key={status.id} value={status.id}>
+                    {status.title}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
