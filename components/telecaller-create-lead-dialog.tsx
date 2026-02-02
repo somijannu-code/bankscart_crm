@@ -75,7 +75,7 @@ export function TelecallerCreateLeadDialog({ currentUserId }: TelecallerCreateLe
         phone: formData.phone,
         status: formData.status,
         assigned_to: currentUserId, // Auto-assign to self
-        source: "Other", // FIX: Changed to 'Other' to match DB constraint
+        source: "other", // FIX: Changed to 'Other' to match DB constraint
         created_at: new Date().toISOString(),
         last_contacted: new Date().toISOString(),
       })
