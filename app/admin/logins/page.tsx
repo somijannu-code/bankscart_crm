@@ -15,8 +15,8 @@ import {
     ArrowRightLeft, Edit, Plus, X, Save, Users, CheckCircle2, XCircle, Clock, Trash2
 } from "lucide-react"
 import { toast } from "sonner"
-import { format } from "date-fns"
-import { EmptyState } from "@/components/empty-state" // Ensure you have this
+import { format, subMonths, startOfMonth, endOfMonth } from "date-fns" // Added date helpers
+import { EmptyState } from "@/components/empty-state" 
 
 // --- TYPES ---
 type BankAttempt = {
@@ -55,19 +55,29 @@ export default function AdminLoginsPage() {
                 .order('updated_at', { ascending: false })
 
             const todayDate = new Date()
-            const startOfToday = new Date(todayDate.setHours(0,0,0,0)).toISOString()
-
+            
+            // --- DATE LOGIC UPDATED ---
             if (dateFilter === 'today') {
+                const startOfToday = new Date(todayDate.setHours(0,0,0,0)).toISOString()
                 loginsQuery = loginsQuery.gte('updated_at', startOfToday)
             } else if (dateFilter === 'month') {
-                loginsQuery = loginsQuery.gte('updated_at', new Date(todayDate.getFullYear(), todayDate.getMonth(), 1).toISOString())
+                const startOfThisMonth = new Date(todayDate.getFullYear(), todayDate.getMonth(), 1).toISOString()
+                loginsQuery = loginsQuery.gte('updated_at', startOfThisMonth)
+            } else if (dateFilter === 'last_month') {
+                const lastMonthDate = subMonths(new Date(), 1)
+                const start = startOfMonth(lastMonthDate).toISOString()
+                const end = endOfMonth(lastMonthDate).toISOString()
+                
+                loginsQuery = loginsQuery
+                    .gte('updated_at', start)
+                    .lte('updated_at', end)
             }
 
             const transfersQuery = supabase
                 .from('leads')
                 .select(`id, name, updated_at, users:assigned_to ( full_name )`)
                 .eq('status', 'Transferred to KYC')
-                .gte('updated_at', startOfToday)
+                .gte('updated_at', new Date(new Date().setHours(0,0,0,0)).toISOString()) // Transfers usually keep today's view
                 .order('updated_at', { ascending: false })
 
             const [loginsRes, transfersRes] = await Promise.all([loginsQuery, transfersQuery])
@@ -90,6 +100,61 @@ export default function AdminLoginsPage() {
     const handleSave = (updatedLogin: any) => {
         setLogins(logins.map(l => l.id === updatedLogin.id ? updatedLogin : l))
         setEditingLogin(null)
+    }
+
+    // --- NEW EXPORT FUNCTION ---
+    const handleExport = () => {
+        if (filteredLogins.length === 0) {
+            toast.error("No data to export");
+            return;
+        }
+
+        try {
+            // Flatten data for CSV
+            const csvData = filteredLogins.map(login => {
+                // Create a readable string for bank attempts
+                const bankDetails = Array.isArray(login.bank_attempts) && login.bank_attempts.length > 0
+                    ? login.bank_attempts.map((a: BankAttempt) => `${a.bank} (${a.status})`).join('; ')
+                    : login.bank_name;
+
+                return {
+                    "Agent Name": login.users?.full_name || 'Unknown',
+                    "Customer Name": login.name,
+                    "Customer Phone": login.phone,
+                    "Current Status": login.status,
+                    "Bank Applications": bankDetails,
+                    "Last Updated": format(new Date(login.updated_at), "yyyy-MM-dd HH:mm:ss")
+                };
+            });
+
+            // Generate CSV Headers
+            const headers = Object.keys(csvData[0]);
+            const csvContent = [
+                headers.join(","), // Header row
+                ...csvData.map(row => 
+                    headers.map(header => {
+                        const cell = (row as any)[header] || "";
+                        // Escape quotes and wrap in quotes to handle commas in data
+                        return `"${String(cell).replace(/"/g, '""')}"`;
+                    }).join(",")
+                )
+            ].join("\n");
+
+            // Trigger Download
+            const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.setAttribute("download", `Logins_Export_${dateFilter}_${format(new Date(), 'yyyyMMdd')}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            toast.success("Export downloaded successfully");
+
+        } catch (error) {
+            console.error("Export failed", error);
+            toast.error("Failed to generate CSV");
+        }
     }
 
     // 3. FILTERING & STATS
@@ -141,10 +206,14 @@ export default function AdminLoginsPage() {
                         <SelectContent>
                             <SelectItem value="today">Today</SelectItem>
                             <SelectItem value="month">This Month</SelectItem>
+                            {/* Added Last Month Option */}
+                            <SelectItem value="last_month">Last Month</SelectItem>
                             <SelectItem value="all">All Time</SelectItem>
                         </SelectContent>
                     </Select>
-                    <Button variant="outline" className="bg-white h-9 text-sm" onClick={() => toast.success("Export started")}>
+                    
+                    {/* Fixed Export Button */}
+                    <Button variant="outline" className="bg-white h-9 text-sm" onClick={handleExport}>
                         <Download className="w-3.5 h-3.5 mr-2" /> Export
                     </Button>
                 </div>
