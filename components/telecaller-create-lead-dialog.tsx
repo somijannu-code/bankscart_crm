@@ -75,7 +75,7 @@ export function TelecallerCreateLeadDialog({ currentUserId }: TelecallerCreateLe
         phone: formData.phone,
         status: formData.status,
         assigned_to: currentUserId, // Auto-assign to self
-        source: "Manual Entry (Telecaller)",
+        source: "Other", // FIX: Changed to 'Other' to match DB constraint
         created_at: new Date().toISOString(),
         last_contacted: new Date().toISOString(),
       })
@@ -88,7 +88,7 @@ export function TelecallerCreateLeadDialog({ currentUserId }: TelecallerCreateLe
       router.refresh() // Refresh data on page
     } catch (error: any) {
       console.error("Error creating lead:", error)
-      toast.error("Failed to create lead")
+      toast.error(error.message || "Failed to create lead")
     } finally {
       setIsLoading(false)
     }
