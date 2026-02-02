@@ -15,7 +15,7 @@ import {
     ArrowRightLeft, Edit, Plus, X, Save, Users, CheckCircle2, XCircle, Clock, Trash2
 } from "lucide-react"
 import { toast } from "sonner"
-import { format, subMonths, startOfMonth, endOfMonth } from "date-fns" // Added date helpers
+import { format, subMonths, startOfMonth, endOfMonth } from "date-fns" 
 import { EmptyState } from "@/components/empty-state" 
 
 // --- TYPES ---
@@ -56,7 +56,6 @@ export default function AdminLoginsPage() {
 
             const todayDate = new Date()
             
-            // --- DATE LOGIC UPDATED ---
             if (dateFilter === 'today') {
                 const startOfToday = new Date(todayDate.setHours(0,0,0,0)).toISOString()
                 loginsQuery = loginsQuery.gte('updated_at', startOfToday)
@@ -77,7 +76,7 @@ export default function AdminLoginsPage() {
                 .from('leads')
                 .select(`id, name, updated_at, users:assigned_to ( full_name )`)
                 .eq('status', 'Transferred to KYC')
-                .gte('updated_at', new Date(new Date().setHours(0,0,0,0)).toISOString()) // Transfers usually keep today's view
+                .gte('updated_at', new Date(new Date().setHours(0,0,0,0)).toISOString()) 
                 .order('updated_at', { ascending: false })
 
             const [loginsRes, transfersRes] = await Promise.all([loginsQuery, transfersQuery])
@@ -102,7 +101,7 @@ export default function AdminLoginsPage() {
         setEditingLogin(null)
     }
 
-    // --- NEW EXPORT FUNCTION ---
+    // --- EXPORT FUNCTION ---
     const handleExport = () => {
         if (filteredLogins.length === 0) {
             toast.error("No data to export");
@@ -110,9 +109,7 @@ export default function AdminLoginsPage() {
         }
 
         try {
-            // Flatten data for CSV
             const csvData = filteredLogins.map(login => {
-                // Create a readable string for bank attempts
                 const bankDetails = Array.isArray(login.bank_attempts) && login.bank_attempts.length > 0
                     ? login.bank_attempts.map((a: BankAttempt) => `${a.bank} (${a.status})`).join('; ')
                     : login.bank_name;
@@ -127,20 +124,17 @@ export default function AdminLoginsPage() {
                 };
             });
 
-            // Generate CSV Headers
             const headers = Object.keys(csvData[0]);
             const csvContent = [
-                headers.join(","), // Header row
+                headers.join(","), 
                 ...csvData.map(row => 
                     headers.map(header => {
                         const cell = (row as any)[header] || "";
-                        // Escape quotes and wrap in quotes to handle commas in data
                         return `"${String(cell).replace(/"/g, '""')}"`;
                     }).join(",")
                 )
             ].join("\n");
 
-            // Trigger Download
             const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
             const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
@@ -206,21 +200,20 @@ export default function AdminLoginsPage() {
                         <SelectContent>
                             <SelectItem value="today">Today</SelectItem>
                             <SelectItem value="month">This Month</SelectItem>
-                            {/* Added Last Month Option */}
                             <SelectItem value="last_month">Last Month</SelectItem>
                             <SelectItem value="all">All Time</SelectItem>
                         </SelectContent>
                     </Select>
                     
-                    {/* Fixed Export Button */}
                     <Button variant="outline" className="bg-white h-9 text-sm" onClick={handleExport}>
                         <Download className="w-3.5 h-3.5 mr-2" /> Export
                     </Button>
                 </div>
             </div>
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 items-start">
+                
+                {/* 1. Total Logins Card */}
                 <Card className="shadow-sm border-l-4 border-indigo-500">
                     <CardContent className="p-5 flex flex-col justify-between h-full">
                         <div className="flex items-center gap-3 mb-2">
@@ -231,6 +224,7 @@ export default function AdminLoginsPage() {
                     </CardContent>
                 </Card>
 
+                {/* 2. Top Performers (Gold/Silver/Bronze) */}
                 <Card className="shadow-sm border-l-4 border-amber-500">
                     <CardContent className="p-5">
                         <div className="flex items-center gap-3 mb-3">
@@ -240,7 +234,10 @@ export default function AdminLoginsPage() {
                         <div className="space-y-2">
                             {allTelecallerStats.slice(0, 3).map((agent, i) => (
                                 <div key={agent.name} className="flex justify-between items-center text-sm">
-                                    <span className="font-medium text-gray-700 truncate max-w-[120px]">{i + 1}. {agent.name}</span>
+                                    <span className="font-medium text-gray-700 truncate max-w-[120px]">
+                                        {i === 0 && "🥇 "} {i === 1 && "🥈 "} {i === 2 && "🥉 "}
+                                        {agent.name}
+                                    </span>
                                     <Badge variant="secondary" className="bg-amber-100 text-amber-800">{agent.count}</Badge>
                                 </div>
                             ))}
@@ -249,24 +246,37 @@ export default function AdminLoginsPage() {
                     </CardContent>
                 </Card>
 
-                <Card className="shadow-sm border-l-4 border-blue-500 flex flex-col">
-                    <CardContent className="p-5 flex-1 flex flex-col min-h-0">
-                        <div className="flex items-center gap-3 mb-2 shrink-0">
+                {/* 3. Full Leaderboard (Portrait Mode - Scrollable) */}
+                <Card className="shadow-sm border-l-4 border-blue-500 flex flex-col row-span-2 md:h-auto h-full">
+                    <CardHeader className="pb-2">
+                        <div className="flex items-center gap-3">
                             <div className="p-2 bg-blue-50 rounded-lg text-blue-600"><Users className="h-5 w-5" /></div>
-                            <span className="text-sm font-medium text-gray-500">Leaderboard</span>
+                            <CardTitle className="text-sm font-medium text-gray-700">Full Leaderboard</CardTitle>
                         </div>
-                        <div className="flex-1 overflow-y-auto pr-2 min-h-[100px] max-h-[120px] custom-scrollbar">
-                            <table className="w-full text-sm">
-                                <tbody>
-                                    {allTelecallerStats.map((agent) => (
-                                        <tr key={agent.name} className="border-b border-gray-100 last:border-0">
-                                            <td className="py-1.5 text-gray-600 truncate max-w-[140px]">{agent.name}</td>
-                                            <td className="py-1.5 text-right font-bold text-gray-900">{agent.count}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                    </CardHeader>
+                    <CardContent className="p-0 flex-1 min-h-[300px] max-h-[400px] overflow-y-auto custom-scrollbar">
+                        <table className="w-full text-sm">
+                            <thead className="bg-gray-50 sticky top-0 z-10">
+                                <tr>
+                                    <th className="text-left py-2 px-4 font-medium text-gray-500 text-xs uppercase">Agent</th>
+                                    <th className="text-right py-2 px-4 font-medium text-gray-500 text-xs uppercase">Count</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {allTelecallerStats.map((agent, index) => (
+                                    <tr key={agent.name} className="hover:bg-gray-50/50 transition-colors">
+                                        <td className="py-2.5 px-4 text-gray-700 flex items-center gap-2">
+                                            <span className="text-gray-400 font-mono text-xs w-4">{index + 1}.</span>
+                                            <span className="truncate max-w-[120px]" title={agent.name}>{agent.name}</span>
+                                        </td>
+                                        <td className="py-2.5 px-4 text-right font-bold text-blue-600">{agent.count}</td>
+                                    </tr>
+                                ))}
+                                {allTelecallerStats.length === 0 && (
+                                    <tr><td colSpan={2} className="text-center py-8 text-gray-400">No activity yet.</td></tr>
+                                )}
+                            </tbody>
+                        </table>
                     </CardContent>
                 </Card>
             </div>
@@ -410,7 +420,7 @@ export default function AdminLoginsPage() {
                 </CardContent>
             </Card>
 
-            {/* EDIT DIALOG (Separated Component for Performance) */}
+            {/* EDIT DIALOG */}
             <EditLoginDialog 
                 login={editingLogin} 
                 open={!!editingLogin} 
@@ -421,7 +431,6 @@ export default function AdminLoginsPage() {
     )
 }
 
-// --- SUB-COMPONENT: EDIT DIALOG ---
 function EditLoginDialog({ login, open, onClose, onSave }: { login: any, open: boolean, onClose: () => void, onSave: (l: any) => void }) {
     const supabase = createClient()
     const [attempts, setAttempts] = useState<BankAttempt[]>([])
@@ -526,7 +535,6 @@ function EditLoginDialog({ login, open, onClose, onSave }: { login: any, open: b
     )
 }
 
-// --- HELPERS ---
 function getStatusIcon(status: string) {
     switch(status) {
         case 'Approved': case 'Disbursed': return <CheckCircle2 className="h-3 w-3 text-green-600" />
