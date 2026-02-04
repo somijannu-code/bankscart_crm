@@ -77,8 +77,11 @@ export default function TelecallerDisbursementReport() {
     // --- STATE ---
     const [filterMode, setFilterMode] = useState<'monthly' | 'custom'>('monthly');
     const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1; // 1-12
+
+    // Set Default Year & Month (Current Month)
     const [selectedYear, setSelectedYear] = useState(String(currentYear));
-    const [selectedMonth, setSelectedMonth] = useState<string>('all');
+    const [selectedMonth, setSelectedMonth] = useState<string>(String(currentMonth).padStart(2, '0'));
     
     const [customStart, setCustomStart] = useState("");
     const [customEnd, setCustomEnd] = useState("");
