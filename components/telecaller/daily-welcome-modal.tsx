@@ -23,15 +23,15 @@ export function DailyWelcomeModal() {
   const [topPerformer, setTopPerformer] = useState<{ name: string; amount: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [prediction, setPrediction] = useState("")
-  const [userName, setUserName] = useState("") 
+  const [userName, setUserName] = useState("") // State for current user name
   const supabase = createClient()
   const { toast } = useToast()
 
   useEffect(() => {
     const checkAndInit = async () => {
-      // 1. Check LocalStorage (Prevent showing twice a day)
-      const todayStr = new Date().toISOString().split('T')[0]
-      const seenKey = `seen_welcome_${todayStr}`
+      // 1. Check LocalStorage
+      const today = new Date().toISOString().split('T')[0]
+      const seenKey = `seen_welcome_${today}`
       const hasSeen = localStorage.getItem(seenKey)
 
       if (hasSeen) {
@@ -39,7 +39,7 @@ export function DailyWelcomeModal() {
         return
       }
 
-      // 2. Fetch Current User Details
+      // 2. Fetch Current User Details (Name)
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         const { data: userData } = await supabase
@@ -53,56 +53,13 @@ export function DailyWelcomeModal() {
         }
       }
 
-      // 3. Fetch Top Performer (Logic moved to JS for safety with Text columns)
-      const now = new Date();
-      const currentMonth = now.getMonth(); // 0-11
-      const currentYear = now.getFullYear();
+      // 3. Fetch Top Performer
+      const { data, error } = await supabase.rpc('get_top_performer')
 
-      try {
-          // Fetch ALL disbursed leads first (safer than SQL date filtering on text columns)
-          // We check for multiple case variations of 'Disbursed' to be safe
-          const { data: leads, error } = await supabase
-            .from('leads')
-            .select('assigned_to, disbursed_amount, disbursed_at, status, users:assigned_to(full_name)') 
-            .in('status', ['Disbursed', 'DISBURSED', 'disbursed']);
-
-          if (leads && leads.length > 0) {
-              const totals: Record<string, { name: string, amount: number }> = {};
-              
-              leads.forEach((lead: any) => {
-                  // A. Parse Date safely
-                  const leadDate = new Date(lead.disbursed_at);
-                  
-                  // B. Filter for Current Month & Year in JavaScript
-                  if (leadDate.getMonth() === currentMonth && leadDate.getFullYear() === currentYear) {
-                      
-                      const agentId = lead.assigned_to;
-                      const agentName = lead.users?.full_name || 'Unknown Agent';
-                      
-                      // C. Parse Amount (Remove commas if stored as text "5,00,000")
-                      const rawAmount = String(lead.disbursed_amount).replace(/,/g, '');
-                      const amount = Number(rawAmount) || 0;
-
-                      if (!totals[agentId]) {
-                          totals[agentId] = { name: agentName, amount: 0 };
-                      }
-                      totals[agentId].amount += amount;
-                  }
-              });
-
-              // D. Sort & Pick Winner
-              const sorted = Object.values(totals).sort((a, b) => b.amount - a.amount);
-              
-              if (sorted.length > 0) {
-                  setTopPerformer(sorted[0]); 
-              } else {
-                  setTopPerformer(null); 
-              }
-          } else {
-              setTopPerformer(null);
-          }
-      } catch (err) {
-          console.error("Error fetching top performer:", err);
+      if (data) {
+        setTopPerformer(data)
+      } else {
+        setTopPerformer({ name: "No one yet", amount: 0 })
       }
 
       // 4. Open Modal
@@ -133,7 +90,7 @@ export function DailyWelcomeModal() {
 
   return (
     <Dialog open={isOpen} onOpenChange={() => {}}> 
-      <DialogContent className="sm:max-w-md text-center bg-gradient-to-br from-indigo-50 to-white border-2 border-indigo-100 shadow-2xl" onOpenAutoFocus={(e) => e.preventDefault()}>
+      <DialogContent className="sm:max-w-md text-center bg-gradient-to-br from-indigo-50 to-white border-2 border-indigo-100 shadow-2xl">
         
         <DialogHeader>
           <DialogTitle className="sr-only">Daily Top Performer Announcement</DialogTitle>
@@ -158,6 +115,7 @@ export function DailyWelcomeModal() {
 
         <div className="relative z-10 py-6">
           
+          {/* --- NEW GREETING TEXT --- */}
           <div className="mb-8">
             <h1 className="text-xl font-bold text-gray-800">
               Good Morning, <span className="text-indigo-600">{userName || 'Champion'}</span>! ☀️
@@ -184,12 +142,11 @@ export function DailyWelcomeModal() {
                    <span className="text-xl font-bold text-gray-700">{formatCurrency(topPerformer.amount)}</span>
                    <Sparkles className="h-4 w-4 text-yellow-500" />
                 </div>
-                <p className="text-xs text-gray-400 mt-2">Disbursed Amount (This Month)</p>
+                <p className="text-xs text-gray-400 mt-2">Disbursed Amount</p>
              </div>
           ) : (
-             <div className="mb-6 py-4 bg-gray-50 rounded-lg mx-4">
-                <p className="text-gray-500 font-medium">Race is open! No disbursements yet this month.</p>
-                <p className="text-xs text-gray-400 mt-1">Be the first to close a deal!</p>
+             <div className="mb-6 py-4 bg-gray-50 rounded-lg">
+                <p className="text-gray-500">Calculating the champion...</p>
              </div>
           )}
 
