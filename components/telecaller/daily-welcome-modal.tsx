@@ -23,7 +23,7 @@ export function DailyWelcomeModal() {
   const [topPerformer, setTopPerformer] = useState<{ name: string; amount: number } | null>(null)
   const [loading, setLoading] = useState(true)
   const [prediction, setPrediction] = useState("")
-  const [userName, setUserName] = useState("") // State for current user name
+  const [userName, setUserName] = useState("") 
   const supabase = createClient()
   const { toast } = useToast()
 
@@ -39,7 +39,7 @@ export function DailyWelcomeModal() {
         return
       }
 
-      // 2. Fetch Current User Details (Name)
+      // 2. Fetch Current User Details
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
         const { data: userData } = await supabase
@@ -53,13 +53,49 @@ export function DailyWelcomeModal() {
         }
       }
 
-      // 3. Fetch Top Performer
-      const { data, error } = await supabase.rpc('get_top_performer')
+      // 3. Fetch Top Performer for CURRENT MONTH
+      // Calculate start/end of current month explicitly
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString();
 
-      if (data) {
-        setTopPerformer(data)
-      } else {
-        setTopPerformer({ name: "No one yet", amount: 0 })
+      try {
+          // If you have a view or RPC, you can use it, but filtering directly is safer for date accuracy
+          const { data: leads, error } = await supabase
+            .from('leads')
+            .select('assigned_to, disbursed_amount, users:assigned_to(full_name)') // Join users table
+            .eq('status', 'DISBURSED')
+            .gte('disbursed_at', startOfMonth)
+            .lte('disbursed_at', endOfMonth);
+
+          if (leads && leads.length > 0) {
+              // Aggregate by user
+              const totals: Record<string, { name: string, amount: number }> = {};
+              
+              leads.forEach((lead: any) => {
+                  const agentId = lead.assigned_to;
+                  const agentName = lead.users?.full_name || 'Unknown Agent';
+                  const amount = Number(lead.disbursed_amount) || 0;
+
+                  if (!totals[agentId]) {
+                      totals[agentId] = { name: agentName, amount: 0 };
+                  }
+                  totals[agentId].amount += amount;
+              });
+
+              // Sort descending
+              const sorted = Object.values(totals).sort((a, b) => b.amount - a.amount);
+              
+              if (sorted.length > 0) {
+                  setTopPerformer(sorted[0]); // The Winner
+              } else {
+                  setTopPerformer(null); // No sales yet this month
+              }
+          } else {
+              setTopPerformer(null);
+          }
+      } catch (err) {
+          console.error("Error fetching top performer:", err);
       }
 
       // 4. Open Modal
@@ -90,7 +126,7 @@ export function DailyWelcomeModal() {
 
   return (
     <Dialog open={isOpen} onOpenChange={() => {}}> 
-      <DialogContent className="sm:max-w-md text-center bg-gradient-to-br from-indigo-50 to-white border-2 border-indigo-100 shadow-2xl">
+      <DialogContent className="sm:max-w-md text-center bg-gradient-to-br from-indigo-50 to-white border-2 border-indigo-100 shadow-2xl" onOpenAutoFocus={(e) => e.preventDefault()}>
         
         <DialogHeader>
           <DialogTitle className="sr-only">Daily Top Performer Announcement</DialogTitle>
@@ -142,11 +178,12 @@ export function DailyWelcomeModal() {
                    <span className="text-xl font-bold text-gray-700">{formatCurrency(topPerformer.amount)}</span>
                    <Sparkles className="h-4 w-4 text-yellow-500" />
                 </div>
-                <p className="text-xs text-gray-400 mt-2">Disbursed Amount</p>
+                <p className="text-xs text-gray-400 mt-2">Disbursed Amount (This Month)</p>
              </div>
           ) : (
-             <div className="mb-6 py-4 bg-gray-50 rounded-lg">
-                <p className="text-gray-500">Calculating the champion...</p>
+             <div className="mb-6 py-4 bg-gray-50 rounded-lg mx-4">
+                <p className="text-gray-500 font-medium">Race is open! No disbursements yet this month.</p>
+                <p className="text-xs text-gray-400 mt-1">Be the first to close a deal!</p>
              </div>
           )}
 
