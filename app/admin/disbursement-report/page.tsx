@@ -90,7 +90,7 @@ export default function TelecallerDisbursementReport() {
     const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
     const [selectedBank, setSelectedBank] = useState<string>("all");
 
-    const [targetAmount, setTargetAmount] = useState<number>(5000000); 
+    const [targetAmount, setTargetAmount] = useState<number>(50000000); 
     const [isTargetEditing, setIsTargetEditing] = useState(false);
     const [commissionRate, setCommissionRate] = useState<number[]>([1.0]); 
 
