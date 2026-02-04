@@ -29,9 +29,9 @@ export function DailyWelcomeModal() {
 
   useEffect(() => {
     const checkAndInit = async () => {
-      // 1. Check LocalStorage
-      const today = new Date().toISOString().split('T')[0]
-      const seenKey = `seen_welcome_${today}`
+      // 1. Check LocalStorage (Prevent showing twice a day)
+      const todayStr = new Date().toISOString().split('T')[0]
+      const seenKey = `seen_welcome_${todayStr}`
       const hasSeen = localStorage.getItem(seenKey)
 
       if (hasSeen) {
@@ -53,43 +53,50 @@ export function DailyWelcomeModal() {
         }
       }
 
-      // 3. Fetch Top Performer for CURRENT MONTH
-      // Calculate start/end of current month explicitly
+      // 3. Fetch Top Performer (Logic moved to JS for safety with Text columns)
       const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString();
+      const currentMonth = now.getMonth(); // 0-11
+      const currentYear = now.getFullYear();
 
       try {
-          // If you have a view or RPC, you can use it, but filtering directly is safer for date accuracy
+          // Fetch ALL disbursed leads first (safer than SQL date filtering on text columns)
+          // We check for multiple case variations of 'Disbursed' to be safe
           const { data: leads, error } = await supabase
             .from('leads')
-            .select('assigned_to, disbursed_amount, users:assigned_to(full_name)') // Join users table
-            .eq('status', 'DISBURSED')
-            .gte('disbursed_at', startOfMonth)
-            .lte('disbursed_at', endOfMonth);
+            .select('assigned_to, disbursed_amount, disbursed_at, status, users:assigned_to(full_name)') 
+            .in('status', ['Disbursed', 'DISBURSED', 'disbursed']);
 
           if (leads && leads.length > 0) {
-              // Aggregate by user
               const totals: Record<string, { name: string, amount: number }> = {};
               
               leads.forEach((lead: any) => {
-                  const agentId = lead.assigned_to;
-                  const agentName = lead.users?.full_name || 'Unknown Agent';
-                  const amount = Number(lead.disbursed_amount) || 0;
+                  // A. Parse Date safely
+                  const leadDate = new Date(lead.disbursed_at);
+                  
+                  // B. Filter for Current Month & Year in JavaScript
+                  if (leadDate.getMonth() === currentMonth && leadDate.getFullYear() === currentYear) {
+                      
+                      const agentId = lead.assigned_to;
+                      const agentName = lead.users?.full_name || 'Unknown Agent';
+                      
+                      // C. Parse Amount (Remove commas if stored as text "5,00,000")
+                      const rawAmount = String(lead.disbursed_amount).replace(/,/g, '');
+                      const amount = Number(rawAmount) || 0;
 
-                  if (!totals[agentId]) {
-                      totals[agentId] = { name: agentName, amount: 0 };
+                      if (!totals[agentId]) {
+                          totals[agentId] = { name: agentName, amount: 0 };
+                      }
+                      totals[agentId].amount += amount;
                   }
-                  totals[agentId].amount += amount;
               });
 
-              // Sort descending
+              // D. Sort & Pick Winner
               const sorted = Object.values(totals).sort((a, b) => b.amount - a.amount);
               
               if (sorted.length > 0) {
-                  setTopPerformer(sorted[0]); // The Winner
+                  setTopPerformer(sorted[0]); 
               } else {
-                  setTopPerformer(null); // No sales yet this month
+                  setTopPerformer(null); 
               }
           } else {
               setTopPerformer(null);
@@ -151,7 +158,6 @@ export function DailyWelcomeModal() {
 
         <div className="relative z-10 py-6">
           
-          {/* --- NEW GREETING TEXT --- */}
           <div className="mb-8">
             <h1 className="text-xl font-bold text-gray-800">
               Good Morning, <span className="text-indigo-600">{userName || 'Champion'}</span>! ☀️
