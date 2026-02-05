@@ -158,7 +158,6 @@ export default function UsersPage() {
     }
   }
 
-  // Single Delete Handler
   const handleDeleteUser = async (userId: string) => {
     if (!confirm("Are you sure you want to delete this user? This action cannot be undone.")) return;
     
@@ -199,7 +198,29 @@ export default function UsersPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto min-h-screen bg-slate-50/50">
-      
+      {/* 1. Custom CSS for Coin Flip Animation */}
+      <style jsx global>{`
+        @keyframes flip-in-hor-bottom {
+          0% {
+            transform: rotateX(0);
+            opacity: 1;
+          }
+          50% {
+             opacity: 0.8;
+          }
+          100% {
+            transform: rotateX(360deg);
+            opacity: 1;
+          }
+        }
+        
+        .hover-flip:hover {
+          animation: flip-in-hor-bottom 0.6s cubic-bezier(0.250, 0.460, 0.450, 0.940) both;
+          transform-style: preserve-3d;
+          background-color: #f8fafc; /* slight highlight during flip */
+        }
+      `}</style>
+
       <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Team Management</h1>
@@ -309,36 +330,36 @@ export default function UsersPage() {
                 </TableRow>
               ) : (
                 paginatedUsers.map((user) => (
-                  <TableRow key={user.id} className={`group transition-colors ${selectedUserIds.includes(user.id) ? "bg-indigo-50/50 hover:bg-indigo-50" : "hover:bg-slate-50"}`}>
+                  // --- APPLIED THE 3D COIN FLIP ANIMATION CLASS HERE ---
+                  <TableRow 
+                    key={user.id} 
+                    className={`group transition-colors hover-flip ${selectedUserIds.includes(user.id) ? "bg-indigo-50/50" : "bg-white"}`}
+                  >
                     <TableCell className="text-center">
                       <Checkbox checked={selectedUserIds.includes(user.id)} onCheckedChange={() => toggleSelection(user.id)} />
                     </TableCell>
                     
-                    {/* --- CLICKABLE PROFILE WITH FLIP ANIMATION --- */}
+                    {/* --- CLICKABLE PROFILE --- */}
                     <TableCell>
                       <Link href={`/admin/users/${user.id}/edit`} className="block w-full">
-                        {/* 1. Removed 'group-hover:translate-x-1' to kill the wave effect */}
                         <div className="flex items-center gap-3 cursor-pointer">
-                            
-                            {/* 2. Added 3D Flip effect to the Avatar Container */}
-                            <div className="relative transition-transform duration-700 ease-in-out group-hover:[transform:rotateY(360deg)] [perspective:1000px]">
-                                <Avatar className="h-9 w-9 border border-slate-200">
-                                    <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${user.full_name}`} />
-                                    <AvatarFallback className="bg-indigo-100 text-indigo-700">{user.full_name?.[0]}</AvatarFallback>
-                                </Avatar>
-                                {user.role === 'telecaller' && (
-                                    <span className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-white ${telecallerStatus[user.id] ? "bg-green-500" : "bg-slate-300"}`} />
-                                )}
+                            <div className="relative">
+                            <Avatar className="h-9 w-9 border border-slate-200">
+                                <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${user.full_name}`} />
+                                <AvatarFallback className="bg-indigo-100 text-indigo-700">{user.full_name?.[0]}</AvatarFallback>
+                            </Avatar>
+                            {user.role === 'telecaller' && (
+                                <span className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-white ${telecallerStatus[user.id] ? "bg-green-500" : "bg-slate-300"}`} />
+                            )}
                             </div>
-
                             <div className="flex flex-col">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm font-semibold text-slate-900 group-hover:text-indigo-600 transition-colors">
-                                        {user.full_name}
-                                    </span>
-                                    <ExternalLink className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                </div>
-                                <span className="text-xs text-slate-500 flex items-center gap-1">{user.email}</span>
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm font-semibold text-slate-900 group-hover:text-indigo-600 transition-colors">
+                                    {user.full_name}
+                                </span>
+                                {/* Icon removed to keep layout stable during flip */}
+                            </div>
+                            <span className="text-xs text-slate-500 flex items-center gap-1">{user.email}</span>
                             </div>
                         </div>
                       </Link>
@@ -359,7 +380,7 @@ export default function UsersPage() {
                       {new Date(user.created_at).toLocaleDateString()}
                     </TableCell>
                     
-                    {/* --- DIRECT DELETE ACTION (No Dropdown) --- */}
+                    {/* --- DIRECT DELETE ACTION --- */}
                     <TableCell className="text-center">
                       {canManage && (
                         <div className="flex items-center justify-center gap-2">
