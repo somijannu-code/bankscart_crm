@@ -12,11 +12,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
-  UserPlus, Search, Trash2, Ban, CheckCircle, MoreHorizontal, Filter, Shield, Mail, Loader2, Eye, Edit
+  UserPlus, Search, Trash2, Ban, CheckCircle, Filter, Shield, Loader2, Edit, ExternalLink
 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { EmptyState } from "@/components/empty-state" 
 
 // --- TYPES ---
@@ -159,6 +158,21 @@ export default function UsersPage() {
     }
   }
 
+  // Single Delete Handler
+  const handleDeleteUser = async (userId: string) => {
+    if (!confirm("Are you sure you want to delete this user? This action cannot be undone.")) return;
+    
+    try {
+        const { error } = await supabase.from("users").delete().eq("id", userId);
+        if (error) throw error;
+        setUsers(prev => prev.filter(u => u.id !== userId));
+        toast.success("User deleted successfully");
+    } catch (err: any) {
+        toast.error("Failed to delete user");
+        console.error(err);
+    }
+  }
+
   const toggleSelection = (id: string) => {
     setSelectedUserIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id])
   }
@@ -254,7 +268,7 @@ export default function UsersPage() {
           </div>
       )}
 
-      {/* TABLE - FIX: Removed overflow-hidden to allow dropdowns to be visible */}
+      {/* TABLE */}
       <Card className="shadow-sm border-slate-200">
         <div className="overflow-x-auto min-h-[400px]">
           <Table>
@@ -266,12 +280,12 @@ export default function UsersPage() {
                     onCheckedChange={toggleSelectAll}
                   />
                 </TableHead>
-                <TableHead className="w-[300px]">User Profile</TableHead>
+                <TableHead className="w-[300px]">User Profile (Click to Edit)</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="hidden md:table-cell">Manager</TableHead>
                 <TableHead className="hidden md:table-cell">Joined</TableHead>
-                <TableHead className="w-[50px]"></TableHead>
+                <TableHead className="w-[80px] text-center">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -299,23 +313,33 @@ export default function UsersPage() {
                     <TableCell className="text-center">
                       <Checkbox checked={selectedUserIds.includes(user.id)} onCheckedChange={() => toggleSelection(user.id)} />
                     </TableCell>
+                    
+                    {/* --- CLICKABLE PROFILE (Direct Link to Edit) --- */}
                     <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div className="relative">
-                          <Avatar className="h-9 w-9 border border-slate-200">
-                            <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${user.full_name}`} />
-                            <AvatarFallback className="bg-indigo-100 text-indigo-700">{user.full_name?.[0]}</AvatarFallback>
-                          </Avatar>
-                          {user.role === 'telecaller' && (
-                            <span className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-white ${telecallerStatus[user.id] ? "bg-green-500" : "bg-slate-300"}`} />
-                          )}
+                      <Link href={`/admin/users/${user.id}/edit`} className="block w-full">
+                        <div className="flex items-center gap-3 cursor-pointer group-hover:translate-x-1 transition-transform">
+                            <div className="relative">
+                            <Avatar className="h-9 w-9 border border-slate-200">
+                                <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${user.full_name}`} />
+                                <AvatarFallback className="bg-indigo-100 text-indigo-700">{user.full_name?.[0]}</AvatarFallback>
+                            </Avatar>
+                            {user.role === 'telecaller' && (
+                                <span className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-white ${telecallerStatus[user.id] ? "bg-green-500" : "bg-slate-300"}`} />
+                            )}
+                            </div>
+                            <div className="flex flex-col">
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm font-semibold text-slate-900 group-hover:text-indigo-600 transition-colors">
+                                    {user.full_name}
+                                </span>
+                                <ExternalLink className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                            <span className="text-xs text-slate-500 flex items-center gap-1">{user.email}</span>
+                            </div>
                         </div>
-                        <div className="flex flex-col">
-                          <span className="text-sm font-semibold text-slate-900">{user.full_name}</span>
-                          <span className="text-xs text-slate-500 flex items-center gap-1">{user.email}</span>
-                        </div>
-                      </div>
+                      </Link>
                     </TableCell>
+
                     <TableCell>{getRoleBadge(user.role)}</TableCell>
                     <TableCell>
                       {user.is_active ? (
@@ -331,50 +355,24 @@ export default function UsersPage() {
                       {new Date(user.created_at).toLocaleDateString()}
                     </TableCell>
                     
-                    {/* --- FIXED DROPDOWN --- */}
-                    <TableCell>
+                    {/* --- DIRECT DELETE ACTION (No Dropdown) --- */}
+                    <TableCell className="text-center">
                       {canManage && (
-                        <DropdownMenu modal={false}>
-                          <DropdownMenuTrigger asChild>
+                        <div className="flex items-center justify-center gap-2">
+                            <Link href={`/admin/users/${user.id}/edit`}>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50">
+                                    <Edit className="h-4 w-4" />
+                                </Button>
+                            </Link>
                             <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="h-8 w-8 text-slate-500 hover:text-slate-700 hover:bg-slate-100 data-[state=open]:bg-slate-100"
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50"
+                                onClick={() => handleDeleteUser(user.id)}
                             >
-                              <span className="sr-only">Open menu</span>
-                              <MoreHorizontal className="h-4 w-4" />
+                                <Trash2 className="h-4 w-4" />
                             </Button>
-                          </DropdownMenuTrigger>
-                          
-                          <DropdownMenuContent align="end" className="w-48 bg-white shadow-lg border border-slate-200 z-50">
-                            <DropdownMenuLabel>User Actions</DropdownMenuLabel>
-                            <DropdownMenuSeparator />
-                            
-                            <DropdownMenuItem asChild>
-                              <Link href={`/admin/users/${user.id}/edit`} className="w-full flex items-center cursor-pointer">
-                                <Edit className="h-4 w-4 mr-2" /> Edit Details
-                              </Link>
-                            </DropdownMenuItem>
-                            
-                            {currentUserRole === 'super_admin' && (
-                                <DropdownMenuItem className="cursor-pointer" onClick={() => toast.info("Impersonate coming soon")}>
-                                    <Eye className="h-4 w-4 mr-2" /> Impersonate
-                                </DropdownMenuItem>
-                            )}
-                            
-                            <DropdownMenuSeparator />
-                            
-                            <DropdownMenuItem 
-                              className="text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer" 
-                              onSelect={() => {
-                                setSelectedUserIds([user.id])
-                                handleBulkAction('delete')
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" /> Delete User
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        </div>
                       )}
                     </TableCell>
                   </TableRow>
