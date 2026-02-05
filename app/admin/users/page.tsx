@@ -314,27 +314,31 @@ export default function UsersPage() {
                       <Checkbox checked={selectedUserIds.includes(user.id)} onCheckedChange={() => toggleSelection(user.id)} />
                     </TableCell>
                     
-                    {/* --- CLICKABLE PROFILE (Direct Link to Edit) --- */}
+                    {/* --- CLICKABLE PROFILE WITH FLIP ANIMATION --- */}
                     <TableCell>
                       <Link href={`/admin/users/${user.id}/edit`} className="block w-full">
-                        <div className="flex items-center gap-3 cursor-pointer group-hover:translate-x-1 transition-transform">
-                            <div className="relative">
-                            <Avatar className="h-9 w-9 border border-slate-200">
-                                <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${user.full_name}`} />
-                                <AvatarFallback className="bg-indigo-100 text-indigo-700">{user.full_name?.[0]}</AvatarFallback>
-                            </Avatar>
-                            {user.role === 'telecaller' && (
-                                <span className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-white ${telecallerStatus[user.id] ? "bg-green-500" : "bg-slate-300"}`} />
-                            )}
+                        {/* 1. Removed 'group-hover:translate-x-1' to kill the wave effect */}
+                        <div className="flex items-center gap-3 cursor-pointer">
+                            
+                            {/* 2. Added 3D Flip effect to the Avatar Container */}
+                            <div className="relative transition-transform duration-700 ease-in-out group-hover:[transform:rotateY(360deg)] [perspective:1000px]">
+                                <Avatar className="h-9 w-9 border border-slate-200">
+                                    <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${user.full_name}`} />
+                                    <AvatarFallback className="bg-indigo-100 text-indigo-700">{user.full_name?.[0]}</AvatarFallback>
+                                </Avatar>
+                                {user.role === 'telecaller' && (
+                                    <span className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-white ${telecallerStatus[user.id] ? "bg-green-500" : "bg-slate-300"}`} />
+                                )}
                             </div>
+
                             <div className="flex flex-col">
-                            <div className="flex items-center gap-2">
-                                <span className="text-sm font-semibold text-slate-900 group-hover:text-indigo-600 transition-colors">
-                                    {user.full_name}
-                                </span>
-                                <ExternalLink className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
-                            </div>
-                            <span className="text-xs text-slate-500 flex items-center gap-1">{user.email}</span>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-sm font-semibold text-slate-900 group-hover:text-indigo-600 transition-colors">
+                                        {user.full_name}
+                                    </span>
+                                    <ExternalLink className="h-3 w-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </div>
+                                <span className="text-xs text-slate-500 flex items-center gap-1">{user.email}</span>
                             </div>
                         </div>
                       </Link>
