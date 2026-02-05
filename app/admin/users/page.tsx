@@ -44,7 +44,7 @@ export default function UsersPage() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [currentUserRole, setCurrentUserRole] = useState("telecaller")
   const [telecallerStatus, setTelecallerStatus] = useState<Record<string, boolean>>({})
-  
+   
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1)
 
@@ -254,9 +254,9 @@ export default function UsersPage() {
           </div>
       )}
 
-      {/* TABLE */}
-      <Card className="shadow-sm border-slate-200 overflow-hidden">
-        <div className="overflow-x-auto">
+      {/* TABLE - FIX: Removed overflow-hidden to allow dropdowns to be visible */}
+      <Card className="shadow-sm border-slate-200">
+        <div className="overflow-x-auto min-h-[400px]">
           <Table>
             <TableHeader className="bg-slate-50/80">
               <TableRow className="hover:bg-transparent">
@@ -336,7 +336,6 @@ export default function UsersPage() {
                       {canManage && (
                         <DropdownMenu modal={false}>
                           <DropdownMenuTrigger asChild>
-                            {/* Removed onClick={stopPropagation} as it can break trigger logic */}
                             <Button 
                               variant="ghost" 
                               size="icon" 
@@ -351,7 +350,6 @@ export default function UsersPage() {
                             <DropdownMenuLabel>User Actions</DropdownMenuLabel>
                             <DropdownMenuSeparator />
                             
-                            {/* FIX: Use asChild + Link. This is the correct Shadcn/Next.js pattern */}
                             <DropdownMenuItem asChild>
                               <Link href={`/admin/users/${user.id}/edit`} className="w-full flex items-center cursor-pointer">
                                 <Edit className="h-4 w-4 mr-2" /> Edit Details
@@ -368,7 +366,7 @@ export default function UsersPage() {
                             
                             <DropdownMenuItem 
                               className="text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer" 
-                              onSelect={() => { // Changed to onSelect for better event handling in menus
+                              onSelect={() => {
                                 setSelectedUserIds([user.id])
                                 handleBulkAction('delete')
                               }}
