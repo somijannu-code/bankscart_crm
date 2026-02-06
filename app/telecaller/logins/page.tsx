@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -43,6 +43,7 @@ export default function TelecallerLoginsPage() {
     // Pending Pop-up State
     const [pendingLogins, setPendingLogins] = useState<any[]>([])
     const [isPendingModalOpen, setIsPendingModalOpen] = useState(false)
+    const hasCheckedPending = useRef(false) // Ref to prevent re-opening modal on every fetch
     
     // Duplicate Logic States
     const [dupState, setDupState] = useState<DuplicateState>('clean')
@@ -74,27 +75,23 @@ export default function TelecallerLoginsPage() {
             setDupState('checking')
 
             try {
-                // CALL THE SECURE DATABASE FUNCTION
-                // This bypasses RLS safely to check duplicates across all users
+                // Using RPC to bypass RLS for duplicate checking only
                 const { data, error } = await supabase
                     .rpc('check_global_duplicate', { lookup_phone: debouncedPhone })
 
                 if (error) throw error;
 
                 if (data) {
-                    // Scenario: Editing my own record -> ALLOW
                     if (formData.id === data.id) {
                         setDupState('clean')
                         setDupMessage(null)
                         return
                     }
 
-                    // Scenario: Duplicate found (Mine or Someone else's)
                     setDupState('duplicate')
                     const agentName = data.agent_name || 'Another Agent'
                     const dateLogged = new Date(data.updated_at).toLocaleDateString()
                     
-                    // Auto-fill name to help agent identify customer
                     if (!formData.name && data.name) {
                         setFormData(prev => ({...prev, name: data.name}))
                     }
@@ -106,8 +103,7 @@ export default function TelecallerLoginsPage() {
                 }
 
             } catch (err) {
-                console.error("Duplicate check failed. Did you run the SQL?", err)
-                // Fallback: If RPC fails, try local check (though less effective)
+                console.error("Duplicate check failed:", err)
                 setDupState('clean') 
             }
         }
@@ -136,11 +132,14 @@ export default function TelecallerLoginsPage() {
         if (data) {
             setLogins(data)
             
-            // Pop-up Trigger: Check for pending items
+            // Check pending items for the modal
             const pending = data.filter(l => l.status === 'Login Done' || l.status === 'Pending')
-            if (pending.length > 0) {
-                setPendingLogins(pending)
-                setIsPendingModalOpen(true) 
+            setPendingLogins(pending)
+
+            // Only open modal automatically ONCE on first load
+            if (pending.length > 0 && !hasCheckedPending.current) {
+                setIsPendingModalOpen(true)
+                hasCheckedPending.current = true
             }
         }
     }, [supabase, activeTab])
@@ -166,7 +165,16 @@ export default function TelecallerLoginsPage() {
         }
     }
 
-    // 4. SUBMIT
+    // 4. MODAL SPECIFIC HANDLER (Closes modal on action)
+    const handleModalStatusUpdate = async (id: string, newStatus: 'Approved' | 'Rejected') => {
+        // 1. Close Modal Immediately
+        setIsPendingModalOpen(false)
+        
+        // 2. Perform Update in Background
+        await handleStatusUpdate(id, newStatus)
+    }
+
+    // 5. SUBMIT FORM
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (dupState === 'duplicate' || dupState === 'checking') {
@@ -504,10 +512,10 @@ export default function TelecallerLoginsPage() {
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-2">
-                                                <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={() => handleStatusUpdate(p.id, 'Approved')}>
+                                                <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={() => handleModalStatusUpdate(p.id, 'Approved')}>
                                                     Approve
                                                 </Button>
-                                                <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => handleStatusUpdate(p.id, 'Rejected')}>
+                                                <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => handleModalStatusUpdate(p.id, 'Rejected')}>
                                                     Reject
                                                 </Button>
                                             </div>
