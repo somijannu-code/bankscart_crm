@@ -61,7 +61,7 @@ export default function TelecallerLoginsPage() {
     const [logins, setLogins] = useState<any[]>([])
     
     const debouncedPhone = useDebounce(formData.phone, 500)
-    const dailyGoal = 10 
+    const dailyGoal = 5 
     const todayCount = logins.filter(l => new Date(l.updated_at).toDateString() === new Date().toDateString()).length
 
     // 1. GLOBAL DUPLICATE CHECK (Via RPC)
