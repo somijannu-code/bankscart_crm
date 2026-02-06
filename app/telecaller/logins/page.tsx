@@ -10,10 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, CalendarCheck, History, CheckCircle2, XCircle, RefreshCcw, Search, Ban } from "lucide-react"
+import { Loader2, CalendarCheck, History, CheckCircle2, XCircle, RefreshCcw, Search, Ban, AlertTriangle } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { Badge } from "@/components/ui/badge"
-import confetti from 'canvas-confetti'
 
 // --- TYPES ---
 type DuplicateState = 'checking' | 'clean' | 'duplicate' | 'error'
@@ -79,13 +78,12 @@ export default function TelecallerLoginsPage() {
                         users:assigned_to ( full_name )
                     `)
                     .eq('phone', debouncedPhone)
-                    .maybeSingle() // Use maybeSingle to avoid 406 errors on no rows
+                    .maybeSingle() 
 
                 if (error && error.code !== 'PGRST116') throw error;
 
                 if (data) {
                     // SCENARIO 1: It's the SAME record we are currently editing.
-                    // We allow this so the user can update the name/notes of an existing entry.
                     if (formData.id === data.id) {
                         setDupState('clean')
                         setDupMessage(null)
@@ -110,7 +108,7 @@ export default function TelecallerLoginsPage() {
 
             } catch (err) {
                 console.error("Duplicate check failed:", err)
-                setDupState('error') // Fail open or closed? Usually fail closed or show warning.
+                setDupState('error') 
             }
         }
 
@@ -177,7 +175,6 @@ export default function TelecallerLoginsPage() {
                 const { error } = await supabase.from('logins').insert([payload])
                 if (error) throw error
                 toast({ title: "Success! 🎉", description: "Login submitted successfully.", className: "bg-green-50 border-green-200" })
-                confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } })
             }
             
             // Reset
