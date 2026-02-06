@@ -2,19 +2,23 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/l
+import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, FileText, CheckCircle2, AlertCircle, RefreshCcw, Search } from "lucide-react"
+import { Loader2, CalendarCheck, History, CheckCircle2, XCircle, RefreshCcw, Search, Ban } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { Badge } from "@/components/ui/badge"
+import confetti from 'canvas-confetti'
 
-// Simple Debounce Hook for Phone Search
+// --- TYPES ---
+type DuplicateState = 'checking' | 'clean' | 'duplicate' | 'error'
+
+// --- HOOKS ---
 function useDebounce(value: string, delay: number) {
     const [debouncedValue, setDebouncedValue] = useState(value);
     useEffect(() => {
@@ -28,12 +32,18 @@ export default function TelecallerLoginsPage() {
     const supabase = createClient()
     const { toast } = useToast()
     
+    // UI States
     const [loading, setLoading] = useState(false)
-    const [checkingPhone, setCheckingPhone] = useState(false)
+    const [activeTab, setActiveTab] = useState("today")
+    const [searchTerm, setSearchTerm] = useState("")
     
-    // Form & Data State
+    // Duplicate Logic States
+    const [dupState, setDupState] = useState<DuplicateState>('clean')
+    const [dupMessage, setDupMessage] = useState<string | null>(null)
+    
+    // Form Data
     const [formData, setFormData] = useState({
-        id: null as string | null, // Track ID for editing
+        id: null as string | null, // ID present means "Edit Mode"
         name: "",
         phone: "",
         bank_name: "",
@@ -41,66 +51,83 @@ export default function TelecallerLoginsPage() {
     })
     
     const [logins, setLogins] = useState<any[]>([])
-    const [searchTerm, setSearchTerm] = useState("")
-    const [activeTab, setActiveTab] = useState("today")
-    const [existingWarning, setExistingWarning] = useState<string | null>(null)
-
+    
     const debouncedPhone = useDebounce(formData.phone, 500)
+    const dailyGoal = 10 
+    const todayCount = logins.filter(l => new Date(l.updated_at).toDateString() === new Date().toDateString()).length
 
-    // 1. AUTO-CHECK PHONE NUMBER (Updated to check 'logins' table)
+    // 1. STRICT DUPLICATE CHECK
     useEffect(() => {
         const checkPhone = async () => {
-            if (debouncedPhone.length < 10) return
-            setCheckingPhone(true)
-            setExistingWarning(null)
-
-            // CHANGED: Checking 'logins' table
-            const { data } = await supabase
-                .from('logins')
-                .select('*')
-                .eq('phone', debouncedPhone)
-                .order('updated_at', { ascending: false }) // Get most recent
-                .limit(1)
-                .single()
-
-            if (data) {
-                // Auto-fill name if found in previous logins
-                setFormData(prev => ({ ...prev, name: data.name }))
-                
-                // Warn if already logged in TODAY
-                const lastUpdate = new Date(data.updated_at).toDateString()
-                const today = new Date().toDateString()
-                if (lastUpdate === today) {
-                    setExistingWarning("⚠️ You have already logged this file today!")
-                    // Also set ID to enable edit mode for today's entry
-                    setFormData(prev => ({ 
-                        ...prev, 
-                        id: data.id, 
-                        bank_name: data.bank_name || "",
-                        notes: data.notes || ""
-                    }))
-                } else {
-                    toast({ description: "Previous login found. Name auto-filled.", className: "bg-blue-50" })
-                }
+            // Reset if empty or short
+            if (debouncedPhone.length < 10) {
+                setDupState('clean')
+                setDupMessage(null)
+                return
             }
-            setCheckingPhone(false)
-        }
-        checkPhone()
-    }, [debouncedPhone, supabase, toast])
 
-    // 2. FETCH DATA (Updated to fetch from 'logins')
+            setDupState('checking')
+
+            try {
+                // Check if phone exists in DB, fetch WHO assigned it
+                const { data, error } = await supabase
+                    .from('logins')
+                    .select(`
+                        id, 
+                        name, 
+                        updated_at, 
+                        users:assigned_to ( full_name )
+                    `)
+                    .eq('phone', debouncedPhone)
+                    .maybeSingle() // Use maybeSingle to avoid 406 errors on no rows
+
+                if (error && error.code !== 'PGRST116') throw error;
+
+                if (data) {
+                    // SCENARIO 1: It's the SAME record we are currently editing.
+                    // We allow this so the user can update the name/notes of an existing entry.
+                    if (formData.id === data.id) {
+                        setDupState('clean')
+                        setDupMessage(null)
+                        return
+                    }
+
+                    // SCENARIO 2: It is a DIFFERENT record (Duplicate)
+                    setDupState('duplicate')
+                    
+                    const agentName = data.users?.full_name || 'Unknown Agent'
+                    const dateLogged = new Date(data.updated_at).toLocaleDateString()
+                    
+                    // Auto-fill name just to show we found it, but BLOCK submission
+                    if (!formData.name) setFormData(prev => ({...prev, name: data.name}))
+                    
+                    setDupMessage(`Duplicate! Logged by ${agentName} on ${dateLogged}.`)
+                } else {
+                    // SCENARIO 3: No record found (Clean)
+                    setDupState('clean')
+                    setDupMessage(null)
+                }
+
+            } catch (err) {
+                console.error("Duplicate check failed:", err)
+                setDupState('error') // Fail open or closed? Usually fail closed or show warning.
+            }
+        }
+
+        checkPhone()
+    }, [debouncedPhone, formData.id, supabase, formData.name])
+
+    // 2. FETCH LIST
     const fetchLogins = useCallback(async () => {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
 
-        // CHANGED: Fetching from 'logins' table
         let query = supabase
             .from('logins')
             .select('*')
-            .eq('assigned_to', user.id)
+            .eq('assigned_to', user.id) // Only show MY logins in the list
             .order('updated_at', { ascending: false })
 
-        // Date Filters
         const today = new Date()
         if (activeTab === 'today') {
             query = query.gte('updated_at', new Date(today.setHours(0,0,0,0)).toISOString())
@@ -114,9 +141,20 @@ export default function TelecallerLoginsPage() {
 
     useEffect(() => { fetchLogins() }, [fetchLogins])
 
-    // 3. SUBMIT HANDLER (Updated to write to 'logins')
+    // 3. SUBMIT
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
+        
+        // Final Safety Check
+        if (dupState === 'duplicate' || dupState === 'checking') {
+            toast({
+                title: "Duplicate Lead",
+                description: dupMessage || "This number already exists in the system.",
+                variant: "destructive"
+            })
+            return
+        }
+
         setLoading(true)
         const { data: { user } } = await supabase.auth.getUser()
 
@@ -131,24 +169,20 @@ export default function TelecallerLoginsPage() {
                 updated_at: new Date().toISOString()
             }
 
-            // CHANGED: Operations on 'logins' table
             if (formData.id) {
                 const { error } = await supabase.from('logins').update(payload).eq('id', formData.id)
                 if (error) throw error
+                toast({ title: "Updated", description: "Entry updated successfully.", className: "bg-green-50" })
             } else {
                 const { error } = await supabase.from('logins').insert([payload])
                 if (error) throw error
+                toast({ title: "Success! 🎉", description: "Login submitted successfully.", className: "bg-green-50 border-green-200" })
+                confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } })
             }
-
-            toast({ 
-                title: "Success! 🎉", 
-                description: `Login for ${formData.name} recorded.`, 
-                className: "bg-green-50 border-green-200" 
-            })
             
             // Reset
             setFormData({ id: null, name: "", phone: "", bank_name: "", notes: "" })
-            setExistingWarning(null)
+            setDupState('clean')
             fetchLogins()
 
         } catch (err: any) {
@@ -158,189 +192,223 @@ export default function TelecallerLoginsPage() {
         }
     }
 
-    // Filtered List for Search
     const filteredLogins = logins.filter(l => 
         l.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
         l.phone.includes(searchTerm) ||
         l.bank_name.toLowerCase().includes(searchTerm.toLowerCase())
     )
 
+    // Helper for Input Class
+    const getInputClass = () => {
+        if (dupState === 'duplicate') return "border-red-400 bg-red-50 focus-visible:ring-red-400 text-red-900"
+        if (dupState === 'clean' && formData.phone.length === 10) return "border-green-400 bg-green-50 focus-visible:ring-green-400"
+        return "bg-slate-50 focus:bg-white"
+    }
+
     return (
-        <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-8 bg-gray-50/50 min-h-screen">
+        <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6 bg-slate-50 min-h-screen font-sans">
             
-            {/* Header Stats */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row justify-between items-end gap-4 bg-white p-6 rounded-2xl border shadow-sm">
                 <div>
-                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 flex items-center gap-2">
-                        <FileText className="h-7 w-7 text-indigo-600" />
-                        Login Entry
+                    <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-3">
+                       Telecaller Portal
                     </h1>
-                    <p className="text-gray-500 text-sm">Track your daily file submissions</p>
+                    <p className="text-slate-500 mt-2 flex items-center gap-2">
+                        <CalendarCheck className="h-4 w-4" /> {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                    </p>
                 </div>
-                
-                <Card className="bg-white border-l-4 border-indigo-500 shadow-sm min-w-[200px]">
-                    <CardContent className="p-4 flex items-center gap-3">
-                        <div className="p-2 bg-indigo-50 rounded-full text-indigo-600">
-                            <CheckCircle2 className="h-5 w-5" />
+
+                {/* Progress Widget */}
+                <div className="flex items-center gap-4 bg-indigo-50 p-3 rounded-xl border border-indigo-100 min-w-[200px]">
+                    <div className="relative h-12 w-12 flex items-center justify-center">
+                         <svg className="h-full w-full transform -rotate-90">
+                            <circle cx="24" cy="24" r="20" stroke="#e0e7ff" strokeWidth="4" fill="transparent" />
+                            <circle cx="24" cy="24" r="20" stroke="#4f46e5" strokeWidth="4" fill="transparent" strokeDasharray={125} strokeDashoffset={125 - (125 * Math.min(todayCount, dailyGoal)) / dailyGoal} />
+                        </svg>
+                        <span className="absolute text-xs font-bold text-indigo-700">{todayCount}</span>
+                    </div>
+                    <div>
+                        <p className="text-xs text-indigo-500 font-medium uppercase tracking-wider">Daily Goal</p>
+                        <div className="flex items-end gap-1">
+                             <span className="text-xl font-bold text-indigo-900 leading-none">{todayCount}</span>
+                             <span className="text-xs text-indigo-400 mb-0.5">/ {dailyGoal}</span>
                         </div>
-                        <div>
-                            <p className="text-xs text-gray-500 font-medium">Logins Today</p>
-                            <p className="text-2xl font-bold text-gray-900">
-                                {logins.filter(l => new Date(l.updated_at).toDateString() === new Date().toDateString()).length}
-                            </p>
-                        </div>
-                    </CardContent>
-                </Card>
+                    </div>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 
-                {/* LEFT: FORM (4 cols) */}
-                <div className="lg:col-span-4 space-y-4">
-                    <Card className="shadow-lg border-t-4 border-indigo-600">
-                        <CardHeader className="bg-gray-50/50 border-b pb-4">
-                            <CardTitle className="text-lg flex items-center justify-between">
-                                {formData.id ? "Edit Entry" : "New Entry"}
+                {/* FORM SECTION */}
+                <div className="lg:col-span-4 space-y-6">
+                    <Card className={`shadow-xl border-t-4 transition-colors ${dupState === 'duplicate' ? 'border-red-500' : 'border-indigo-600'} bg-white/80 backdrop-blur-sm sticky top-6`}>
+                        <CardHeader className="bg-slate-50/50 border-b pb-4">
+                            <CardTitle className="flex items-center justify-between">
+                                {formData.id ? "Edit Entry" : "New Login"}
                                 {formData.id && (
-                                    <Button variant="ghost" size="sm" onClick={() => setFormData({ id: null, name: "", phone: "", bank_name: "", notes: "" })}>
-                                        Cancel Edit
-                                    </Button>
+                                    <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => {
+                                        setFormData({ id: null, name: "", phone: "", bank_name: "", notes: "" })
+                                        setDupState('clean')
+                                        setDupMessage(null)
+                                    }}>Cancel Edit</Button>
                                 )}
                             </CardTitle>
-                            <CardDescription>Enter customer details accurately</CardDescription>
                         </CardHeader>
                         <CardContent className="pt-6">
-                            <form onSubmit={handleSubmit} className="space-y-4">
+                            <form onSubmit={handleSubmit} className="space-y-5">
                                 
-                                {/* Phone Input with Live Check */}
-                                <div className="space-y-2 relative">
+                                {/* PHONE INPUT WITH DUPLICATE CHECK */}
+                                <div className="space-y-2">
                                     <Label>Mobile Number <span className="text-red-500">*</span></Label>
-                                    <div className="relative">
+                                    <div className="relative group">
                                         <Input 
                                             placeholder="9876543210" 
                                             value={formData.phone}
                                             onChange={(e) => setFormData({...formData, phone: e.target.value.replace(/\D/g,'')})}
                                             maxLength={10}
-                                            className={existingWarning ? "border-red-300 bg-red-50" : ""}
+                                            className={`pr-10 transition-all ${getInputClass()}`}
                                         />
-                                        {checkingPhone && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-gray-400" />}
+                                        <div className="absolute right-3 top-2.5">
+                                            {dupState === 'checking' ? <Loader2 className="h-4 w-4 animate-spin text-slate-400" /> : 
+                                             dupState === 'duplicate' ? <XCircle className="h-4 w-4 text-red-500"/> :
+                                             dupState === 'clean' && formData.phone.length === 10 ? <CheckCircle2 className="h-4 w-4 text-green-600"/> : null}
+                                        </div>
                                     </div>
-                                    {existingWarning && (
-                                        <p className="text-xs text-red-600 flex items-center gap-1">
-                                            <AlertCircle className="h-3 w-3" /> {existingWarning}
-                                        </p>
+                                    
+                                    {/* DUPLICATE ERROR MESSAGE */}
+                                    {dupState === 'duplicate' && (
+                                        <div className="rounded-md bg-red-50 p-3 border border-red-200 animate-in slide-in-from-top-2 fade-in duration-300">
+                                            <div className="flex gap-2">
+                                                <Ban className="h-4 w-4 text-red-600 mt-0.5" />
+                                                <div className="text-xs text-red-700 font-medium">
+                                                    <p className="font-bold">Duplicate Lead!</p>
+                                                    <p>{dupMessage}</p>
+                                                </div>
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
 
                                 <div className="space-y-2">
                                     <Label>Customer Name <span className="text-red-500">*</span></Label>
                                     <Input 
-                                        placeholder="Enter full name" 
+                                        placeholder="Full Name" 
                                         value={formData.name}
                                         onChange={(e) => setFormData({...formData, name: e.target.value})}
                                         required
+                                        className="bg-slate-50 focus:bg-white"
+                                        disabled={dupState === 'duplicate'} // Disable fields if duplicate
                                     />
                                 </div>
 
                                 <div className="space-y-2">
-                                    <Label>Bank Name <span className="text-red-500">*</span></Label>
+                                    <Label>Target Bank <span className="text-red-500">*</span></Label>
                                     <Select 
                                         value={formData.bank_name} 
-                                        onValueChange={(val) => setFormData({...formData, bank_name: val})}
+                                        onValueChange={(val) => setFormData({...formData, bank_name: val})} 
                                         required
+                                        disabled={dupState === 'duplicate'}
                                     >
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Select Bank" />
-                                        </SelectTrigger>
+                                        <SelectTrigger className="bg-slate-50 focus:bg-white"><SelectValue placeholder="Select Bank" /></SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="HDFC Bank">HDFC Bank</SelectItem>
                                             <SelectItem value="ICICI Bank">ICICI Bank</SelectItem>
                                             <SelectItem value="Axis Bank">Axis Bank</SelectItem>
-                                            <SelectItem value="Incred">Incred</SelectItem>
                                             <SelectItem value="IDFC First">IDFC First</SelectItem>
-                                            <SelectItem value="FINNABLE">FINNABLE</SelectItem>
+                                            <SelectItem value="Incred">Incred</SelectItem>
                                             <SelectItem value="Other">Other</SelectItem>
                                         </SelectContent>
                                     </Select>
                                 </div>
 
                                 <div className="space-y-2">
-                                    <Label>Notes / Remarks</Label>
+                                    <Label>Notes</Label>
                                     <Textarea 
-                                        placeholder="E.g., Docs collected, login id..." 
+                                        placeholder="Documents status, specific requirements..." 
                                         value={formData.notes}
                                         onChange={(e) => setFormData({...formData, notes: e.target.value})}
-                                        rows={3}
+                                        className="bg-slate-50 focus:bg-white min-h-[80px]"
+                                        disabled={dupState === 'duplicate'}
                                     />
                                 </div>
 
-                                <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 h-11" disabled={loading}>
-                                    {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : formData.id ? "Update Entry" : "Submit Login"}
+                                <Button 
+                                    type="submit" 
+                                    className={`w-full h-12 text-base transition-all ${dupState === 'duplicate' ? 'bg-slate-300 cursor-not-allowed hover:bg-slate-300' : 'bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200'}`} 
+                                    disabled={loading || dupState === 'duplicate' || dupState === 'checking'}
+                                >
+                                    {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : 
+                                     dupState === 'duplicate' ? "Cannot Submit Duplicate" :
+                                     formData.id ? "Update Entry" : "Submit Login"}
                                 </Button>
                             </form>
                         </CardContent>
                     </Card>
                 </div>
 
-                {/* RIGHT: LIST (8 cols) */}
-                <div className="lg:col-span-8">
+                {/* LIST SECTION */}
+                <div className="lg:col-span-8 space-y-4">
                     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                         <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-4">
-                            <TabsList className="grid w-full sm:w-[300px] grid-cols-2">
-                                <TabsTrigger value="today">Today</TabsTrigger>
-                                <TabsTrigger value="month">This Month</TabsTrigger>
+                            <TabsList className="bg-slate-200">
+                                <TabsTrigger value="today">Today's Logins</TabsTrigger>
+                                <TabsTrigger value="month">History (Month)</TabsTrigger>
                             </TabsList>
                             
-                            <div className="relative w-full sm:w-[250px]">
-                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
+                            <div className="relative w-full sm:w-[280px]">
+                                <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                                 <Input 
-                                    placeholder="Search name or bank..." 
-                                    className="pl-9"
+                                    placeholder="Search your records..." 
+                                    className="pl-9 bg-white border-slate-200 shadow-sm"
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                 />
                             </div>
                         </div>
 
-                        <Card className="shadow-sm border-gray-200">
+                        <Card className="shadow-sm border-0 ring-1 ring-slate-200 min-h-[500px]">
                             <Table>
-                                <TableHeader className="bg-gray-50">
+                                <TableHeader className="bg-slate-50/80">
                                     <TableRow>
                                         <TableHead>Customer</TableHead>
-                                        <TableHead>Details</TableHead>
-                                        <TableHead className="text-right">Action</TableHead>
+                                        <TableHead>Bank</TableHead>
+                                        <TableHead className="text-right">Time</TableHead>
+                                        <TableHead className="w-[50px]"></TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {filteredLogins.length === 0 ? (
                                         <TableRow>
-                                            <TableCell colSpan={3} className="text-center h-32 text-gray-500">
-                                                No records found for "{searchTerm}" in this period.
+                                            <TableCell colSpan={4} className="h-64 text-center">
+                                                <div className="flex flex-col items-center justify-center text-slate-400">
+                                                    <History className="h-10 w-10 mb-2 opacity-20" />
+                                                    <p>No records found.</p>
+                                                </div>
                                             </TableCell>
                                         </TableRow>
                                     ) : (
                                         filteredLogins.map((login) => (
-                                            <TableRow key={login.id} className="hover:bg-gray-50 group">
+                                            <TableRow key={login.id} className="hover:bg-indigo-50/30 group transition-colors cursor-default">
                                                 <TableCell>
-                                                    <div className="font-medium text-gray-900">{login.name}</div>
-                                                    <div className="text-xs text-gray-500 font-mono mt-0.5">{login.phone}</div>
+                                                    <div className="font-semibold text-slate-800">{login.name}</div>
+                                                    <div className="text-xs text-slate-500 font-mono tracking-tight">{login.phone}</div>
                                                 </TableCell>
                                                 <TableCell>
-                                                    <div className="flex items-center gap-2 mb-1">
-                                                        <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-100">
-                                                            {login.bank_name}
-                                                        </Badge>
-                                                        <span className="text-xs text-gray-400">
-                                                            {new Date(login.updated_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-                                                        </span>
-                                                    </div>
-                                                    {login.notes && <div className="text-xs text-gray-500 truncate max-w-[200px]">{login.notes}</div>}
+                                                    <Badge variant="outline" className="bg-white hover:bg-white text-slate-700 border-slate-200">
+                                                        {login.bank_name}
+                                                    </Badge>
                                                 </TableCell>
                                                 <TableCell className="text-right">
-                                                    <Button 
-                                                        variant="ghost" 
-                                                        size="sm" 
-                                                        className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                    <div className="text-sm font-medium text-slate-600">
+                                                        {new Date(login.updated_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                                                    </div>
+                                                    <div className="text-[10px] text-slate-400">
+                                                        {new Date(login.updated_at).toLocaleDateString([], {month: 'short', day: 'numeric'})}
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-indigo-600 group-hover:bg-white" 
                                                         onClick={() => {
                                                             setFormData({
                                                                 id: login.id,
@@ -352,7 +420,7 @@ export default function TelecallerLoginsPage() {
                                                             window.scrollTo({ top: 0, behavior: 'smooth' })
                                                         }}
                                                     >
-                                                        <RefreshCcw className="h-4 w-4 text-gray-500" />
+                                                        <RefreshCcw className="h-3.5 w-3.5" />
                                                     </Button>
                                                 </TableCell>
                                             </TableRow>
