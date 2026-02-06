@@ -60,30 +60,33 @@ export default function AdminLoginsPage() {
     const fetchData = useCallback(async () => {
         setLoading(true)
         try {
+            // UPDATED: Select created_at and order by created_at
             let loginsQuery = supabase
                 .from('logins') 
                 .select(`
-                    id, name, phone, bank_name, updated_at, notes, status, bank_attempts,
+                    id, name, phone, bank_name, created_at, updated_at, notes, status, bank_attempts,
                     assigned_to,
                     users:assigned_to ( full_name, email )
                 `)
-                .order('updated_at', { ascending: false })
+                .order('created_at', { ascending: false })
 
             const todayDate = new Date()
             
+            // UPDATED: Filter by created_at
             if (dateFilter === 'today') {
                 const startOfToday = new Date(todayDate.setHours(0,0,0,0)).toISOString()
-                loginsQuery = loginsQuery.gte('updated_at', startOfToday)
+                loginsQuery = loginsQuery.gte('created_at', startOfToday)
             } else if (dateFilter === 'this_month') {
                 const start = startOfMonth(new Date()).toISOString()
-                loginsQuery = loginsQuery.gte('updated_at', start)
+                loginsQuery = loginsQuery.gte('created_at', start)
             } else if (dateFilter === 'last_month') {
                 const lastMonth = subMonths(new Date(), 1)
                 const start = startOfMonth(lastMonth).toISOString()
                 const end = endOfMonth(lastMonth).toISOString()
-                loginsQuery = loginsQuery.gte('updated_at', start).lte('updated_at', end)
+                loginsQuery = loginsQuery.gte('created_at', start).lte('created_at', end)
             }
 
+            // Keep transfers on updated_at as this tracks the moment of handover, not lead creation
             const transfersQuery = supabase
                 .from('leads')
                 .select(`id, name, updated_at, users:assigned_to ( full_name )`)
@@ -150,7 +153,8 @@ export default function AdminLoginsPage() {
         }
 
         filteredLogins.forEach(l => {
-            const date = format(new Date(l.updated_at), 'MMM dd')
+            // UPDATED: Use created_at for trend analysis
+            const date = format(new Date(l.created_at), 'MMM dd')
             if (trendMap[date] !== undefined) {
                 trendMap[date] = (trendMap[date] || 0) + 1
             }
@@ -196,15 +200,16 @@ export default function AdminLoginsPage() {
     const handleExport = () => {
         if (filteredLogins.length === 0) return toast.error("No data to export");
         
+        // UPDATED: Export Created At
         const csvRows = [
-            ["Agent Name", "Customer Name", "Phone", "Status", "Bank Details", "Updated At"],
+            ["Agent Name", "Customer Name", "Phone", "Status", "Bank Details", "Created At"],
             ...filteredLogins.map(l => [
                 l.users?.full_name || 'Unknown',
                 l.name,
                 l.phone,
                 l.status,
                 Array.isArray(l.bank_attempts) ? l.bank_attempts.map((a:any) => `${a.bank}(${a.status})`).join('; ') : l.bank_name,
-                format(new Date(l.updated_at), "yyyy-MM-dd HH:mm:ss")
+                format(new Date(l.created_at), "yyyy-MM-dd HH:mm:ss")
             ])
         ]
 
@@ -339,7 +344,7 @@ export default function AdminLoginsPage() {
                                     <TableHead>Customer Details</TableHead>
                                     <TableHead className="hidden md:table-cell">Bank Status</TableHead>
                                     <TableHead className="hidden md:table-cell">Agent</TableHead>
-                                    <TableHead>Date</TableHead>
+                                    <TableHead>Created Date</TableHead>
                                     <TableHead className="w-[80px]"></TableHead>
                                 </TableRow>
                             </TableHeader>
@@ -383,8 +388,9 @@ export default function AdminLoginsPage() {
                                             </TableCell>
 
                                             <TableCell>
-                                                <div className="text-sm text-slate-600">{format(new Date(item.updated_at), "MMM dd")}</div>
-                                                <div className="text-[10px] text-slate-400">{format(new Date(item.updated_at), "hh:mm a")}</div>
+                                                {/* UPDATED: Display created_at */}
+                                                <div className="text-sm text-slate-600">{format(new Date(item.created_at), "MMM dd")}</div>
+                                                <div className="text-[10px] text-slate-400">{format(new Date(item.created_at), "hh:mm a")}</div>
                                             </TableCell>
 
                                             <TableCell>
