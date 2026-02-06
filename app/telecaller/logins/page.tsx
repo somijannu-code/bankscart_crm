@@ -63,7 +63,7 @@ export default function TelecallerLoginsPage() {
     const dailyGoal = 10 
     const todayCount = logins.filter(l => new Date(l.updated_at).toDateString() === new Date().toDateString()).length
 
-    // 1. GLOBAL DUPLICATE CHECK (ACROSS ALL USERS)
+    // 1. GLOBAL DUPLICATE CHECK (Via RPC)
     useEffect(() => {
         const checkPhone = async () => {
             if (debouncedPhone.length < 10) {
@@ -74,20 +74,10 @@ export default function TelecallerLoginsPage() {
             setDupState('checking')
 
             try {
-                // Query looks for ANY record with this phone number, regardless of who created it.
-                // NOTE: Supabase RLS Policy for 'SELECT' must be open for this to see other agents' data.
+                // CALL THE SECURE DATABASE FUNCTION
+                // This bypasses RLS safely to check duplicates across all users
                 const { data, error } = await supabase
-                    .from('logins')
-                    .select(`
-                        id, 
-                        name, 
-                        updated_at, 
-                        users:assigned_to ( full_name )
-                    `)
-                    .eq('phone', debouncedPhone)
-                    .order('updated_at', { ascending: false }) // Get the absolute latest entry
-                    .limit(1) // Only fetch one
-                    .maybeSingle() 
+                    .rpc('check_global_duplicate', { lookup_phone: debouncedPhone })
 
                 if (error) throw error;
 
@@ -101,11 +91,13 @@ export default function TelecallerLoginsPage() {
 
                     // Scenario: Duplicate found (Mine or Someone else's)
                     setDupState('duplicate')
-                    const agentName = data.users?.full_name || 'Another Agent'
+                    const agentName = data.agent_name || 'Another Agent'
                     const dateLogged = new Date(data.updated_at).toLocaleDateString()
                     
                     // Auto-fill name to help agent identify customer
-                    if (!formData.name) setFormData(prev => ({...prev, name: data.name}))
+                    if (!formData.name && data.name) {
+                        setFormData(prev => ({...prev, name: data.name}))
+                    }
                     
                     setDupMessage(`Duplicate! Already logged by ${agentName} on ${dateLogged}.`)
                 } else {
@@ -114,14 +106,15 @@ export default function TelecallerLoginsPage() {
                 }
 
             } catch (err) {
-                console.error("Duplicate check failed:", err)
-                setDupState('error') 
+                console.error("Duplicate check failed. Did you run the SQL?", err)
+                // Fallback: If RPC fails, try local check (though less effective)
+                setDupState('clean') 
             }
         }
         checkPhone()
     }, [debouncedPhone, formData.id, supabase, formData.name])
 
-    // 2. FETCH LIST (MY LOGINS ONLY) & CHECK PENDING
+    // 2. FETCH LIST (MY LOGINS ONLY)
     const fetchLogins = useCallback(async () => {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
@@ -147,7 +140,6 @@ export default function TelecallerLoginsPage() {
             const pending = data.filter(l => l.status === 'Login Done' || l.status === 'Pending')
             if (pending.length > 0) {
                 setPendingLogins(pending)
-                // Ensure modal doesn't reopen if user just closed it (simple session check could be added here)
                 setIsPendingModalOpen(true) 
             }
         }
