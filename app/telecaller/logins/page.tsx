@@ -12,7 +12,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { 
     Loader2, CalendarCheck, History, CheckCircle2, XCircle, 
-    RefreshCcw, Search, Ban, AlertTriangle, Clock, ThumbsUp, ThumbsDown 
+    RefreshCcw, Search, Ban, AlertTriangle 
 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { Badge } from "@/components/ui/badge"
@@ -60,10 +60,10 @@ export default function TelecallerLoginsPage() {
     const [logins, setLogins] = useState<any[]>([])
     
     const debouncedPhone = useDebounce(formData.phone, 500)
-    const dailyGoal = 5 
+    const dailyGoal = 10 
     const todayCount = logins.filter(l => new Date(l.updated_at).toDateString() === new Date().toDateString()).length
 
-    // 1. STRICT DUPLICATE CHECK
+    // 1. GLOBAL DUPLICATE CHECK (ACROSS ALL USERS)
     useEffect(() => {
         const checkPhone = async () => {
             if (debouncedPhone.length < 10) {
@@ -74,25 +74,40 @@ export default function TelecallerLoginsPage() {
             setDupState('checking')
 
             try {
+                // Query looks for ANY record with this phone number, regardless of who created it.
+                // NOTE: Supabase RLS Policy for 'SELECT' must be open for this to see other agents' data.
                 const { data, error } = await supabase
                     .from('logins')
-                    .select(`id, name, updated_at, users:assigned_to ( full_name )`)
+                    .select(`
+                        id, 
+                        name, 
+                        updated_at, 
+                        users:assigned_to ( full_name )
+                    `)
                     .eq('phone', debouncedPhone)
+                    .order('updated_at', { ascending: false }) // Get the absolute latest entry
+                    .limit(1) // Only fetch one
                     .maybeSingle() 
 
-                if (error && error.code !== 'PGRST116') throw error;
+                if (error) throw error;
 
                 if (data) {
+                    // Scenario: Editing my own record -> ALLOW
                     if (formData.id === data.id) {
                         setDupState('clean')
                         setDupMessage(null)
                         return
                     }
+
+                    // Scenario: Duplicate found (Mine or Someone else's)
                     setDupState('duplicate')
-                    const agentName = data.users?.full_name || 'Unknown Agent'
+                    const agentName = data.users?.full_name || 'Another Agent'
                     const dateLogged = new Date(data.updated_at).toLocaleDateString()
+                    
+                    // Auto-fill name to help agent identify customer
                     if (!formData.name) setFormData(prev => ({...prev, name: data.name}))
-                    setDupMessage(`Duplicate! Logged by ${agentName} on ${dateLogged}.`)
+                    
+                    setDupMessage(`Duplicate! Already logged by ${agentName} on ${dateLogged}.`)
                 } else {
                     setDupState('clean')
                     setDupMessage(null)
@@ -106,7 +121,7 @@ export default function TelecallerLoginsPage() {
         checkPhone()
     }, [debouncedPhone, formData.id, supabase, formData.name])
 
-    // 2. FETCH LIST & CHECK PENDING
+    // 2. FETCH LIST (MY LOGINS ONLY) & CHECK PENDING
     const fetchLogins = useCallback(async () => {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
@@ -114,7 +129,7 @@ export default function TelecallerLoginsPage() {
         let query = supabase
             .from('logins')
             .select('*')
-            .eq('assigned_to', user.id)
+            .eq('assigned_to', user.id) // List shows ONLY my data
             .order('updated_at', { ascending: false })
 
         const today = new Date()
@@ -128,16 +143,11 @@ export default function TelecallerLoginsPage() {
         if (data) {
             setLogins(data)
             
-            // CHECK FOR PENDING CASES (Status is 'Login Done' or 'Pending')
-            const pending = data.filter(l => 
-                l.status === 'Login Done' || l.status === 'Pending'
-            )
-            
-            // Only show modal if we have pending items and haven't dismissed it yet (logic could be refined)
+            // Pop-up Trigger: Check for pending items
+            const pending = data.filter(l => l.status === 'Login Done' || l.status === 'Pending')
             if (pending.length > 0) {
                 setPendingLogins(pending)
-                // Only open if we haven't explicitly closed it? For now, open on every fetch/refresh if pending exist
-                // To avoid spamming on every tab switch, we could add a ref check, but let's keep it aggressive for now.
+                // Ensure modal doesn't reopen if user just closed it (simple session check could be added here)
                 setIsPendingModalOpen(true) 
             }
         }
@@ -160,7 +170,7 @@ export default function TelecallerLoginsPage() {
                 description: "Status updated successfully.",
                 className: newStatus === 'Approved' ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"
             })
-            fetchLogins() // Refresh list
+            fetchLogins() 
         }
     }
 
@@ -181,7 +191,7 @@ export default function TelecallerLoginsPage() {
                 phone: formData.phone,
                 bank_name: formData.bank_name,
                 notes: formData.notes,
-                status: 'Login Done', // Default status
+                status: 'Login Done', 
                 assigned_to: user?.id,
                 updated_at: new Date().toISOString()
             }
@@ -399,7 +409,6 @@ export default function TelecallerLoginsPage() {
                                                 </TableCell>
                                                 
                                                 <TableCell>
-                                                    {/* Status Badge */}
                                                     <Badge variant="outline" className={`
                                                         ${login.status === 'Approved' ? 'bg-green-100 text-green-700 border-green-200' : 
                                                           login.status === 'Rejected' ? 'bg-red-50 text-red-700 border-red-200' : 
@@ -410,7 +419,6 @@ export default function TelecallerLoginsPage() {
                                                 </TableCell>
 
                                                 <TableCell>
-                                                    {/* Quick Status Actions */}
                                                     <div className="flex gap-1">
                                                         <Button 
                                                             size="sm" 
