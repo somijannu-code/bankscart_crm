@@ -45,7 +45,7 @@ export default function AdminLoginsPage() {
     const [transfers, setTransfers] = useState<any[]>([])
     
     // Filters & Pagination
-    const [dateFilter, setDateFilter] = useState("this_month")
+    const [dateFilter, setDateFilter] = useState("today")
     const [searchQuery, setSearchQuery] = useState("")
     const [selectedBank, setSelectedBank] = useState("all")
     const [statusFilter, setStatusFilter] = useState("all")
