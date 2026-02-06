@@ -10,9 +10,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Loader2, CalendarCheck, History, CheckCircle2, XCircle, RefreshCcw, Search, Ban, AlertTriangle } from "lucide-react"
+import { 
+    Loader2, CalendarCheck, History, CheckCircle2, XCircle, 
+    RefreshCcw, Search, Ban, AlertTriangle, Clock, ThumbsUp, ThumbsDown 
+} from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { Badge } from "@/components/ui/badge"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 
 // --- TYPES ---
 type DuplicateState = 'checking' | 'clean' | 'duplicate' | 'error'
@@ -36,6 +40,10 @@ export default function TelecallerLoginsPage() {
     const [activeTab, setActiveTab] = useState("today")
     const [searchTerm, setSearchTerm] = useState("")
     
+    // Pending Pop-up State
+    const [pendingLogins, setPendingLogins] = useState<any[]>([])
+    const [isPendingModalOpen, setIsPendingModalOpen] = useState(false)
+    
     // Duplicate Logic States
     const [dupState, setDupState] = useState<DuplicateState>('clean')
     const [dupMessage, setDupMessage] = useState<string | null>(null)
@@ -52,56 +60,40 @@ export default function TelecallerLoginsPage() {
     const [logins, setLogins] = useState<any[]>([])
     
     const debouncedPhone = useDebounce(formData.phone, 500)
-    const dailyGoal = 10 
+    const dailyGoal = 5 
     const todayCount = logins.filter(l => new Date(l.updated_at).toDateString() === new Date().toDateString()).length
 
     // 1. STRICT DUPLICATE CHECK
     useEffect(() => {
         const checkPhone = async () => {
-            // Reset if empty or short
             if (debouncedPhone.length < 10) {
                 setDupState('clean')
                 setDupMessage(null)
                 return
             }
-
             setDupState('checking')
 
             try {
-                // Check if phone exists in DB, fetch WHO assigned it
                 const { data, error } = await supabase
                     .from('logins')
-                    .select(`
-                        id, 
-                        name, 
-                        updated_at, 
-                        users:assigned_to ( full_name )
-                    `)
+                    .select(`id, name, updated_at, users:assigned_to ( full_name )`)
                     .eq('phone', debouncedPhone)
                     .maybeSingle() 
 
                 if (error && error.code !== 'PGRST116') throw error;
 
                 if (data) {
-                    // SCENARIO 1: It's the SAME record we are currently editing.
                     if (formData.id === data.id) {
                         setDupState('clean')
                         setDupMessage(null)
                         return
                     }
-
-                    // SCENARIO 2: It is a DIFFERENT record (Duplicate)
                     setDupState('duplicate')
-                    
                     const agentName = data.users?.full_name || 'Unknown Agent'
                     const dateLogged = new Date(data.updated_at).toLocaleDateString()
-                    
-                    // Auto-fill name just to show we found it, but BLOCK submission
                     if (!formData.name) setFormData(prev => ({...prev, name: data.name}))
-                    
                     setDupMessage(`Duplicate! Logged by ${agentName} on ${dateLogged}.`)
                 } else {
-                    // SCENARIO 3: No record found (Clean)
                     setDupState('clean')
                     setDupMessage(null)
                 }
@@ -111,11 +103,10 @@ export default function TelecallerLoginsPage() {
                 setDupState('error') 
             }
         }
-
         checkPhone()
     }, [debouncedPhone, formData.id, supabase, formData.name])
 
-    // 2. FETCH LIST
+    // 2. FETCH LIST & CHECK PENDING
     const fetchLogins = useCallback(async () => {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) return
@@ -123,7 +114,7 @@ export default function TelecallerLoginsPage() {
         let query = supabase
             .from('logins')
             .select('*')
-            .eq('assigned_to', user.id) // Only show MY logins in the list
+            .eq('assigned_to', user.id)
             .order('updated_at', { ascending: false })
 
         const today = new Date()
@@ -134,22 +125,50 @@ export default function TelecallerLoginsPage() {
         }
 
         const { data } = await query
-        if (data) setLogins(data)
+        if (data) {
+            setLogins(data)
+            
+            // CHECK FOR PENDING CASES (Status is 'Login Done' or 'Pending')
+            const pending = data.filter(l => 
+                l.status === 'Login Done' || l.status === 'Pending'
+            )
+            
+            // Only show modal if we have pending items and haven't dismissed it yet (logic could be refined)
+            if (pending.length > 0) {
+                setPendingLogins(pending)
+                // Only open if we haven't explicitly closed it? For now, open on every fetch/refresh if pending exist
+                // To avoid spamming on every tab switch, we could add a ref check, but let's keep it aggressive for now.
+                setIsPendingModalOpen(true) 
+            }
+        }
     }, [supabase, activeTab])
 
     useEffect(() => { fetchLogins() }, [fetchLogins])
 
-    // 3. SUBMIT
+    // 3. STATUS UPDATE HANDLER
+    const handleStatusUpdate = async (id: string, newStatus: 'Approved' | 'Rejected') => {
+        const { error } = await supabase
+            .from('logins')
+            .update({ status: newStatus, updated_at: new Date().toISOString() })
+            .eq('id', id)
+
+        if (error) {
+            toast({ title: "Error", description: "Failed to update status", variant: "destructive" })
+        } else {
+            toast({ 
+                title: newStatus === 'Approved' ? "Approved! ✅" : "Rejected ❌", 
+                description: "Status updated successfully.",
+                className: newStatus === 'Approved' ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"
+            })
+            fetchLogins() // Refresh list
+        }
+    }
+
+    // 4. SUBMIT
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        
-        // Final Safety Check
         if (dupState === 'duplicate' || dupState === 'checking') {
-            toast({
-                title: "Duplicate Lead",
-                description: dupMessage || "This number already exists in the system.",
-                variant: "destructive"
-            })
+            toast({ title: "Duplicate Lead", description: dupMessage || "Number exists.", variant: "destructive" })
             return
         }
 
@@ -162,7 +181,7 @@ export default function TelecallerLoginsPage() {
                 phone: formData.phone,
                 bank_name: formData.bank_name,
                 notes: formData.notes,
-                status: 'Login Done',
+                status: 'Login Done', // Default status
                 assigned_to: user?.id,
                 updated_at: new Date().toISOString()
             }
@@ -170,18 +189,16 @@ export default function TelecallerLoginsPage() {
             if (formData.id) {
                 const { error } = await supabase.from('logins').update(payload).eq('id', formData.id)
                 if (error) throw error
-                toast({ title: "Updated", description: "Entry updated successfully.", className: "bg-green-50" })
+                toast({ title: "Updated", description: "Entry updated.", className: "bg-green-50" })
             } else {
                 const { error } = await supabase.from('logins').insert([payload])
                 if (error) throw error
-                toast({ title: "Success! 🎉", description: "Login submitted successfully.", className: "bg-green-50 border-green-200" })
+                toast({ title: "Success! 🎉", description: "Login submitted.", className: "bg-green-50 border-green-200" })
             }
             
-            // Reset
             setFormData({ id: null, name: "", phone: "", bank_name: "", notes: "" })
             setDupState('clean')
             fetchLogins()
-
         } catch (err: any) {
             toast({ title: "Error", description: err.message, variant: "destructive" })
         } finally {
@@ -195,7 +212,6 @@ export default function TelecallerLoginsPage() {
         l.bank_name.toLowerCase().includes(searchTerm.toLowerCase())
     )
 
-    // Helper for Input Class
     const getInputClass = () => {
         if (dupState === 'duplicate') return "border-red-400 bg-red-50 focus-visible:ring-red-400 text-red-900"
         if (dupState === 'clean' && formData.phone.length === 10) return "border-green-400 bg-green-50 focus-visible:ring-green-400"
@@ -208,15 +224,12 @@ export default function TelecallerLoginsPage() {
             {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-end gap-4 bg-white p-6 rounded-2xl border shadow-sm">
                 <div>
-                    <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-3">
-                       Telecaller Portal
-                    </h1>
+                    <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-3">Telecaller Portal</h1>
                     <p className="text-slate-500 mt-2 flex items-center gap-2">
                         <CalendarCheck className="h-4 w-4" /> {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                     </p>
                 </div>
 
-                {/* Progress Widget */}
                 <div className="flex items-center gap-4 bg-indigo-50 p-3 rounded-xl border border-indigo-100 min-w-[200px]">
                     <div className="relative h-12 w-12 flex items-center justify-center">
                          <svg className="h-full w-full transform -rotate-90">
@@ -236,7 +249,6 @@ export default function TelecallerLoginsPage() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                
                 {/* FORM SECTION */}
                 <div className="lg:col-span-4 space-y-6">
                     <Card className={`shadow-xl border-t-4 transition-colors ${dupState === 'duplicate' ? 'border-red-500' : 'border-indigo-600'} bg-white/80 backdrop-blur-sm sticky top-6`}>
@@ -254,8 +266,6 @@ export default function TelecallerLoginsPage() {
                         </CardHeader>
                         <CardContent className="pt-6">
                             <form onSubmit={handleSubmit} className="space-y-5">
-                                
-                                {/* PHONE INPUT WITH DUPLICATE CHECK */}
                                 <div className="space-y-2">
                                     <Label>Mobile Number <span className="text-red-500">*</span></Label>
                                     <div className="relative group">
@@ -273,9 +283,8 @@ export default function TelecallerLoginsPage() {
                                         </div>
                                     </div>
                                     
-                                    {/* DUPLICATE ERROR MESSAGE */}
                                     {dupState === 'duplicate' && (
-                                        <div className="rounded-md bg-red-50 p-3 border border-red-200 animate-in slide-in-from-top-2 fade-in duration-300">
+                                        <div className="rounded-md bg-red-50 p-3 border border-red-200">
                                             <div className="flex gap-2">
                                                 <Ban className="h-4 w-4 text-red-600 mt-0.5" />
                                                 <div className="text-xs text-red-700 font-medium">
@@ -295,18 +304,13 @@ export default function TelecallerLoginsPage() {
                                         onChange={(e) => setFormData({...formData, name: e.target.value})}
                                         required
                                         className="bg-slate-50 focus:bg-white"
-                                        disabled={dupState === 'duplicate'} // Disable fields if duplicate
+                                        disabled={dupState === 'duplicate'} 
                                     />
                                 </div>
 
                                 <div className="space-y-2">
                                     <Label>Target Bank <span className="text-red-500">*</span></Label>
-                                    <Select 
-                                        value={formData.bank_name} 
-                                        onValueChange={(val) => setFormData({...formData, bank_name: val})} 
-                                        required
-                                        disabled={dupState === 'duplicate'}
-                                    >
+                                    <Select value={formData.bank_name} onValueChange={(val) => setFormData({...formData, bank_name: val})} required disabled={dupState === 'duplicate'}>
                                         <SelectTrigger className="bg-slate-50 focus:bg-white"><SelectValue placeholder="Select Bank" /></SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="HDFC Bank">HDFC Bank</SelectItem>
@@ -369,7 +373,8 @@ export default function TelecallerLoginsPage() {
                                 <TableHeader className="bg-slate-50/80">
                                     <TableRow>
                                         <TableHead>Customer</TableHead>
-                                        <TableHead>Bank</TableHead>
+                                        <TableHead>Status</TableHead>
+                                        <TableHead>Action</TableHead>
                                         <TableHead className="text-right">Time</TableHead>
                                         <TableHead className="w-[50px]"></TableHead>
                                     </TableRow>
@@ -377,7 +382,7 @@ export default function TelecallerLoginsPage() {
                                 <TableBody>
                                     {filteredLogins.length === 0 ? (
                                         <TableRow>
-                                            <TableCell colSpan={4} className="h-64 text-center">
+                                            <TableCell colSpan={5} className="h-64 text-center">
                                                 <div className="flex flex-col items-center justify-center text-slate-400">
                                                     <History className="h-10 w-10 mb-2 opacity-20" />
                                                     <p>No records found.</p>
@@ -390,12 +395,44 @@ export default function TelecallerLoginsPage() {
                                                 <TableCell>
                                                     <div className="font-semibold text-slate-800">{login.name}</div>
                                                     <div className="text-xs text-slate-500 font-mono tracking-tight">{login.phone}</div>
+                                                    <div className="text-[10px] text-indigo-600 mt-1">{login.bank_name}</div>
                                                 </TableCell>
+                                                
                                                 <TableCell>
-                                                    <Badge variant="outline" className="bg-white hover:bg-white text-slate-700 border-slate-200">
-                                                        {login.bank_name}
+                                                    {/* Status Badge */}
+                                                    <Badge variant="outline" className={`
+                                                        ${login.status === 'Approved' ? 'bg-green-100 text-green-700 border-green-200' : 
+                                                          login.status === 'Rejected' ? 'bg-red-50 text-red-700 border-red-200' : 
+                                                          'bg-amber-50 text-amber-700 border-amber-200'}
+                                                    `}>
+                                                        {login.status === 'Login Done' ? 'Pending' : login.status}
                                                     </Badge>
                                                 </TableCell>
+
+                                                <TableCell>
+                                                    {/* Quick Status Actions */}
+                                                    <div className="flex gap-1">
+                                                        <Button 
+                                                            size="sm" 
+                                                            variant="outline" 
+                                                            className="h-7 w-7 p-0 text-green-600 hover:bg-green-100 border-green-200"
+                                                            onClick={() => handleStatusUpdate(login.id, 'Approved')}
+                                                            title="Mark Approved"
+                                                        >
+                                                            <CheckCircle2 className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button 
+                                                            size="sm" 
+                                                            variant="outline" 
+                                                            className="h-7 w-7 p-0 text-red-600 hover:bg-red-50 border-red-200"
+                                                            onClick={() => handleStatusUpdate(login.id, 'Rejected')}
+                                                            title="Mark Rejected"
+                                                        >
+                                                            <XCircle className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                </TableCell>
+
                                                 <TableCell className="text-right">
                                                     <div className="text-sm font-medium text-slate-600">
                                                         {new Date(login.updated_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
@@ -404,6 +441,7 @@ export default function TelecallerLoginsPage() {
                                                         {new Date(login.updated_at).toLocaleDateString([], {month: 'short', day: 'numeric'})}
                                                     </div>
                                                 </TableCell>
+
                                                 <TableCell>
                                                     <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-indigo-600 group-hover:bg-white" 
                                                         onClick={() => {
@@ -429,6 +467,62 @@ export default function TelecallerLoginsPage() {
                     </Tabs>
                 </div>
             </div>
+
+            {/* PENDING CASES POP-UP MODAL */}
+            <Dialog open={isPendingModalOpen} onOpenChange={setIsPendingModalOpen}>
+                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-amber-600">
+                            <AlertTriangle className="h-5 w-5" />
+                            Pending Follow-ups Required
+                        </DialogTitle>
+                        <DialogDescription>
+                            You have {pendingLogins.length} login(s) that are still pending. Please check their status with the bank and update them.
+                        </DialogDescription>
+                    </DialogHeader>
+                    
+                    <div className="border rounded-md mt-4 overflow-hidden">
+                        <Table>
+                            <TableHeader className="bg-slate-50">
+                                <TableRow>
+                                    <TableHead>Customer</TableHead>
+                                    <TableHead>Bank</TableHead>
+                                    <TableHead className="text-right">Action</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {pendingLogins.map((p) => (
+                                    <TableRow key={p.id}>
+                                        <TableCell>
+                                            <div className="font-medium text-sm">{p.name}</div>
+                                            <div className="text-xs text-slate-500">{p.phone}</div>
+                                        </TableCell>
+                                        <TableCell>
+                                            <Badge variant="outline" className="text-xs font-normal">
+                                                {p.bank_name}
+                                            </Badge>
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            <div className="flex justify-end gap-2">
+                                                <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700" onClick={() => handleStatusUpdate(p.id, 'Approved')}>
+                                                    Approve
+                                                </Button>
+                                                <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => handleStatusUpdate(p.id, 'Rejected')}>
+                                                    Reject
+                                                </Button>
+                                            </div>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </div>
+
+                    <DialogFooter className="mt-4">
+                        <Button variant="outline" onClick={() => setIsPendingModalOpen(false)}>Close & Remind Later</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }
