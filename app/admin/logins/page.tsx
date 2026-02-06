@@ -19,18 +19,16 @@ import {
 } from "@/components/ui/dialog"
 import { 
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter 
-} from "@/components/ui/sheet" // Assuming you have Shadcn Sheet
+} from "@/components/ui/sheet"
 import { Label } from "@/components/ui/label"
 import { 
   Loader2, FileCheck, Download, Search, Trophy, 
-  ArrowRightLeft, Edit, Plus, X, Save, Users, 
-  CheckCircle2, XCircle, Clock, Trash2, Calendar, 
-  TrendingUp, TrendingDown, Filter, ChevronLeft, ChevronRight
+  ArrowRightLeft, Edit, Plus, X, Trash2, 
+  TrendingUp, Clock, CheckCircle2, XCircle, ChevronLeft, ChevronRight
 } from "lucide-react"
 import { toast } from "sonner"
-import { format, subDays, isSameDay, startOfMonth, endOfMonth, subMonths } from "date-fns" 
+import { format, startOfMonth, endOfMonth, subMonths } from "date-fns" 
 import { EmptyState } from "@/components/empty-state" 
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 // --- TYPES ---
 type BankAttempt = {
@@ -73,7 +71,6 @@ export default function AdminLoginsPage() {
 
             const todayDate = new Date()
             
-            // Enhanced Date Logic
             if (dateFilter === 'today') {
                 const startOfToday = new Date(todayDate.setHours(0,0,0,0)).toISOString()
                 loginsQuery = loginsQuery.gte('updated_at', startOfToday)
@@ -134,7 +131,7 @@ export default function AdminLoginsPage() {
 
     const totalPages = Math.ceil(filteredLogins.length / itemsPerPage)
 
-    // Analytics Calculation
+    // Analytics Calculation (Custom CSS Chart Data)
     const stats = useMemo(() => {
         const total = filteredLogins.length
         const approved = filteredLogins.filter(l => l.status === 'Approved' || l.status === 'Disbursed').length
@@ -142,17 +139,27 @@ export default function AdminLoginsPage() {
         const pending = total - approved - rejected
         const approvalRate = total > 0 ? Math.round((approved / total) * 100) : 0
 
-        // Daily Trend for Chart
+        // Daily Trend for Custom Chart
         const trendMap: Record<string, number> = {}
+        
+        // Initialize last 7 days with 0
+        for (let i = 6; i >= 0; i--) {
+            const d = new Date()
+            d.setDate(d.getDate() - i)
+            trendMap[format(d, 'MMM dd')] = 0
+        }
+
         filteredLogins.forEach(l => {
             const date = format(new Date(l.updated_at), 'MMM dd')
-            trendMap[date] = (trendMap[date] || 0) + 1
+            if (trendMap[date] !== undefined) {
+                trendMap[date] = (trendMap[date] || 0) + 1
+            }
         })
-        const chartData = Object.entries(trendMap)
-            .map(([date, count]) => ({ date, count }))
-            .slice(-7) // Last 7 days in view
 
-        return { total, approved, rejected, pending, approvalRate, chartData }
+        const chartData = Object.entries(trendMap).map(([date, count]) => ({ date, count }))
+        const maxCount = Math.max(...chartData.map(d => d.count), 1) // Avoid divide by zero
+
+        return { total, approved, rejected, pending, approvalRate, chartData, maxCount }
     }, [filteredLogins])
 
     const allTelecallerStats = useMemo(() => {
@@ -228,19 +235,19 @@ export default function AdminLoginsPage() {
                 <div className="flex flex-wrap items-center gap-3">
                     <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg border">
                         <Button 
-                            variant={dateFilter === 'today' ? 'white' : 'ghost'} 
+                            variant={dateFilter === 'today' ? 'default' : 'ghost'} 
                             size="sm" onClick={() => setDateFilter('today')}
-                            className={dateFilter === 'today' ? 'shadow-sm text-indigo-600' : 'text-slate-500'}
+                            className={dateFilter === 'today' ? 'shadow-sm bg-white text-indigo-600 hover:bg-white' : 'text-slate-500'}
                         >Today</Button>
                         <Button 
-                            variant={dateFilter === 'this_month' ? 'white' : 'ghost'} 
+                            variant={dateFilter === 'this_month' ? 'default' : 'ghost'} 
                             size="sm" onClick={() => setDateFilter('this_month')}
-                            className={dateFilter === 'this_month' ? 'shadow-sm text-indigo-600' : 'text-slate-500'}
+                            className={dateFilter === 'this_month' ? 'shadow-sm bg-white text-indigo-600 hover:bg-white' : 'text-slate-500'}
                         >This Month</Button>
                          <Button 
-                            variant={dateFilter === 'last_month' ? 'white' : 'ghost'} 
+                            variant={dateFilter === 'last_month' ? 'default' : 'ghost'} 
                             size="sm" onClick={() => setDateFilter('last_month')}
-                            className={dateFilter === 'last_month' ? 'shadow-sm text-indigo-600' : 'text-slate-500'}
+                            className={dateFilter === 'last_month' ? 'shadow-sm bg-white text-indigo-600 hover:bg-white' : 'text-slate-500'}
                         >Last Month</Button>
                     </div>
                     
@@ -255,14 +262,17 @@ export default function AdminLoginsPage() {
                 <Card className="border-l-4 border-indigo-500 shadow-sm relative overflow-hidden">
                     <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-500">Total Logins</CardTitle></CardHeader>
                     <CardContent>
-                        <div className="text-3xl font-bold text-slate-800">{stats.total}</div>
-                        <div className="h-10 w-full mt-2">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={stats.chartData}>
-                                    <Bar dataKey="count" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                                    <Tooltip cursor={{fill: 'transparent'}} contentStyle={{fontSize: '12px'}} />
-                                </BarChart>
-                            </ResponsiveContainer>
+                        <div className="text-3xl font-bold text-slate-800 mb-4">{stats.total}</div>
+                        {/* Custom CSS Mini Bar Chart */}
+                        <div className="h-12 w-full flex items-end justify-between gap-1">
+                            {stats.chartData.map((d, i) => (
+                                <div key={i} className="flex flex-col items-center flex-1 h-full justify-end group">
+                                    <div 
+                                        className="w-full bg-indigo-500 rounded-t-sm transition-all group-hover:bg-indigo-600"
+                                        style={{ height: `${(d.count / stats.maxCount) * 100}%` }}
+                                    ></div>
+                                </div>
+                            ))}
                         </div>
                     </CardContent>
                 </Card>
@@ -458,7 +468,7 @@ export default function AdminLoginsPage() {
                 </div>
             </div>
 
-            {/* EDIT SHEET (Better than Modal) */}
+            {/* EDIT SHEET */}
             <EditLoginSheet 
                 login={editingLogin} 
                 open={!!editingLogin} 
