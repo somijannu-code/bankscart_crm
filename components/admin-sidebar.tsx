@@ -23,34 +23,33 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 // Icons
 import { ChevronLeft, ChevronRight, Menu } from "lucide-react"
 
-// --- SUB-COMPONENT: Nav Item (Updated with 3D Effect) ---
+// --- SUB-COMPONENT: Nav Item (Updated with Enhanced 3D Effect) ---
 function SidebarItem({ item, isCollapsed, isActive }: { item: any, isCollapsed: boolean, isActive: boolean }) {
   const Icon = item.icon
 
-  // 1. COLLAPSED VIEW (Icon Only) - 3D Icon Pop
+  // 1. COLLAPSED VIEW (Icon Only) - 3D Bubble Pop
   if (isCollapsed) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <Link href={item.href} className="flex justify-center mb-2">
-            <Button
-              variant="ghost"
-              size="icon"
+          <Link href={item.href} className="flex justify-center mb-3">
+            <div
               className={cn(
-                "h-10 w-10 rounded-xl transition-all duration-300 ease-out",
-                // 3D Hover Effect for Icons
-                "hover:scale-110 hover:shadow-[0_0_15px_rgba(37,99,235,0.3)] hover:-translate-y-1",
+                "h-11 w-11 flex items-center justify-center rounded-2xl transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
+                // 3D Effect: Scale + Rotate + Shadow on Hover
+                "hover:scale-115 hover:-translate-y-1 hover:rotate-3 hover:shadow-[0_10px_20px_-5px_rgba(59,130,246,0.4)]",
+                "active:scale-95 active:translate-y-0", // Tactile click press
                 isActive 
-                  ? "bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/30 ring-2 ring-blue-400 ring-offset-2" 
-                  : "text-slate-500 hover:bg-slate-50 hover:text-blue-600"
+                  ? "bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/40" 
+                  : "bg-white text-slate-500 hover:text-blue-600 border border-slate-100"
               )}
             >
               <Icon className="h-5 w-5" />
               <span className="sr-only">{item.name}</span>
-            </Button>
+            </div>
           </Link>
         </TooltipTrigger>
-        <TooltipContent side="right" className="bg-slate-900 text-white border-0 font-medium ml-2 shadow-xl animate-in zoom-in-50 duration-200">
+        <TooltipContent side="right" className="bg-slate-900 text-white border-0 font-bold ml-2 shadow-2xl animate-in zoom-in-50 duration-300">
           {item.name}
         </TooltipContent>
       </Tooltip>
@@ -59,38 +58,48 @@ function SidebarItem({ item, isCollapsed, isActive }: { item: any, isCollapsed: 
 
   // 2. EXPANDED VIEW (Full Row) - 3D Card Lift
   return (
-    <Link href={item.href} className="block mb-2 px-1">
+    <Link href={item.href} className="block mb-2 px-2 perspective-[1000px] group/item">
       <div
         className={cn(
-          "group relative flex items-center w-full p-2.5 rounded-xl transition-all duration-300 ease-out cursor-pointer overflow-hidden",
-          // Base State
-          "border border-transparent",
-          // 3D HOVER EFFECT: Lift up + Drop Shadow + Scale + Border Highlight
-          "hover:-translate-y-1 hover:shadow-[0_8px_20px_-6px_rgba(0,0,0,0.1)] hover:scale-[1.02] hover:bg-white hover:border-slate-100",
+          "relative flex items-center w-full p-3 rounded-xl transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
+          "border cursor-pointer overflow-hidden",
+          
+          // --- THE 3D EFFECT ---
+          // 1. Lift Up (Translate Y)
+          // 2. Scale Up
+          // 3. Deep Shadow (Gives height perception)
+          // 4. Border Highlight (Simulates light catching edge)
+          "hover:-translate-y-1.5 hover:scale-[1.02] hover:shadow-[0_20px_25px_-5px_rgba(0,0,0,0.1),0_8px_10px_-6px_rgba(0,0,0,0.1)] hover:border-blue-200/50",
+          
+          // Active Click Effect (Press down)
+          "active:scale-[0.98] active:translate-y-0 active:shadow-none",
+
           isActive 
-            ? "bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 shadow-sm border-blue-100" 
-            : "text-slate-600"
+            ? "bg-gradient-to-r from-blue-50 via-indigo-50 to-white text-blue-700 border-blue-100 shadow-sm" 
+            : "bg-transparent text-slate-600 border-transparent hover:bg-white"
         )}
       >
-        {/* Active Indicator Bar (Left side) */}
+        {/* Active Indicator (Glowing Pill) */}
         {isActive && (
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 bg-blue-600 rounded-r-full shadow-[0_0_10px_rgba(37,99,235,0.5)]" />
+          <div className="absolute left-0 h-full w-1 bg-blue-600 rounded-r-full shadow-[0_0_15px_2px_rgba(37,99,235,0.6)]" />
         )}
 
         <Icon className={cn(
-          "h-5 w-5 mr-3 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3", // Subtle icon rotation
-          isActive ? "text-blue-600" : "text-slate-400 group-hover:text-blue-500"
+          "h-5 w-5 mr-3 transition-transform duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
+          // Icon bounces on hover
+          "group-hover/item:scale-125 group-hover/item:rotate-6",
+          isActive ? "text-blue-600" : "text-slate-400 group-hover/item:text-blue-500"
         )} />
         
         <span className={cn(
-          "font-medium transition-colors",
-          isActive ? "text-blue-900" : "group-hover:text-slate-900"
+          "font-semibold tracking-tight transition-colors",
+          isActive ? "text-blue-900" : "group-hover/item:text-slate-900"
         )}>
           {item.name}
         </span>
 
-        {/* Subtle Shine Effect on Hover */}
-        <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-transparent via-white/40 to-transparent opacity-0 group-hover:opacity-100 group-hover:translate-x-full transition-all duration-700 pointer-events-none" />
+        {/* Dynamic Light Sheen Effect */}
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent -translate-x-full group-hover/item:animate-[shimmer_1.5s_infinite] pointer-events-none" />
       </div>
     </Link>
   )
@@ -122,8 +131,8 @@ export function AdminSidebar() {
       <div className="md:hidden p-4 fixed top-0 left-0 z-50">
         <Sheet>
           <SheetTrigger asChild>
-            <Button variant="outline" size="icon" className="shadow-lg active:scale-95 transition-transform">
-              <Menu className="h-4 w-4" />
+            <Button variant="outline" size="icon" className="shadow-lg active:scale-95 transition-transform bg-white/80 backdrop-blur-md">
+              <Menu className="h-5 w-5 text-slate-700" />
             </Button>
           </SheetTrigger>
           <SheetContent side="left" className="w-72 p-0 border-r-0">
@@ -135,18 +144,18 @@ export function AdminSidebar() {
       {/* 2. DESKTOP SIDEBAR */}
       <div 
         className={cn(
-          "hidden md:flex flex-col h-screen bg-slate-50/50 border-r transition-all duration-300 relative sticky top-0",
-          isCollapsed ? "w-[80px]" : "w-72"
+          "hidden md:flex flex-col h-screen bg-slate-50/50 border-r border-slate-200/60 transition-all duration-500 ease-[cubic-bezier(0.25,1,0.5,1)] relative sticky top-0",
+          isCollapsed ? "w-[90px]" : "w-72"
         )}
       >
-        {/* 3D Toggle Button */}
+        {/* 3D Floating Toggle Button */}
         <Button
           variant="outline"
           size="icon"
           onClick={toggleSidebar}
-          className="absolute -right-3 top-9 h-7 w-7 rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.1)] border border-slate-200 z-30 hidden md:flex hover:scale-110 hover:shadow-md transition-all text-slate-500 hover:text-blue-600"
+          className="absolute -right-4 top-8 h-9 w-9 rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.1)] border-slate-100 z-30 hidden md:flex text-slate-400 hover:text-blue-600 hover:scale-110 hover:-rotate-180 transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]"
         >
-          {isCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
+          <ChevronLeft className={cn("h-4 w-4 transition-transform duration-300", isCollapsed && "rotate-180")} />
         </Button>
 
         <SidebarContent isCollapsed={isCollapsed} pathname={pathname} />
@@ -158,38 +167,38 @@ export function AdminSidebar() {
 // --- INTERNAL CONTENT RENDERER ---
 function SidebarContent({ isCollapsed, pathname }: { isCollapsed: boolean, pathname: string }) {
   return (
-    <div className="flex flex-col h-full bg-white/80 backdrop-blur-xl">
+    <div className="flex flex-col h-full bg-white/60 backdrop-blur-2xl">
       
-      {/* Branding */}
-      <div className={cn("h-20 flex items-center border-b border-slate-100/80 px-5 transition-all", isCollapsed ? "justify-center" : "justify-start gap-3")}>
-        <div className="relative group">
-            <div className="h-10 w-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg shadow-blue-500/20 flex-shrink-0 transition-transform duration-500 group-hover:rotate-[360deg]">
+      {/* Branding - 3D Logo */}
+      <div className={cn("h-24 flex items-center border-b border-slate-100/50 px-6 transition-all duration-500", isCollapsed ? "justify-center" : "justify-start gap-4")}>
+        <div className="relative group cursor-default">
+            <div className="h-12 w-12 bg-gradient-to-tr from-blue-600 to-violet-600 rounded-2xl flex items-center justify-center text-white font-extrabold text-xl shadow-[0_10px_20px_-5px_rgba(79,70,229,0.4)] flex-shrink-0 transition-all duration-500 group-hover:scale-110 group-hover:rotate-6 group-hover:shadow-blue-600/50">
               BC
             </div>
-            {/* Glow effect under logo */}
-            <div className="absolute -inset-1 bg-blue-500/30 blur-lg rounded-full opacity-0 group-hover:opacity-50 transition-opacity duration-500" />
+            {/* Ambient Glow */}
+            <div className="absolute -inset-2 bg-blue-500/20 blur-xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
         </div>
         
         {!isCollapsed && (
-          <div className="flex flex-col overflow-hidden animate-in slide-in-from-left-2 duration-300">
-            <span className="font-bold text-slate-800 text-lg leading-none tracking-tight">BanksCart</span>
-            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Admin Panel</span>
+          <div className="flex flex-col overflow-hidden animate-in fade-in slide-in-from-left-4 duration-500">
+            <span className="font-extrabold text-slate-800 text-xl tracking-tight">BanksCart</span>
+            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em]">Admin Panel</span>
           </div>
         )}
       </div>
 
       {/* Navigation */}
       <ScrollArea className="flex-1 py-6">
-        <div className="px-4 space-y-8">
+        <div className="px-4 space-y-9">
           <TooltipProvider delayDuration={0}>
             {sidebarGroups.map((group, groupIndex) => (
-              <div key={group.label}>
+              <div key={group.label} className="animate-in fade-in slide-in-from-bottom-2 duration-500" style={{ animationDelay: `${groupIndex * 100}ms` }}>
                 {!isCollapsed && (
-                  <h4 className="mb-3 px-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest opacity-80">
+                  <h4 className="mb-4 px-3 text-[11px] font-extrabold text-slate-300 uppercase tracking-widest">
                     {group.label}
                   </h4>
                 )}
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   {group.items.map((item) => (
                     <SidebarItem 
                       key={item.href} 
@@ -199,36 +208,37 @@ function SidebarContent({ isCollapsed, pathname }: { isCollapsed: boolean, pathn
                     />
                   ))}
                 </div>
-                {!isCollapsed && groupIndex !== sidebarGroups.length - 1 && (
-                    <div className="mt-6 mx-2 border-b border-slate-100" />
-                )}
               </div>
             ))}
           </TooltipProvider>
         </div>
       </ScrollArea>
 
-      {/* User & Logout */}
-      <div className="p-4 border-t border-slate-100 bg-slate-50/50">
+      {/* User & Logout - Floating Card */}
+      <div className="p-4 border-t border-slate-100/50">
         {!isCollapsed && (
-          <div className="flex items-center gap-3 px-3 mb-4 p-2 rounded-xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition-shadow cursor-default">
-            <Avatar className="h-9 w-9 border-2 border-white shadow-sm">
-              <AvatarImage src="/placeholder-user.jpg" />
-              <AvatarFallback className="bg-gradient-to-br from-indigo-100 to-purple-100 text-indigo-700 text-xs font-bold">AD</AvatarFallback>
-            </Avatar>
+          <div className="group flex items-center gap-3 px-3 mb-4 p-3 rounded-2xl bg-gradient-to-r from-slate-50 to-white border border-slate-100 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all duration-300 cursor-default">
+            <div className="relative">
+              <Avatar className="h-10 w-10 border-2 border-white shadow-md group-hover:scale-105 transition-transform duration-300">
+                <AvatarImage src="/placeholder-user.jpg" />
+                <AvatarFallback className="bg-slate-800 text-white font-bold">AD</AvatarFallback>
+              </Avatar>
+              <span className="absolute bottom-0 right-0 h-3 w-3 bg-green-500 border-2 border-white rounded-full"></span>
+            </div>
             <div className="flex flex-col overflow-hidden">
-              <span className="text-sm font-semibold text-slate-800 truncate">Admin User</span>
-              <span className="text-[10px] text-slate-500 truncate">admin@bankscart.com</span>
+              <span className="text-sm font-bold text-slate-800 truncate">Admin User</span>
+              <span className="text-[10px] text-slate-500 truncate font-medium">admin@bankscart.com</span>
             </div>
           </div>
         )}
         
         <LogoutButton 
-          variant={isCollapsed ? "ghost" : "outline"}
+          variant="outline"
           size={isCollapsed ? "icon" : "default"}
           className={cn(
-            "w-full transition-all duration-300 hover:shadow-md hover:border-red-100 hover:bg-red-50 hover:text-red-600",
-            isCollapsed ? "justify-center rounded-xl h-10 w-10" : "justify-start gap-2 h-10 border-slate-200 rounded-lg"
+            "w-full transition-all duration-300 ease-out border-slate-200 shadow-sm",
+            "hover:shadow-red-100 hover:border-red-200 hover:bg-red-50 hover:text-red-600 hover:-translate-y-0.5",
+            isCollapsed ? "rounded-2xl h-11 w-11 mx-auto flex" : "rounded-xl h-11 justify-center gap-2 font-semibold"
           )}
           showText={!isCollapsed}
         />
